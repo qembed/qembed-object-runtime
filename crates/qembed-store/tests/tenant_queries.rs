@@ -7,8 +7,6 @@ use qembed_store::{
 };
 use sqlx::PgPool;
 
-const RLS_TEST_ROLE: &str = "qembed_tenant_rls_test";
-
 async fn create_rls_fixture(
     transaction: &mut TenantTransaction,
     tenant_a: &str,
