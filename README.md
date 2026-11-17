@@ -37,6 +37,21 @@ To use a different connection string, set `DATABASE_URL` before running the
 script. The integration-test fixture is shared under
 `crates/qembed-store/tests/common`.
 
+### Run database migrations explicitly
+
+The store crate owns the SQLx PostgreSQL pool and migration runner. Creating a
+pool never applies migrations automatically. With the test PostgreSQL service
+running, apply migrations explicitly with:
+
+```bash
+docker compose --project-name qembed-rust-test --file compose.test.yaml up -d --wait
+DATABASE_URL=postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test cargo run -p qembed-store --bin qembed-migrate
+docker compose --project-name qembed-rust-test --file compose.test.yaml down --volumes --remove-orphans
+```
+
+The migration runner is intentionally separate from normal application startup.
+
+
 ## Git
 
 The repository is initialized and contains an initial commit
