@@ -226,7 +226,7 @@ mod tests {
         let tenant_id = TenantId::new();
         let object_id = ObjectId::new();
         let object_version_id = ObjectVersionId::new();
-        let bytes = br#"{\"config\":{\"enabled\":true},\"name\":\"demo\"}"#;
+        let bytes = br#"{"config":{"enabled":true},"name":"demo"}"#;
 
         let first = SnapshotBuilder::new(
             id,
