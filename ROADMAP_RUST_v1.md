@@ -201,8 +201,9 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: RFC 8785 number vector; UTF-16 key ordering; duplicate keys на вложенных уровнях; NaN/Infinity; invalid UTF-8 и malformed JSON; noncanonical whitespace/key order/number/string escapes; idempotence corpus; Snapshot construction rejects noncanonical bytes.
   - DoD: Rust отвергает некорректный или неканонический snapshot до persistence; canonicalization выдаёт RFC 8785 bytes, validation не переписывает вход.
 
-- [ ] **RUST-023 (S)** Реализовать DB hash/projection integration tests и store mapping.
-  - Тесты: реальные PostgreSQL cases на несовпадение hash/projection и round-trip canonical bytes.
+- [x] **RUST-023 (S)** Реализовать DB hash/projection integration tests и store mapping.
+  - Реализация: явно проверить mapping `canonical_json BYTEA` и `content_hash` в domain Snapshot; `json_projection JSONB` остаётся отдельной производной колонкой.
+  - Тесты: PostgreSQL round-trip сравнивает исходные байты, SHA-256 и отличающуюся текстовую JSONB-проекцию; projection mismatch отвергается DB guard; hash mismatch отвергается Domain при чтении; корректные hash/projection не позволяют принять неканоничные source bytes.
   - DoD: store не подменяет canonical bytes JSONB projection.
 
 - [ ] **RUST-024 (M)** Реализовать append-only event write и transactional outbox insert.  - Тесты: DB integration — event+outbox+state commit; forced rollback; duplicate delivery identity.
