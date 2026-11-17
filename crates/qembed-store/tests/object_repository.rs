@@ -136,16 +136,39 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     .expect("the failed insert should be queryable");
     assert_eq!(persisted_after_failure, 0);
 
-    // Repository creation accepts only new Draft domain entities.
-    let mut active_object = Object::new(ObjectId::new(), tenant_a);
-    active_object.begin_validation().expect("Draft can validate");
-    // Activation is intentionally not possible without a published version;
-    // this check is covered by the domain entity tests. The repository API
-    // receives Draft entities in this milestone.
+    // Repository methods accept only new Draft domain entities.
+    let active_object = Object::from_persisted(
+        ObjectId::new(),
+        tenant_a,
+        ObjectState::Active,
+        Some(ObjectVersionId::new()),
+    )
+    .expect("active object requires a published-version pointer");
+    let non_draft_object = repository
+        .create_object(&scope_a, &active_object)
+        .await
+        .expect_err("create_object must not persist an already-active object");
+    assert!(matches!(
+        non_draft_object,
+        ObjectRepositoryError::ObjectMustBeDraft
+    ));
 
-    let _ = ObjectState::Draft;
-    let _ = ObjectVersionStatus::Draft;
-    let _ = active_object;
+    let mut published_version = ObjectVersion::new(
+        ObjectVersionId::new(),
+        tenant_a,
+        object.id(),
+        2,
+    )
+    .expect("version number must be positive");
+    published_version.publish().expect("Draft can be published");
+    let non_draft_version = repository
+        .create_draft_version(&scope_a, &published_version)
+        .await
+        .expect_err("create_draft_version must reject a published version");
+    assert!(matches!(
+        non_draft_version,
+        ObjectRepositoryError::VersionMustBeDraft
+    ));
 
     pool.close().await;
 }
