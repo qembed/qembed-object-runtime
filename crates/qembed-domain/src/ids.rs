@@ -23,7 +23,9 @@ macro_rules! define_id {
         /// let object_id = ObjectId::new();
         /// require_tenant(object_id);
         /// ```
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(
+            Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(Uuid);
 
@@ -111,9 +113,7 @@ mod tests {
     {
         assert!("".parse::<T>().is_err());
         assert!("not-a-uuid".parse::<T>().is_err());
-        assert!("550e8400-e29b-41d4-a716-44665544000z"
-            .parse::<T>()
-            .is_err());
+        assert!("550e8400-e29b-41d4-a716-44665544000z".parse::<T>().is_err());
     }
 
     #[test]
