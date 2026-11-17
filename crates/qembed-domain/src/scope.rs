@@ -88,9 +88,8 @@ mod tests {
     fn trusted_auth_context_creates_scope() {
         let tenant_id = TenantId::new();
         let caller_id = CallerId::new();
-        let principal =
-            Principal::from_verified_auth(caller_id, PrincipalKind::TenantOwner)
-                .expect("non-nil caller ID must be accepted");
+        let principal = Principal::from_verified_auth(caller_id, PrincipalKind::TenantOwner)
+            .expect("non-nil caller ID must be accepted");
 
         let scope = Scope::from_verified_auth(tenant_id, principal)
             .expect("non-nil tenant ID must be accepted");
@@ -102,11 +101,9 @@ mod tests {
 
     #[test]
     fn scope_rejects_nil_tenant_id() {
-        let principal = Principal::from_verified_auth(
-            CallerId::new(),
-            PrincipalKind::Authenticated,
-        )
-        .expect("non-nil caller ID must be accepted");
+        let principal =
+            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
+                .expect("non-nil caller ID must be accepted");
 
         let error = Scope::from_verified_auth(TenantId::from_uuid(Uuid::nil()), principal)
             .expect_err("nil tenant ID must be rejected");
