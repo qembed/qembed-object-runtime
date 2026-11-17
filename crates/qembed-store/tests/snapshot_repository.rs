@@ -151,7 +151,7 @@ async fn repository_reads_source_bytes_instead_of_jsonb_projection() {
     assert_eq!(stored_bytes, bytes);
     assert_eq!(
         stored_hash,
-        Sha256::digest(bytes).as_slice(),
+        Sha256::digest(bytes).to_vec(),
         "the persisted digest must cover the exact BYTEA source"
     );
     assert_ne!(
