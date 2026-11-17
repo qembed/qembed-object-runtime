@@ -21,6 +21,5 @@ icu_properties.workspace = true
 icu_properties_data.workspace = true
 icu_provider.workspace = true
 
-
 [dev-dependencies]
 qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
