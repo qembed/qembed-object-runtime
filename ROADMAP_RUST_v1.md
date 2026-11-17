@@ -139,7 +139,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: unit tests на создание scope из доверенного auth context; отрицательные тесты на пустой/некорректный scope.
   - DoD: HTTP DTO не может самостоятельно создать доверенный `Scope`.
 
-- [ ] **RUST-012 (M)** Реализовать domain entities и state enums.
+- [x] **RUST-012 (M)** Реализовать domain entities и state enums.
   - Объекты: Object, ObjectVersion, Invocation, Snapshot.
   - Тесты: таблицы допустимых/недопустимых state transitions; property tests для инвариантов.
   - DoD: переходы выражены методами/типами, а не произвольными строками.
