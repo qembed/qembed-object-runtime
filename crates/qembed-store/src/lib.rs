@@ -1,6 +1,5 @@
 //! PostgreSQL persistence infrastructure.
 
-use std::path::Path;
 use std::time::Duration;
 
 use sqlx::PgPool;
@@ -39,7 +38,7 @@ pub async fn connect_pool(database_url: &str, config: PgPoolConfig) -> Result<Pg
 /// This function is intentionally explicit: connecting to PostgreSQL never runs
 /// migrations as a side effect.
 pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
-    let migrations_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-    let migrator = Migrator::new(&migrations_path).await?;
+    let migrations_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+    let migrator = Migrator::new(migrations_path).await?;
     migrator.run(pool).await
 }
