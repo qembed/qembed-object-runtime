@@ -185,9 +185,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: DB integration — создание объекта и draft version, duplicate object/version IDs and version number, tenant mismatch, cross-tenant object reference через composite FK, failed insert rollback; unit/domain boundary — repository отвергает не-Draft сущности.
   - DoD: создание объекта и draft version выполняется в tenant scope; PostgreSQL не допускает dangling или cross-tenant version references.
 
-- [ ] **RUST-020 (M)** Реализовать publish operation.
-  - Тесты: DB integration — публикация первой версии, замена опубликованной версии, rollback при ошибке, конкурентная публикация.
-  - DoD: публикация и обновление object pointer/state атомарны; опубликованная версия не редактируется через repository API.
+- [x] **RUST-020 (M)** Реализовать publish operation.
+  - Реализация: `ObjectRepository::begin_validation` переводит Draft object в Validating; `publish_version` блокирует строку Object через `SELECT ... FOR UPDATE`, проверяет expected current pointer, переводит новую версию Draft → Published, предыдущую Published → Superseded и атомарно обновляет pointer/state.
+  - Тесты: DB integration — первая публикация, замена версии, stale pointer rejection, injected failure на финальном pointer update с проверкой rollback всех изменений, две конкурентные первые публикации с ровно одним победителем.
+  - DoD: публикация и обновление object pointer/state атомарны; repository принимает к публикации только Draft version, а ранее опубликованная версия переводится в Superseded без редактирования её содержимого.
 
 - [ ] **RUST-021 (M)** Реализовать Snapshot builder и repository.
   - Тесты: unit — deterministic snapshot; DB integration — immutable insert/read, hash mismatch, projection mismatch.
