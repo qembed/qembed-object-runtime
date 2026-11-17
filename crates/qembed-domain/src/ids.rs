@@ -32,6 +32,7 @@ macro_rules! define_id {
         impl $name {
             /// Generates a new random UUIDv4 identifier.
             #[must_use]
+            #[allow(clippy::new_without_default)]
             pub fn new() -> Self {
                 Self(Uuid::new_v4())
             }
