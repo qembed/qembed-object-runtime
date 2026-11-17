@@ -8,7 +8,7 @@ use sqlx::Transaction;
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgArguments, PgConnection, PgPoolOptions, PgQueryResult, PgRow, Postgres};
 use sqlx::query::{Query, QueryAs};
-use sqlx::{FromRow, query};
+use sqlx::FromRow;
 
 /// Connection-pool settings shared by application and migration entry points.
 #[derive(Clone, Debug)]
