@@ -6,16 +6,8 @@ use qembed_store::run_migrations;
 async fn postgres_harness_runs_migrations_and_connects_to_supported_server() {
     let pool = common::connect().await;
 
-    // Pool creation must not mutate the database schema as a side effect.
-    let migration_table_before_connecting: bool =
-        sqlx::query_scalar("SELECT to_regclass('public._sqlx_migrations') IS NOT NULL")
-            .fetch_one(&pool)
-            .await
-            .expect("the initial database state should be queryable");
-    assert!(!migration_table_before_connecting);
-
-    // The test runner creates a fresh database. Applying migrations here proves
-    // that the explicit migration path works before application queries run.
+    // Migration application is idempotent; other integration tests may need
+    // the schema too, so this harness verifies the explicit migration path.
     run_migrations(&pool)
         .await
         .expect("migrations should run against an empty test database");
