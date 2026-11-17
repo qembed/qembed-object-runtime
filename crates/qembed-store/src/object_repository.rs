@@ -97,6 +97,7 @@ impl ObjectRepository {
             .await
             .map_err(ObjectRepositoryError::Database)
     }
+
     /// Moves a Draft object into Validating before external validation begins.
     ///
     /// The state change is guarded by the current persisted state so concurrent
@@ -290,7 +291,6 @@ impl ObjectRepository {
             .await
             .map_err(ObjectRepositoryError::Database)
     }
-
 }
 
 /// Validation or persistence failure while creating an Object or Draft version.
@@ -333,11 +333,21 @@ impl fmt::Display for ObjectRepositoryError {
             }
             Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
             Self::DomainObject(error) => write!(formatter, "object lifecycle error: {error:?}"),
-            Self::DomainVersion(error) => write!(formatter, "object version lifecycle error: {error:?}"),
-            Self::VersionNotFound => formatter.write_str("version does not belong to this object and tenant"),
-            Self::InvalidObjectState => formatter.write_str("object state does not permit this operation"),
-            Self::PublishedVersionMismatch => formatter.write_str("published version does not match expected value"),
-            Self::CurrentVersionNotPublished => formatter.write_str("current object version is not Published"),
+            Self::DomainVersion(error) => {
+                write!(formatter, "object version lifecycle error: {error:?}")
+            }
+            Self::VersionNotFound => {
+                formatter.write_str("version does not belong to this object and tenant")
+            }
+            Self::InvalidObjectState => {
+                formatter.write_str("object state does not permit this operation")
+            }
+            Self::PublishedVersionMismatch => {
+                formatter.write_str("published version does not match expected value")
+            }
+            Self::CurrentVersionNotPublished => {
+                formatter.write_str("current object version is not Published")
+            }
             Self::Database(error) => write!(formatter, "object repository database error: {error}"),
         }
     }
