@@ -9,6 +9,7 @@ lints.workspace = true
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
 sqlx.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 # Resolver pins for transitive SQLx dependencies; see workspace Cargo.toml.
 home.workspace = true
