@@ -173,7 +173,6 @@ impl fmt::Display for SnapshotRepositoryError {
 impl std::error::Error for SnapshotRepositoryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Domain(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
