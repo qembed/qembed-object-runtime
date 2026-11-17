@@ -1,4 +1,4 @@
-use qembed_store::{connect_pool, PgPoolConfig};
+use qembed_store::{PgPoolConfig, connect_pool};
 use sqlx::PgPool;
 
 pub async fn connect() -> PgPool {
