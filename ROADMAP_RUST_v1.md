@@ -1,0 +1,602 @@
+# Qembed Object Runtime — Rust Development Roadmap
+
+> **Файл:** `ROADMAP.md`  
+> **База:** Qembed Object Runtime M0 v2.3.3; ADR RT-039…RT-047  
+> **Фокус:** только Rust-разработка и тестирование Rust-кода  
+> **Первый milestone:** M1a — walking skeleton `create → publish → invoke → retrieve result` на mock ChatProvider.
+
+---
+
+## 1. Принципы разработки
+
+1. Этот roadmap описывает только Rust-реализацию. SQL remediation, исправление схемы, эксплуатационные и юридические работы сюда не входят.
+2. Архитектура M0 и шесть crates считаются зафиксированными:
+   - `qembed-domain`
+   - `qembed-store`
+   - `qembed-llm`
+   - `qembed-tools`
+   - `qembed-runtime`
+   - `qembed-api`
+3. `qembed-eval` — binary target внутри `qembed-runtime`, не отдельный crate.
+4. Каждая задача заканчивается тестами. Нельзя закрыть задачу только потому, что код компилируется.
+5. Сначала unit tests, затем integration tests на границе соответствующего слоя. Для persistence, RLS, транзакций, CAS и fencing нужны тесты с реальной PostgreSQL, а не SQLite/mock repository.
+6. Внешние сетевые вызовы не выполняются внутри SQL-транзакций.
+7. Все tenant-scoped repository operations принимают `&Scope`; tenant context задаётся в транзакции через `SET LOCAL app.tenant_id`.
+8. Invocation и ToolExecution имеют независимые leases/fencing tokens. Переходы состояния используют CAS по tenant, ID, token и version.
+9. `Unknown` не является основанием для автоматического retry: требуется reconciliation либо доказанная upstream idempotency со стабильным ключом.
+10. Новые архитектурные решения не вводятся молча: при необходимости отдельный ADR.
+
+### Размер задач
+
+- **XS:** до нескольких часов.
+- **S:** 0.5–1.5 дня.
+- **M:** 2–4 дня.
+- **L:** 5+ дней; перед реализацией желательно дополнительно декомпозировать.
+
+Оценки ориентировочные. Реальный размер зависит от выбранных библиотек и состояния репозитория.
+
+---
+
+## 2. Crates и границы ответственности
+
+| Crate | Ответственность | Ограничения |
+|---|---|---|
+| `qembed-domain` | IDs, entities, `Scope`, `Principal`, state machines, policy contracts, ports, `AllowedCommand` | Без SQLx, Actix, provider SDK и сетевого I/O |
+| `qembed-store` | SQLx repositories, transaction context, persistence, CAS/fencing | Без HTTP handlers и provider-specific logic |
+| `qembed-llm` | ChatProvider adapters, capability negotiation, structured output, usage/error mapping | Без orchestration и tool authorization |
+| `qembed-tools` | Tool registry adapter, executor/reconciler, SSRF-safe networking, encrypted payload handling | Не принимает policy verdict самостоятельно |
+| `qembed-runtime` | Orchestration, budgets, invocation/worker lifecycle, retrieval coordination | Без HTTP transport и SQL query details |
+| `qembed-api` | Actix handlers, auth boundary, DTO/OpenAPI, composition root | Handler-ы не содержат бизнес-правила |
+
+**Dependency rule:** domain не зависит от adapters; adapters реализуют domain ports; runtime координирует domain и ports; API handlers вызывают runtime. Package/binary `qembed-api` может зависеть от concrete adapter crates только в composition root для сборки приложения. Handler modules ограничиваются `qembed-domain` и `qembed-runtime`. Не добавлять седьмой crate.
+
+---
+
+## 3. Общий тестовый стандарт
+
+Для каждой задачи ниже тестирование входит в Definition of Done. Применять подходящий уровень:
+
+- **Unit:** чистая логика, state transitions, canonicalization, validation, mapping.
+- **Compile-fail:** гарантии типов и невозможность запрещённых операций на этапе компиляции.
+- **Integration:** взаимодействие crates и реальных адаптеров.
+- **Database integration:** PostgreSQL, реальные роли, RLS, транзакции, конкурентные сессии.
+- **End-to-end:** HTTP/API → runtime → store/provider → результат.
+
+Минимальные команды CI:
+
+```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo sqlx prepare --check
+SQLX_OFFLINE=true cargo check --workspace
+```
+
+Для SQLx query/migration changes обновлять metadata. Тесты, зависящие от PostgreSQL, должны запускаться в отдельном CI job с зафиксированной версией PostgreSQL и pgvector.
+
+---
+
+## 4. Этап E0 — Rust workspace и developer tooling
+
+**Результат:** пустой, но воспроизводимый workspace, в котором удобно и безопасно развивать проект.
+
+- [ ] **RUST-001 (S)** Создать Cargo workspace и шесть crates.
+  - Реализация: manifests, `src/lib.rs`/`main.rs`, workspace members, минимальные targets.
+  - Тесты: `cargo check --workspace`; smoke test запуска `qembed-eval`.
+  - DoD: все crates собираются; `qembed-eval` — bin-target `qembed-runtime`.
+
+- [ ] **RUST-002 (S)** Централизовать версии зависимостей и workspace metadata.
+  - Реализация: `[workspace.dependencies]`, edition, `rust-version`, общие lint settings.
+  - Тесты: `cargo tree -d`; CI-проверка минимально поддерживаемой версии Rust.
+  - DoD: версии и политики зависимостей заданы централизованно.
+
+- [ ] **RUST-003 (S)** Зафиксировать crate dependency boundaries.
+  - Реализация: composition root в `qembed-api`; handler modules не импортируют concrete adapters.
+  - Тесты: dependency graph check (например, cargo-deny/скрипт архитектурных правил); сборка всех targets.
+  - DoD: нет циклических зависимостей и запрещённых импортов.
+
+- [ ] **RUST-004 (S)** Настроить rustfmt, Clippy и базовые lint rules.
+  - Тесты: `cargo fmt --check`; Clippy на workspace/all-targets с `-D warnings`.
+  - DoD: проверки обязательны в CI.
+- [ ] **RUST-005 (S)** Настроить CI pipeline для Rust.
+  - Реализация: format → check → clippy → unit tests; кэш Cargo.
+  - Тесты: проверить успешный pipeline и намеренно сломанный lint/test.
+  - DoD: PR не проходит при ошибке любой обязательной проверки.
+
+- [ ] **RUST-006 (S)** Подготовить PostgreSQL integration-test harness.
+  - Реализация: выбрать один основной способ — Testcontainers или docker compose; единые test fixtures.
+  - Тесты: тест поднимает БД, подключается, проверяет версию и корректно завершает окружение.
+  - DoD: локально и в CI доступен воспроизводимый PostgreSQL test environment.
+
+- [ ] **RUST-007 (S)** Подключить SQLx и migration runner.
+  - Реализация: единая точка создания pool; явная команда миграций; конфигурация pool.
+  - Тесты: integration test запускает миграции на пустой тестовой БД и проверяет доступность соединения.
+  - DoD: приложение не выполняет скрытые DDL-изменения при обычном старте.
+
+- [ ] **RUST-008 (S)** Настроить SQLx offline metadata.
+  - Реализация: `cargo sqlx prepare`, хранение `.sqlx`.
+  - Тесты: `cargo sqlx prepare --check` и `SQLX_OFFLINE=true cargo check --workspace`.
+  - DoD: CI проверяет актуальность metadata без runtime DB connection.
+
+- [ ] **RUST-009 (XS)** Добавить developer README и тестовые команды.
+  - Тесты: пройти инструкции на чистом checkout/окружении.
+  - DoD: разработчик может собрать workspace и запустить unit/integration tests по README.
+
+**Gate E0:** workspace собирается; CI зелёный; PostgreSQL harness и SQLx offline workflow работают.
+
+---
+
+## 5. Этап M1a — Domain contracts
+
+**Результат:** типизированные контракты, на которых строятся остальные crates.
+
+- [ ] **RUST-010 (S)** Реализовать strongly typed IDs.
+  - Объекты: Tenant, Object, ObjectVersion, Caller, Invocation, Snapshot, Event и остальные используемые ID.
+  - Тесты: parse/format/serde round-trip; некорректные значения; compile-time проверки несовместимости разных ID.
+  - DoD: нельзя случайно передать ID одного типа вместо другого.
+
+- [ ] **RUST-011 (S)** Реализовать `Scope` и `Principal`.
+  - Тесты: unit tests на создание scope из доверенного auth context; отрицательные тесты на пустой/некорректный scope.
+  - DoD: HTTP DTO не может самостоятельно создать доверенный `Scope`.
+
+- [ ] **RUST-012 (M)** Реализовать domain entities и state enums.
+  - Объекты: Object, ObjectVersion, Invocation, Snapshot.
+  - Тесты: таблицы допустимых/недопустимых state transitions; property tests для инвариантов.
+  - DoD: переходы выражены методами/типами, а не произвольными строками.
+
+- [ ] **RUST-013 (S)** Определить domain ports.
+  - Контракты: authentication, execution store, provider, clock/ID generation там, где это нужно.
+  - Тесты: compile tests на реализации test doubles; domain crate собирается без adapter dependencies.
+  - DoD: domain не зависит от SQLx, Actix или provider SDK.
+
+- [ ] **RUST-014 (M)** Реализовать `AllowedCommand` capability.
+  - Реализация: приватные поля; mint boundary только в `qembed-domain::policy`.
+  - Тесты: compile-fail tests на `Clone`, Serialize/Deserialize, Default и внешнее создание; unit tests на валидную mint boundary.
+  - DoD: тип `!Clone`, `!Serialize`, `!Deserialize`, `!Default`; произвольный caller не может его сконструировать.
+
+- [ ] **RUST-015 (S)** Добавить compile-fail suite для security-sensitive domain contracts.
+  - Тесты: trybuild или эквивалент; проверка запрещённых импортов/конструкторов.
+  - DoD: CI проверяет, что запретные примеры действительно не компилируются.
+
+---
+
+## 6. Этап M1a — Store и tenant-scoped persistence
+
+**Результат:** реальные repository operations с tenant isolation и атомарными записями.
+
+- [ ] **RUST-016 (M)** Реализовать SQLx transaction wrapper, принимающий `&Scope`.
+  - Тесты: DB integration — tenant setting присутствует внутри транзакции; отсутствующий scope отклоняется; после commit/rollback setting не протекает в следующее соединение.
+  - DoD: tenant context устанавливается через transaction-local setting в каждой tenant-транзакции.
+
+- [ ] **RUST-017 (M)** Реализовать repository conventions и typed query helpers.
+  - Тесты: integration tests на tenant A/B; запрос без scope не возвращает tenant rows.
+  - DoD: все tenant-owned операции принимают `&Scope`; tenant ID не извлекается из непроверенного пользовательского payload.
+
+- [ ] **RUST-018 (M)** Реализовать principal/caller persistence и минимальный Owner authentication path.
+  - Тесты: integration — валидная аутентификация, неверные credentials, disabled principal, tenant mismatch.
+  - DoD: runtime получает Principal только после успешной проверки auth boundary.
+
+- [ ] **RUST-019 (M)** Реализовать Object repository: create object и create draft version.
+  - Тесты: DB integration — happy path, duplicate IDs/constraints, cross-tenant access, rollback.
+  - DoD: создание объекта и draft version выполняется в tenant scope.
+
+- [ ] **RUST-020 (M)** Реализовать publish operation.
+  - Тесты: DB integration — публикация первой версии, замена опубликованной версии, rollback при ошибке, конкурентная публикация.
+  - DoD: публикация и обновление object pointer/state атомарны; опубликованная версия не редактируется через repository API.
+
+- [ ] **RUST-021 (M)** Реализовать Snapshot builder и repository.
+  - Тесты: unit — deterministic snapshot; DB integration — immutable insert/read, hash mismatch, projection mismatch.
+  - DoD: `canonical_json BYTEA` — source of truth; hash вычисляется по точным bytes.
+
+- [ ] **RUST-022 (M)** Реализовать JCS canonicalization/validation boundary.
+  - Тесты: RFC 8785 test vectors; duplicate keys; NaN/Infinity; invalid UTF-8; noncanonical bytes; property/fuzz tests.
+  - DoD: Rust отвергает некорректный или неканонический snapshot до persistence.
+
+- [ ] **RUST-023 (S)** Реализовать DB hash/projection integration tests и store mapping.
+  - Тесты: реальные PostgreSQL cases на несовпадение hash/projection и round-trip canonical bytes.
+  - DoD: store не подменяет canonical bytes JSONB projection.
+
+- [ ] **RUST-024 (M)** Реализовать append-only event write и transactional outbox insert.  - Тесты: DB integration — event+outbox+state commit; forced rollback; duplicate delivery identity.
+  - DoD: critical event и outbox создаются в той же транзакции, что и state transition.
+
+- [ ] **RUST-025 (S)** Реализовать typed event DTO и payload allowlist.
+  - Тесты: serialization tests; негативные tests на запрещённые поля/секреты/raw payload.
+  - DoD: произвольный JSON и чувствительные payloads не проходят в event API.
+
+- [ ] **RUST-026 (S)** Реализовать repository CAS helper.
+  - Тесты: DB integration с двумя независимыми соединениями; stale version/token даёт `rows_affected = 0`.
+  - DoD: успешный CAS требует ровно одной изменённой строки.
+
+- [ ] **RUST-027 (M)** Покрыть RLS и composite FK интеграционными тестами.
+  - Тесты: запуск под реальными non-owner roles; tenant A не читает/пишет tenant B; отсутствующий scope fail-closed; cross-tenant FK rejected.
+  - DoD: проверяется поведение БД, а не только mock repository.
+
+- [ ] **RUST-028 (S)** Проверить append-only и restricted data access через store API.
+  - Тесты: DB integration — runtime role не может менять immutable rows; repository не предоставляет запрещённые mutation methods.
+  - DoD: snapshots/events/decisions доступны только через разрешённые операции.
+
+- [ ] **RUST-029 (S)** Добавить тесты role separation для store integration.
+  - Тесты: runtime/dispatcher/admin роли выполняют только предусмотренные операции; negative permission tests.
+  - DoD: integration suite подключается под каждой тестируемой ролью, а не только DB owner.
+
+---
+
+## 7. Этап M1a — LLM adapter и Mock ChatProvider
+
+**Результат:** runtime работает с provider через стабильный контракт; тесты не зависят от внешнего API.
+
+- [ ] **RUST-030 (S)** Определить `ChatProvider` port и request/response types.
+  - Тесты: contract tests для обязательных полей, limits и serialization.
+  - DoD: provider SDK-типы не протекают в domain/runtime contracts.
+
+- [ ] **RUST-031 (S)** Реализовать deterministic Mock ChatProvider.
+  - Тесты: заданный input → заданный output; scripted timeout/error; usage fixtures; concurrency test.
+  - DoD: все M1a end-to-end tests могут работать без внешнего LLM API.
+
+- [ ] **RUST-032 (S)** Реализовать structured output modes `JsonOnly` и `None`.
+  - Тесты: contract tests на корректный JSON, malformed response и unsupported mode.
+  - DoD: runtime получает нормализованный результат или типизированную ошибку.
+
+- [ ] **RUST-033 (S)** Реализовать capability negotiation.
+  - Тесты: mock provider с разными capability profiles; unsupported capability rejected before request.
+  - DoD: runtime использует явный capability descriptor, а не угадывает возможности по имени модели.
+
+- [ ] **RUST-034 (S)** Реализовать provider error и usage mapping.
+  - Тесты: mapping tests для timeout, rate limit, unavailable, malformed output, token usage.
+  - DoD: ошибки и usage представлены provider-neutral типами.
+
+---
+
+## 8. Этап M1a — Runtime invocation и API walking skeleton
+
+**Результат:** сквозной flow через реальный API, store и mock provider.
+
+- [ ] **RUST-035 (M)** Реализовать idempotency reservation для begin-invocation.
+  - Тесты: DB integration — одинаковый tenant/object/caller/key возвращает один invocation; конкурентные запросы не создают дубликаты.
+  - DoD: idempotency claim фиксируется до вызова модели.
+
+- [ ] **RUST-036 (M)** Реализовать атомарный begin-invocation transaction.
+  - Состав: invocation, pinned snapshot, pinned knowledge revision reference, critical event, outbox.
+  - Тесты: DB integration — полный commit и forced rollback каждого шага.
+  - DoD: либо фиксируется весь begin-invocation, либо ничего.
+
+- [ ] **RUST-037 (M)** Реализовать минимальный invocation worker lifecycle.
+  - Тесты: integration — claim/process/finish; restart/resume; terminal result не теряется.
+  - DoD: invocation lifecycle сохраняется в PostgreSQL и переживает рестарт процесса.
+
+- [ ] **RUST-038 (M)** Реализовать invocation lease и fencing-token CAS.
+  - Тесты: две независимые worker sessions; lease expiry/reclaim; старый worker не может записать результат после выдачи нового token.
+  - DoD: stale worker не завершает invocation.
+
+- [ ] **RUST-039 (S)** Реализовать `GET invocation`.
+  - Тесты: API integration — queued/running/succeeded/failed; tenant isolation; скрытие внутренних payloads.
+  - DoD: клиент получает только разрешённый status/result/error.
+
+- [ ] **RUST-040 (S)** Реализовать cancellation contract.
+  - Тесты: unit на state transitions; API integration на cancel, repeated cancel и terminal invocation.
+  - DoD: cancellation persisted; API не обещает отмену уже совершённого внешнего side effect.
+
+- [ ] **RUST-041 (M)** Реализовать минимальный budget reservation/settlement для mock path.
+  - Тесты: unit на вычисление effective budget; DB integration на reserve/settle, повтор и rollback.
+  - DoD: effective budget = `min(snapshot limit, live object budget)`; reservation не дублируется при idempotent повторе.
+
+- [ ] **RUST-042 (S)** Реализовать typed runtime errors и API error mapping.
+  - Тесты: unit на все error mappings; API tests на стабильные error codes и отсутствие SQL/provider internals.
+  - DoD: ошибки пригодны для клиента и не раскрывают внутренние детали.
+
+- [ ] **RUST-043 (S)** Реализовать health/readiness endpoints.
+  - Тесты: API integration — healthy DB, unavailable DB, migration mismatch; проверка отсутствия secrets в response.
+  - DoD: readiness проверяет обязательные зависимости.
+
+- [ ] **RUST-044 (M)** Собрать Owner API: create object/version, publish, invoke, inspect invocation.
+  - Тесты: API integration на каждый endpoint; auth/tenant negative cases; DTO validation.
+  - DoD: handler-ы только валидируют transport input и вызывают runtime use cases.
+
+- [ ] **RUST-045 (M)** Добавить полный walking-skeleton end-to-end test.
+  - Тесты: create → publish → invoke → retrieve result; duplicate idempotency key; process restart; cross-tenant denied.
+  - DoD: flow проходит через HTTP/API, runtime, PostgreSQL и Mock ChatProvider без внешнего сервиса.
+- [ ] **RUST-046 (S)** Проверить DB-backed provenance constraints, относящиеся к M1a.
+  - Тесты: integration — запрещённые provenance claims отвергаются; app-level verifier остаётся тестом M2.
+  - DoD: тесты не заявляют наличие application-level retrieval/provenance до реализации M2.
+
+- [ ] **RUST-047 (S)** Добавить failure-injection tests для M1a crash boundaries.
+  - Тесты: crash до/после transaction commit; provider timeout; restart worker; outbox rollback.
+  - DoD: доказана атомарность persistence и restart durability mock-only flow.
+
+- [ ] **RUST-048 (M)** Прогнать M1a acceptance suite.
+  - Тесты: все M1a cases из `acceptance_T-01_to_T-64.md`, включая tenant isolation, idempotency, snapshots, events, API и capability compile-fail.
+  - DoD: тестовый отчёт содержит результат каждого применимого M1a test ID.
+
+- [ ] **RUST-049 (S)** Подготовить M1a test evidence.
+  - Тесты: CI публикует JUnit/nextest report, DB version, pgvector version, test logs и concurrency test results.
+  - DoD: результаты воспроизводимы из CI artifacts.
+
+- [ ] **RUST-050 (XS)** Зафиксировать M1a completion и обновить roadmap.
+  - Тесты: повторный полный CI run на release commit.
+  - DoD: закрытые тесты и известные ограничения перечислены в release note.
+
+**M1a Definition of Done:** walking skeleton работает end-to-end; все применимые M1a acceptance tests зелёные; unit, integration, DB integration и compile-fail suites проходят; нет открытых Critical/High дефектов в реализованном Rust path без formal waiver.
+
+---
+
+## 9. Этап M1b — Durable workers, outbox, budgets и cancellation
+
+**Результат:** надёжная обработка конкурентных и длительных invocation. Внешние write-tools остаются выключенными до M3 gate.
+
+- [ ] **RUST-051 (M)** Реализовать outbox dispatcher.
+  - Тесты: DB integration — claim, delivery, ack; dispatcher видит только delivery projection; consumer deduplicates.
+  - DoD: доставка at-least-once с безопасной дедупликацией.
+
+- [ ] **RUST-052 (M)** Реализовать retry/backoff и dead-letter handling.
+  - Тесты: deterministic clock tests; integration — повтор, max attempts, poison event, recovery.
+  - DoD: retry не теряет событие и не создаёт повторный side effect у consumer.
+
+- [ ] **RUST-053 (M)** Реализовать независимую ToolExecution state machine и lease.
+  - Тесты: unit transition matrix; DB integration на параллельные leases.
+  - DoD: invocation lease и ToolExecution lease не используют общие token/version.
+
+- [ ] **RUST-054 (M)** Реализовать `Unknown` transition после неоднозначного execution timeout.
+  - Тесты: unit и DB integration — timeout, expired lease, запрет auto-retry, попытка запрещённого перехода.
+  - DoD: `Unknown` не переходит в повторное выполнение автоматически.
+
+- [ ] **RUST-055 (M)** Реализовать reconciliation port и workflow.
+  - Тесты: mock reconciler для confirmed success, confirmed failure и unresolved outcome; stale fencing token rejected.
+  - DoD: terminal outcome фиксируется только через актуальный reconciliation result.
+
+- [ ] **RUST-056 (M)** Реализовать стабильный `command_id = UUIDv5(invocation_id, step_index, action_hash)`.
+  - Тесты: deterministic vectors; restart test; uniqueness tests.
+  - DoD: один и тот же logical command получает одинаковый ID после рестарта.
+
+- [ ] **RUST-057 (M)** Реализовать конкурентные budget reservations.
+  - Тесты: DB integration с параллельными транзакциями; overspend race; rollback; duplicate idempotency.
+  - DoD: совокупный reserve не превышает effective budget.
+
+- [ ] **RUST-058 (S)** Реализовать distributed rate limiting и pool isolation.
+  - Тесты: concurrency tests на несколько workers; fairness tests для Anonymous/Authenticated/Owner.
+  - DoD: лимиты согласованы между экземплярами runtime.
+
+- [ ] **RUST-059 (M)** Реализовать hierarchical kill-switch evaluation.
+  - Тесты: unit на precedence Platform/Tenant/Object/Tool; integration — disabled scope блокирует действие до side effect.
+  - DoD: проверка выполняется непосредственно перед разрешённым execution path.
+
+- [ ] **RUST-060 (M)** Реализовать cancellation propagation в worker orchestration.
+  - Тесты: integration — cancel до старта, во время ожидания, между шагами; после принятой отмены новые tool calls не стартуют.
+  - DoD: cancellation распространяется на все последующие шаги.
+
+- [ ] **RUST-061 (M)** Реализовать caller deletion ledger и restore replay.
+  - Тесты: integration — delete, повторный delete, restore replay, повторное удаление caller-derived data.
+  - DoD: erased caller data не восстанавливаются при restore.
+
+- [ ] **RUST-062 (S)** Реализовать reservation sweeper.
+  - Тесты: deterministic clock; повторный запуск; параллельные sweeper; counters не обновляются дважды.
+  - DoD: sweeper идемпотентен.
+
+- [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions.
+  - Тесты: stale CAS, lease reclaim, concurrent budget reservation, competing state transition.
+  - DoD: тесты запускаются в CI и воспроизводят гонки, а не используют один connection.
+
+- [ ] **RUST-064 (S)** Добавить M1b failure-injection matrix.
+  - Тесты: crash до connect, после send до response, после response до DB commit, после event insert до outbox ack.
+  - DoD: для каждого crash point зафиксирован ожидаемый state и проверяемое восстановление.
+
+**M1b Gate:** outbox redelivery, leases/fencing, cancellation, budgets, rate limits и recovery подтверждены автоматическими тестами.
+
+---
+
+## 10. Этап M2 — Knowledge, retrieval и verification
+
+**Результат:** ingestion и retrieval по закреплённой revision с проверяемым provenance.
+
+- [ ] **RUST-065 (M)** Определить domain model для KnowledgeDocument, Chunk, Revision и pinned revision.
+  - Тесты: unit state transition matrix; serialization tests; invalid revision references.
+  - DoD: staged/live/retired и revision identity типизированы.
+
+- [ ] **RUST-066 (L)** Реализовать `commit_knowledge_revision` repository operation.
+  - Тесты: DB integration — успешный commit, rollback, concurrent commit, revision log, event/outbox atomicity.
+  - DoD: lock revision row; проверить indexing completeness; обновить intervals/revision/event в одной транзакции.
+- [ ] **RUST-067 (M)** Реализовать staged ingestion/indexing pipeline.
+  - Тесты: unit на chunking/validation; integration — staged chunks не видны retrieval до commit; повтор ingestion идемпотентен.
+  - DoD: неполный документ не становится видимым.
+
+- [ ] **RUST-068 (M)** Реализовать embedding model registry.
+  - Тесты: contract tests для размерности/метрики; negative tests на смешение несовместимых embeddings.
+  - DoD: разные модели и размерности изолированы.
+
+- [ ] **RUST-069 (M)** Реализовать retrieval filtering по revision до vector top-k.
+  - Тесты: DB integration с staged, future, closed и pinned revisions; regression test на порядок filter/top-k.
+  - DoD: нерелевантные revision rows исключаются до top-k.
+
+- [ ] **RUST-070 (M)** Реализовать pgvector query paths.
+  - Тесты: integration на IP/L2/cosine; проверка порядка результатов и размерностей.
+  - DoD: IP similarity = `-dist`; `1-dist` применяется только к cosine.
+
+- [ ] **RUST-071 (M)** Реализовать HNSW index migration support.
+  - Тесты: migration integration — `CREATE INDEX CONCURRENTLY` вне транзакции; повторный запуск и recovery после неудачи.
+  - DoD: migrator корректно управляет non-transactional index operations.
+
+- [ ] **RUST-072 (M)** Реализовать retrieval pinning и GC protection.
+  - Тесты: DB integration — active invocation pins revision; GC не удаляет pinned revision; release pin после завершения.
+  - DoD: активный invocation воспроизводимо читает зафиксированную revision.
+
+- [ ] **RUST-073 (M)** Реализовать citation/provenance verifier V1–V7.
+  - Тесты: positive/negative corpus для chunk IDs, чисел, ссылок и обязательных citations; property tests на malformed claims.
+  - DoD: verifier отклоняет неподтверждённые claims.
+
+- [ ] **RUST-074 (M)** Реализовать application-level provenance и caller isolation.
+  - Тесты: integration — Caller A не читает episodic memory Caller B; forged provenance rejected.
+  - DoD: provenance проверяется на app path, а не только DB constraints.
+
+- [ ] **RUST-075 (S)** Реализовать memory promotion как новую Owner-authored Verified row.
+  - Тесты: domain и DB integration — candidate остаётся неизменным; только TenantOwner может подтвердить; supersedes chain валидна.
+  - DoD: promotion создаёт новую Verified запись с корректной ссылкой на superseded candidate.
+
+- [ ] **RUST-076 (S)** Добавить knowledge concurrency и GC suite.
+  - Тесты: commit race, pinned invocation, GC race, rollback и повторная публикация.
+  - DoD: suite запускается на PostgreSQL в CI.
+
+**M2 Gate:** revision commit, retrieval filtering, pinning/GC и provenance verifier покрыты unit и PostgreSQL integration tests.
+
+---
+
+## 11. Этап M3 — Policy, tools и SSRF-safe execution
+
+**Результат:** исполнение только явно разрешённых команд с защитой от SSRF и неоднозначных side effects.
+
+- [ ] **RUST-077 (M)** Реализовать typed policy evaluation contract.
+  - Тесты: decision matrix; adversarial input tests; недоверенный model/document content не может повысить verdict.
+  - DoD: policy decision — типизированный результат с audit context.
+
+- [ ] **RUST-078 (M)** Реализовать Authorizer и единственную mint boundary `AllowedCommand`.
+  - Тесты: unit — allow/deny; compile-fail — executor не принимает raw action; negative tests на forged command.
+  - DoD: executor принимает только capability, а не ProposedAction/raw JSON/tool ID/raw URL.
+
+- [ ] **RUST-079 (M)** Реализовать tool registry adapter и immutable ToolVersion resolution.
+  - Тесты: contract/integration — snapshot разрешает точную версию; отсутствующая/несовпадающая версия rejected.
+  - DoD: contract tool не меняется под существующим ToolVersion ID.
+
+- [ ] **RUST-080 (M)** Реализовать binding validation и stale capability rejection.
+  - Тесты: DB integration — binding изменён после mint; execution блокируется до network call.
+  - DoD: capability связана с актуальной binding identity/version.
+
+- [ ] **RUST-081 (M)** Реализовать DNS resolver с проверкой полного A+AAAA RRset.
+  - Тесты: deterministic resolver fixtures; mixed public/private, empty, malformed и special answers.
+  - DoD: весь RRset проверяется; mixed public/private отклоняется.
+
+- [ ] **RUST-082 (L)** Реализовать pinned connect к проверенному IP.
+  - Тесты: network integration с контролируемым DNS; DNS rebinding test; TLS SNI/hostname verification.
+  - DoD: соединение идёт к проверенному IP при сохранении корректной TLS identity.
+
+- [ ] **RUST-083 (M)** Реализовать безопасную redirect policy.
+  - Тесты: redirect chain на public→private, cross-host, loop и превышение лимита.
+  - DoD: redirect либо запрещён, либо каждый hop проходит полную повторную валидацию.
+
+- [ ] **RUST-084 (S)** Изолировать proxy environment и egress policy.
+  - Тесты: тесты с HTTP_PROXY/HTTPS_PROXY/ALL_PROXY; проверка фактического destination.
+  - DoD: не происходит непреднамеренного proxy routing.
+
+- [ ] **RUST-085 (M)** Добавить IPv4/IPv6 special-range validation.
+  - Тесты: corpus для mapped IPv6, NAT64, CGNAT, link-local, loopback, multicast и metadata IPs.
+  - DoD: запрещённые диапазоны отвергаются.
+
+- [ ] **RUST-086 (M)** Реализовать envelope encryption для command payload store.
+  - Тесты: encrypt/decrypt round-trip; tamper/hash mismatch; wrong key; key rotation; ciphertext-only persistence assertion.
+  - DoD: payload зашифрован at rest; key ID поддерживает rotation; hash проверяется до execution.
+
+- [ ] **RUST-087 (S)** Реализовать terminal payload cleanup и Unknown retention behavior.
+  - Тесты: integration — terminal cleanup, TTL, Unknown сохранён до reconciliation/TTL, повторный cleanup.
+  - DoD: cleanup идемпотентен и не удаляет payload, нужный для reconciliation.
+
+- [ ] **RUST-088 (M)** Реализовать ToolExecution executor и upstream idempotency propagation.
+  - Тесты: mock upstream — стабильный idempotency key после restart; timeout ambiguity; отсутствие auto-retry для non-idempotent action.
+  - DoD: side effect не повторяется без доказанной idempotency/reconciliation.
+
+- [ ] **RUST-089 (M)** Реализовать reconciliation adapters для конкретных upstream providers.
+  - Тесты: provider contract tests для confirmed success/failure/unknown; stale token rejected.
+  - DoD: неизвестный outcome не превращается в успех/ошибку без подтверждения.
+- [ ] **RUST-090 (M)** Добавить tool failure-injection suite.
+  - Тесты: все crash points из acceptance plan; повторный запуск; stale worker; network timeout.
+  - DoD: состояние после каждого crash point проверяется автоматически.
+
+- [ ] **RUST-091 (S)** Проверить event/log/API payload hygiene.
+  - Тесты: capture logs/events/responses; assertions на отсутствие secrets, raw command payload и sensitive arguments.
+  - DoD: секреты и raw payload не покидают encrypted payload boundary.
+
+- [ ] **RUST-092 (S)** Подготовить automated tool-enablement test gate.
+  - Тесты: единый CI job запускает SSRF, capability, binding, lease, Unknown, reconciliation и payload security suites.
+  - DoD: write-tools нельзя включить конфигурацией, если обязательный test gate не прошёл.
+
+**M3 Gate:** SSRF, pinned connect, capability, binding, independent leases, Unknown/reconciliation и encrypted payload подтверждены автоматическими тестами. До этого внешние write-tools остаются выключенными.
+
+---
+
+## 12. Этап M4 — Tasks и checkpoints
+
+**Результат:** durable multi-step tasks поверх проверенных invocation/worker primitives.
+
+- [ ] **RUST-093 (S)** Уточнить domain contracts Task и Checkpoint.
+  - Тесты: state transition matrix; invalid checkpoint sequence; serialization round-trip.
+  - DoD: task/checkpoint invariants описаны и проверяются до persistence.
+
+- [ ] **RUST-094 (M)** Реализовать Task/Checkpoint repositories.
+  - Тесты: DB integration — create/update/read, tenant isolation, invalid transitions, rollback.
+  - DoD: repository сохраняет только допустимые transitions.
+
+- [ ] **RUST-095 (M)** Реализовать scheduler/worker integration.
+  - Тесты: integration — scheduling, claim, lease expiry, competing workers.
+  - DoD: task продолжает работу только с последнего валидного checkpoint.
+
+- [ ] **RUST-096 (M)** Реализовать idempotent resume и crash recovery.
+  - Тесты: failure injection между шагами; repeated resume; no duplicate completed step.
+  - DoD: подтверждённые шаги не исполняются повторно.
+
+- [ ] **RUST-097 (S)** Добавить M4 acceptance suite.
+  - Тесты: task/checkpoint durability, concurrency и restore cases; соответствующий acceptance test T-26.
+  - DoD: тестовый отчёт прикладывается к M4 release evidence.
+
+---
+
+## 13. Сквозные тестовые требования
+
+Следующие тесты должны быть не разовыми, а постоянной частью CI:
+
+1. **Domain unit tests:** state machines, validation, budget calculations, policy contracts.
+2. **Compile-fail tests:** `AllowedCommand`, запрещённые зависимости и недоступные конструкторы.
+3. **Store integration tests:** PostgreSQL, реальные роли, RLS, tenant isolation, FK, append-only.
+4. **Concurrency tests:** минимум два независимых DB connection/session для CAS, leases, budgets и revision commit.
+5. **Provider contract tests:** mock provider на M1a; реальные adapter contract tests при добавлении provider.
+6. **Network security tests:** DNS mixed RRset, rebinding, redirect, IPv4/IPv6 special ranges, proxy bypass.
+7. **Failure injection:** crash/timeout на каждой границе persistence и внешнего side effect.
+8. **API integration tests:** auth, DTO validation, tenant isolation, error mapping и response minimization.
+9. **End-to-end:** M1a walking skeleton и последующие milestone flows.
+10. **Regression:** каждый найденный дефект получает тест, который падает до исправления и остаётся в CI после него.
+
+### Правило закрытия каждой задачи
+
+Задача не переводится в Done, пока не выполнены все применимые пункты:
+
+- [ ] Реализация завершена и находится в правильном crate.
+- [ ] Добавлены unit tests для локальной логики.
+- [ ] Добавлены integration/DB/API tests для затронутой границы.
+- [ ] Добавлены negative/security tests для отказных сценариев.
+- [ ] Все тесты задачи проходят локально и в CI.
+- [ ] `cargo fmt --check` и Clippy проходят.
+- [ ] SQLx metadata обновлена и проверена, если затронуты SQLx queries.
+- [ ] Документация и acceptance mapping обновлены при изменении контракта.
+
+---
+
+## 14. Рекомендуемый порядок первых pull requests
+
+PR должны оставаться небольшими. Если один пункт разрастается, разделить его, сохранив task ID и добавив суффиксы.
+
+1. **PR-01:** RUST-001…009 — workspace, CI, PostgreSQL harness, SQLx offline.
+2. **PR-02:** RUST-010…013 — IDs, Scope, Principal, entities и ports.
+3. **PR-03:** RUST-014…015 — `AllowedCommand` и compile-fail tests.
+4. **PR-04:** RUST-016…018 — transaction wrapper, tenant context, auth/principal repositories.
+5. **PR-05:** RUST-019…023 — Object/version/publish/snapshot/JCS persistence.
+6. **PR-06:** RUST-024…029 — events/outbox, CAS, RLS и role integration tests.
+7. **PR-07:** RUST-030…034 — ChatProvider contract и deterministic mock.
+8. **PR-08:** RUST-035…043 — idempotency, invocation worker, leases, budget, errors, health.
+9. **PR-09:** RUST-044…050 — API walking skeleton, end-to-end и M1a acceptance.
+10. Затем M1b → M2 → M3 → M4.
+
+Не начинать M3 tool execution только потому, что M1a API/worker skeleton уже работает.
+
+---
+
+## 15. Что не входит в этот roadmap
+
+- Исправление, аудит и версионирование SQL-схемы как самостоятельная работа.
+- Проектирование/изменение архитектуры M0 и добавление новых crates.
+- Tenant offboarding/erasure schema design, legal review и production operations.
+- Infrastructure-as-code, production deployment, SRE runbooks и compliance sign-off.
+- UI/frontend.
+
+При этом Rust-код тестируется против PostgreSQL как реального persistence backend. Исключение SQL remediation из roadmap не означает, что DB integration tests можно заменить mock-ами или пропустить.
+---
+
+## 16. Source of truth
+
+Roadmap декомпозирует Rust-часть материалов Qembed Object Runtime M0 v2.3.3 и решений RT-039…RT-047. Нумерация `RUST-*`, оценки, порядок PR и тестовые подзадачи — рабочая декомпозиция, а не новые ADR.
+
+**Стартовая точка:** E0 → M1a Domain → M1a Store → Mock ChatProvider → Invocation/API walking skeleton. После каждого отдельного шага обязательны тесты, включая негативные и интеграционные там, где затрагиваются границы безопасности или persistence.
