@@ -75,6 +75,44 @@ impl InvocationStatus {
     }
 }
 
+/// Persisted lifecycle and concurrency metadata used to reconstitute an invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvocationCheckpoint {
+    status: InvocationStatus,
+    version: u64,
+    fencing_token: FencingToken,
+}
+
+impl InvocationCheckpoint {
+    #[must_use]
+    pub const fn new(
+        status: InvocationStatus,
+        version: u64,
+        fencing_token: FencingToken,
+    ) -> Self {
+        Self {
+            status,
+            version,
+            fencing_token,
+        }
+    }
+
+    #[must_use]
+    pub const fn status(self) -> InvocationStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn version(self) -> u64 {
+        self.version
+    }
+
+    #[must_use]
+    pub const fn fencing_token(self) -> FencingToken {
+        self.fencing_token
+    }
+}
+
 /// A single interaction execution, independent from long-lived Tasks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Invocation {
@@ -117,9 +155,7 @@ impl Invocation {
         object_id: ObjectId,
         caller_id: CallerId,
         snapshot_id: SnapshotId,
-        status: InvocationStatus,
-        version: u64,
-        fencing_token: FencingToken,
+        checkpoint: InvocationCheckpoint,
     ) -> Self {
         Self {
             id,
@@ -127,9 +163,9 @@ impl Invocation {
             object_id,
             caller_id,
             snapshot_id,
-            status,
-            version,
-            fencing_token,
+            status: checkpoint.status,
+            version: checkpoint.version,
+            fencing_token: checkpoint.fencing_token,
         }
     }
 
