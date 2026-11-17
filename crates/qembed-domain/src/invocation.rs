@@ -85,11 +85,7 @@ pub struct InvocationCheckpoint {
 
 impl InvocationCheckpoint {
     #[must_use]
-    pub const fn new(
-        status: InvocationStatus,
-        version: u64,
-        fencing_token: FencingToken,
-    ) -> Self {
+    pub const fn new(status: InvocationStatus, version: u64, fencing_token: FencingToken) -> Self {
         Self {
             status,
             version,
