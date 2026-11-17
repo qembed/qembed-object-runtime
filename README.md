@@ -1,59 +1,139 @@
-# Qembed Object Runtime — Rust Starter
+# Qembed Object Runtime — Rust workspace
 
-This is an intentionally minimal Rust workspace scaffold for implementing
-`ROADMAP_RUST_v1.md`.
+This repository contains the Rust workspace for implementing
+[`ROADMAP_RUST_v1.md`](ROADMAP_RUST_v1.md). The project is intentionally being
+built incrementally; not all runtime behavior is implemented yet.
 
 ## Workspace crates
 
-- `qembed-domain`
-- `qembed-store`
-- `qembed-llm`
-- `qembed-tools`
-- `qembed-runtime` (also hosts the `qembed-eval` binary target)
-- `qembed-api`
+- `qembed-domain` — domain contracts and types
+- `qembed-store` — PostgreSQL persistence and explicit SQLx migrations
+- `qembed-llm` — chat-provider adapters
+- `qembed-tools` — tool adapters and execution
+- `qembed-runtime` — orchestration; also contains the `qembed-eval` binary
+- `qembed-api` — API and application composition root
 
-No application orchestration or provider behavior has been implemented yet. The store crate now contains the PostgreSQL pool and explicit SQLx migration infrastructure.
+Do not add a seventh crate or move `qembed-eval` into a separate crate without
+an architecture decision.
 
-## Build and test
+## Prerequisites
+
+- Rust stable toolchain with the `rustfmt` and `clippy` components
+- Rust 1.85.0 (the workspace MSRV; needed to reproduce the MSRV CI job)
+- Docker Engine and Docker Compose v2 for PostgreSQL integration tests
+- Python 3 for the crate-boundary check
+- SQLx CLI 0.8.6 for the SQLx metadata check (installation below)
+
+Install the Rust toolchains:
 
 ```bash
-cargo check --workspace
+rustup toolchain install stable --component rustfmt --component clippy
+rustup toolchain install 1.85.0
+```
+
+## Quick start
+
+From the repository root:
+
+```bash
+cargo check --workspace --all-targets
+cargo test --workspace --lib
 bash scripts/test-postgres.sh
 ```
+
+The first command checks every workspace target. The second runs library unit
+tests without the PostgreSQL integration test. The test script runs the full
+workspace test suite, including integration tests, against PostgreSQL 16.4.
+
+## Standard validation commands
+
+These are the main checks used by CI:
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
+cargo tree -d
+python3 scripts/check_architecture.py
+bash scripts/test-postgres.sh
+```
+
+`cargo tree -d` reports duplicate dependency versions for review; it is
+informational rather than a pass/fail policy by itself.
+
+To check the declared minimum supported Rust version:
+
+```bash
+cargo +1.85.0 check --workspace
+bash scripts/test-postgres.sh
+```
+
+The second command uses the currently selected default Rust toolchain. To run
+the full test suite specifically on MSRV, select the 1.85.0 toolchain first
+(e.g. `cargo +1.85.0 test --workspace` with the PostgreSQL service available).
 
 ## PostgreSQL integration tests
 
-Docker Engine and Docker Compose v2 are required. The test runner starts the
-pinned PostgreSQL 16.4 service, waits for its health check, runs the complete
-workspace test suite, and removes the container and its test volume on exit.
+The integration-test harness uses the pinned `postgres:16.4-alpine` image in
+[`compose.test.yaml`](compose.test.yaml). The runner:
 
-Run locally:
+1. Starts the PostgreSQL service and waits for its health check.
+2. Sets `DATABASE_URL` to the disposable test database unless it is already set.
+3. Runs `cargo test --workspace`.
+4. Removes the test container, network, and volume on exit.
+
+Run the full suite with:
 
 ```bash
 bash scripts/test-postgres.sh
 ```
 
-To use a different connection string, set `DATABASE_URL` before running the
-script. It must point to a disposable, empty PostgreSQL 16 database because
-the harness verifies the initial migration state. The integration-test fixture
-is shared under `crates/qembed-store/tests/common`.
+The default connection string is:
 
-### Run database migrations explicitly
+```text
+postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test
+```
 
-The store crate owns the SQLx PostgreSQL pool and migration runner. Creating a
-pool never applies migrations automatically. With the test PostgreSQL service
-running, apply migrations explicitly with:
+If overriding `DATABASE_URL`, it must point to a disposable, empty PostgreSQL
+16 database: the integration test verifies the initial migration state and
+applies migrations. Do not point the test harness at a database containing
+valuable data. The shared SQLx fixture lives in
+`crates/qembed-store/tests/common`.
+
+## SQLx offline metadata
+
+The CI metadata check uses SQLx CLI 0.8.6 and a running PostgreSQL test service.
+Install the matching CLI:
 
 ```bash
-docker compose --project-name qembed-rust-test --file compose.test.yaml up -d --wait
+cargo install sqlx-cli --version 0.8.6 --no-default-features --features rustls,postgres --locked
+```
+
+Then run the metadata and offline compilation checks:
+
+```bash
+docker compose --project-name qembed-rust-test --file compose.test.yaml up --detach --wait
+DATABASE_URL=postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test cargo sqlx prepare --check --workspace
+SQLX_OFFLINE=true cargo check --workspace --all-targets
+docker compose --project-name qembed-rust-test --file compose.test.yaml down --volumes --remove-orphans
+```
+
+The `.sqlx` directory is committed to the repository. There are currently no
+SQLx query macros, so no query metadata JSON files are expected yet. When
+compile-time checked SQL queries are introduced, regenerate metadata against
+the development database with `cargo sqlx prepare` and commit the generated
+files. The offline compile check uses that metadata; it does not inspect live
+database rows or replace PostgreSQL integration tests.
+
+## Run database migrations explicitly
+
+Creating a pool does not apply migrations. To run the migration command against
+the local test service:
+
+```bash
+docker compose --project-name qembed-rust-test --file compose.test.yaml up --detach --wait
 DATABASE_URL=postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test cargo run -p qembed-store --bin qembed-migrate
 docker compose --project-name qembed-rust-test --file compose.test.yaml down --volumes --remove-orphans
 ```
 
-The migration runner is intentionally separate from normal application startup.
-
-
-## Git
-
-The repository is initialized and contains an initial commit
-(`chore: initialize Rust workspace and roadmap`).
+The migration runner is deliberately separate from normal application startup.
