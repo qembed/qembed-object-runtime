@@ -37,11 +37,10 @@ async fn tenant_setting_is_transaction_local_after_commit_and_rollback() {
     let mut transaction = begin_tenant_transaction(&pool, &scope)
         .await
         .expect("a trusted scope should begin a tenant transaction");
-    let inside: String =
-        sqlx::query_scalar("SELECT current_setting('app.tenant_id', true)")
-            .fetch_one(transaction.connection())
-            .await
-            .expect("tenant setting should be present inside the transaction");
+    let inside: String = sqlx::query_scalar("SELECT current_setting('app.tenant_id', true)")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("tenant setting should be present inside the transaction");
     assert_eq!(inside, tenant_id.to_string());
 
     transaction
