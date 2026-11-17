@@ -134,10 +134,17 @@ async fn failed_object_pointer_update_rolls_back_both_version_changes() {
     let suffix = object_id.to_string().replace('-', "");
     let function_name = format!("test_reject_publication_{suffix}");
     let trigger_name = format!("test_reject_publication_trigger_{suffix}");
-    let ddl = format!(
-        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.object_id = '{object_id}'::uuid AND NEW.published_version_id IS DISTINCT FROM OLD.published_version_id THEN RAISE EXCEPTION 'forced publication failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER {trigger_name} BEFORE UPDATE ON objects FOR EACH ROW EXECUTE FUNCTION {function_name}();"
+    let function_ddl = format!(
+        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN IF NEW.object_id = '{object_id}'::uuid AND NEW.published_version_id IS DISTINCT FROM OLD.published_version_id THEN RAISE EXCEPTION 'forced publication failure'; END IF; RETURN NEW; END $"
     );
-    sqlx::raw_sql(&ddl)
+    sqlx::query(&function_ddl)
+        .execute(&pool)
+        .await
+        .expect("test trigger function should be installed");
+    let trigger_ddl = format!(
+        "CREATE TRIGGER {trigger_name} BEFORE UPDATE ON objects FOR EACH ROW EXECUTE FUNCTION {function_name}()"
+    );
+    sqlx::query(&trigger_ddl)
         .execute(&pool)
         .await
         .expect("test trigger should be installed");
@@ -172,13 +179,16 @@ async fn failed_object_pointer_update_rolls_back_both_version_changes() {
     .expect("version status should remain queryable");
     assert_eq!(version_status, "draft");
 
-    let cleanup = format!(
-        "DROP TRIGGER {trigger_name} ON objects; DROP FUNCTION {function_name}();"
-    );
-    sqlx::raw_sql(&cleanup)
+    let drop_trigger = format!("DROP TRIGGER {trigger_name} ON objects");
+    sqlx::query(&drop_trigger)
         .execute(&pool)
         .await
         .expect("test trigger should be removed");
+    let drop_function = format!("DROP FUNCTION {function_name}()");
+    sqlx::query(&drop_function)
+        .execute(&pool)
+        .await
+        .expect("test trigger function should be removed");
 
     pool.close().await;
 }
