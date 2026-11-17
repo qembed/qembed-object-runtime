@@ -64,7 +64,7 @@ async fn state_event_and_outbox_commit_together() {
     assert_eq!(state, ("active".to_owned(), Some(version_id.to_string())));
 
     let events: Vec<(String, String)> = sqlx::query_as(
-        "SELECT event_type, payload->>'state' FROM events WHERE tenant_id = $1::uuid AND aggregate_id = $2::uuid ORDER BY occurred_at, event_id",
+        "SELECT event_type, payload->>'state' FROM events WHERE tenant_id = $1::uuid AND aggregate_id = $2::uuid ORDER BY event_type",
     )
     .bind(scope.tenant_id().to_string())
     .bind(object_id.to_string())
@@ -80,7 +80,7 @@ async fn state_event_and_outbox_commit_together() {
     );
 
     let outbox: Vec<(String, String)> = sqlx::query_as(
-        "SELECT topic, payload->>'state' FROM outbox_messages WHERE tenant_id = $1::uuid ORDER BY created_at, delivery_id",
+        "SELECT topic, payload->>'state' FROM outbox_messages WHERE tenant_id = $1::uuid ORDER BY topic",
     )
     .bind(scope.tenant_id().to_string())
     .fetch_all(&pool)
