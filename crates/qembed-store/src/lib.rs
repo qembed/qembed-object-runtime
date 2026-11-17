@@ -6,7 +6,9 @@ use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 use sqlx::Transaction;
 use sqlx::migrate::{MigrateError, Migrator};
-use sqlx::postgres::{PgConnection, PgPoolOptions, Postgres};
+use sqlx::postgres::{PgArguments, PgConnection, PgPoolOptions, PgQueryResult, PgRow, Postgres};
+use sqlx::query::{Query, QueryAs};
+use sqlx::{FromRow, query};
 
 /// Connection-pool settings shared by application and migration entry points.
 #[derive(Clone, Debug)]
@@ -99,4 +101,52 @@ pub async fn begin_tenant_transaction(
         .await?;
 
     Ok(TenantTransaction { transaction })
+}
+
+
+/// Executes a typed row query inside a tenant-scoped transaction.
+///
+/// Repository methods should accept `&Scope`, begin their work with
+/// [`begin_tenant_transaction`], and execute every tenant-owned query through
+/// this helper (or its optional-row counterpart). The transaction is the
+/// capability that carries the trusted tenant context; a bare pool is not
+/// accepted.
+///
+/// The query retains SQLx's typed row mapping and bind-parameter API.
+///
+/// ```compile_fail
+/// use qembed_store::fetch_all;
+/// use sqlx::PgPool;
+///
+/// async fn unscoped(pool: &PgPool) {
+///     let _ = fetch_all(pool, sqlx::query_as::<_, (String,)>("SELECT 'x'"));
+/// }
+/// ```
+pub async fn fetch_all<'q, O>(
+    transaction: &mut TenantTransaction,
+    query: QueryAs<'q, Postgres, O, PgArguments>,
+) -> Result<Vec<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    query.fetch_all(transaction.connection()).await
+}
+
+/// Fetches at most one typed row inside a tenant-scoped transaction.
+pub async fn fetch_optional<'q, O>(
+    transaction: &mut TenantTransaction,
+    query: QueryAs<'q, Postgres, O, PgArguments>,
+) -> Result<Option<O>, sqlx::Error>
+where
+    O: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+    query.fetch_optional(transaction.connection()).await
+}
+
+/// Executes a SQLx query inside a tenant-scoped transaction.
+pub async fn execute<'q>(
+    transaction: &mut TenantTransaction,
+    query: Query<'q, Postgres, PgArguments>,
+) -> Result<PgQueryResult, sqlx::Error> {
+    query.execute(transaction.connection()).await
 }
