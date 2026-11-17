@@ -135,7 +135,7 @@ async fn failed_object_pointer_update_rolls_back_both_version_changes() {
     let function_name = format!("test_reject_publication_{suffix}");
     let trigger_name = format!("test_reject_publication_trigger_{suffix}");
     let function_ddl = format!(
-        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN IF NEW.object_id = '{object_id}'::uuid AND NEW.published_version_id IS DISTINCT FROM OLD.published_version_id THEN RAISE EXCEPTION 'forced publication failure'; END IF; RETURN NEW; END $"
+        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF NEW.object_id = '{object_id}'::uuid AND NEW.published_version_id IS DISTINCT FROM OLD.published_version_id THEN RAISE EXCEPTION 'forced publication failure'; END IF; RETURN NEW; END $function$"
     );
     sqlx::query(&function_ddl)
         .execute(&pool)
