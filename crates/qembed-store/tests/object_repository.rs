@@ -153,13 +153,9 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
         ObjectRepositoryError::ObjectMustBeDraft
     ));
 
-    let mut published_version = ObjectVersion::new(
-        ObjectVersionId::new(),
-        tenant_a,
-        object.id(),
-        2,
-    )
-    .expect("version number must be positive");
+    let mut published_version =
+        ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 2)
+            .expect("version number must be positive");
     published_version.publish().expect("Draft can be published");
     let non_draft_version = repository
         .create_draft_version(&scope_a, &published_version)
