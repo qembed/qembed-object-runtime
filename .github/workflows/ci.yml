@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   rust:
-    name: Format, lint, dependency audit, check, and test (stable)
+    name: Format, check, lint, dependency audit, and test (stable)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -20,8 +20,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Check workspace targets
+        run: cargo check --workspace --all-targets
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -31,9 +37,6 @@ jobs:
 
       - name: Check crate dependency boundaries
         run: python3 scripts/check_architecture.py
-
-      - name: Check workspace targets
-        run: cargo check --workspace --all-targets
 
       - name: Run workspace tests
         run: cargo test --workspace
