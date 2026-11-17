@@ -53,7 +53,9 @@ impl<E: fmt::Display> fmt::Display for OwnerAuthenticationError<E> {
         match self {
             Self::Rejected(error) => write!(formatter, "owner authentication rejected: {error}"),
             Self::NotOwner => formatter.write_str("authenticated principal is not a tenant owner"),
-            Self::InvalidPrincipal(error) => write!(formatter, "invalid authenticated principal: {error}"),
+            Self::InvalidPrincipal(error) => {
+                write!(formatter, "invalid authenticated principal: {error}")
+            }
             Self::InvalidScope(error) => write!(formatter, "invalid authenticated scope: {error}"),
         }
     }
@@ -89,7 +91,8 @@ mod tests {
         fn authenticate(
             &self,
             (): Self::Credentials,
-        ) -> impl std::future::Future<Output = Result<AuthenticatedIdentity, Self::Error>> + Send {
+        ) -> impl std::future::Future<Output = Result<AuthenticatedIdentity, Self::Error>> + Send
+        {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
                 CallerId::new(),
