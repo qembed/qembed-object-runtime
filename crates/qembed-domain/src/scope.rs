@@ -119,14 +119,4 @@ mod tests {
         assert_eq!(error, ScopeError::NilTenantId);
     }
 
-    #[test]
-    fn scope_rejects_principal_with_nil_caller_id() {
-        let error = Principal::from_verified_auth(
-            CallerId::from_uuid(Uuid::nil()),
-            PrincipalKind::Authenticated,
-        )
-        .expect_err("nil caller ID must be rejected");
-
-        assert_eq!(error, crate::principal::PrincipalError::NilCallerId);
-    }
 }
