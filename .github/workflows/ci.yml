@@ -41,6 +41,9 @@ jobs:
       - name: Check crate dependency boundaries
         run: python3 scripts/check_architecture.py
 
+      - name: Run security-sensitive compile-fail contracts
+        run: cargo test -p qembed-domain --doc
+
       - name: Start PostgreSQL for SQLx metadata validation
         run: docker compose --project-name qembed-rust-test --file compose.test.yaml up --detach --wait
 
