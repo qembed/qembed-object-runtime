@@ -91,6 +91,7 @@ impl AllowedCommand {
     /// Kept private so this module remains the sole minting boundary. The
     /// Authorizer introduced later must call this only after a positive policy
     /// decision; adapters and executors receive, but cannot manufacture, it.
+    #[allow(dead_code)] // The Authorizer will use this mint boundary in RUST-078.
     fn mint(command_id: CommandId, invocation_id: InvocationId, action_hash: [u8; 32]) -> Self {
         Self {
             command_id,
