@@ -108,10 +108,7 @@ impl Object {
     }
 
     /// Activates a validated object with its first published version.
-    pub fn activate(
-        &mut self,
-        published_version_id: ObjectVersionId,
-    ) -> Result<(), ObjectError> {
+    pub fn activate(&mut self, published_version_id: ObjectVersionId) -> Result<(), ObjectError> {
         if self.state != ObjectState::Validating {
             return Err(ObjectError::InvalidTransition {
                 from: self.state,
@@ -209,19 +206,17 @@ mod tests {
         );
 
         let version_id = ObjectVersionId::new();
-        object.activate(version_id).expect("validated object can activate");
+        object
+            .activate(version_id)
+            .expect("validated object can activate");
         assert_eq!(object.state(), ObjectState::Active);
         assert_eq!(object.published_version_id(), Some(version_id));
     }
 
     #[test]
     fn active_and_suspended_objects_require_a_published_version_when_loaded() {
-        let result = Object::from_persisted(
-            ObjectId::new(),
-            TenantId::new(),
-            ObjectState::Active,
-            None,
-        );
+        let result =
+            Object::from_persisted(ObjectId::new(), TenantId::new(), ObjectState::Active, None);
 
         assert_eq!(result, Err(ObjectError::PublishedVersionRequired));
     }

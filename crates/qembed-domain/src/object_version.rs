@@ -132,27 +132,38 @@ mod tests {
     use super::*;
 
     fn draft() -> ObjectVersion {
-        ObjectVersion::new(
-            ObjectVersionId::new(),
-            TenantId::new(),
-            ObjectId::new(),
-            1,
-        )
-        .expect("version number is positive")
+        ObjectVersion::new(ObjectVersionId::new(), TenantId::new(), ObjectId::new(), 1)
+            .expect("version number is positive")
     }
 
     #[test]
     fn version_lifecycle_is_draft_published_superseded() {
         let cases = [
-            (ObjectVersionStatus::Draft, ObjectVersionStatus::Published, true),
+            (
+                ObjectVersionStatus::Draft,
+                ObjectVersionStatus::Published,
+                true,
+            ),
             (
                 ObjectVersionStatus::Published,
                 ObjectVersionStatus::Superseded,
                 true,
             ),
-            (ObjectVersionStatus::Draft, ObjectVersionStatus::Superseded, false),
-            (ObjectVersionStatus::Published, ObjectVersionStatus::Draft, false),
-            (ObjectVersionStatus::Superseded, ObjectVersionStatus::Published, false),
+            (
+                ObjectVersionStatus::Draft,
+                ObjectVersionStatus::Superseded,
+                false,
+            ),
+            (
+                ObjectVersionStatus::Published,
+                ObjectVersionStatus::Draft,
+                false,
+            ),
+            (
+                ObjectVersionStatus::Superseded,
+                ObjectVersionStatus::Published,
+                false,
+            ),
         ];
 
         for (from, to, expected) in cases {
@@ -163,12 +174,7 @@ mod tests {
     #[test]
     fn version_number_must_be_positive() {
         assert_eq!(
-            ObjectVersion::new(
-                ObjectVersionId::new(),
-                TenantId::new(),
-                ObjectId::new(),
-                0,
-            ),
+            ObjectVersion::new(ObjectVersionId::new(), TenantId::new(), ObjectId::new(), 0,),
             Err(ObjectVersionError::InvalidVersionNumber)
         );
     }

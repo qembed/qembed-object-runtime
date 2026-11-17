@@ -199,10 +199,7 @@ impl Invocation {
     }
 
     /// Installs a newer fencing token after a successful lease reclaim.
-    pub fn advance_fencing_token(
-        &mut self,
-        next: FencingToken,
-    ) -> Result<(), InvocationError> {
+    pub fn advance_fencing_token(&mut self, next: FencingToken) -> Result<(), InvocationError> {
         if self.status.is_terminal() {
             return Err(InvocationError::TerminalInvocationCannotBeReclaimed);
         }
