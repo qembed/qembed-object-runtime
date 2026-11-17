@@ -3,12 +3,12 @@
 use std::time::Duration;
 
 use qembed_domain::scope::Scope;
+use sqlx::FromRow;
 use sqlx::PgPool;
 use sqlx::Transaction;
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgArguments, PgConnection, PgPoolOptions, PgQueryResult, PgRow, Postgres};
 use sqlx::query::{Query, QueryAs};
-use sqlx::FromRow;
 
 /// Connection-pool settings shared by application and migration entry points.
 #[derive(Clone, Debug)]
@@ -102,7 +102,6 @@ pub async fn begin_tenant_transaction(
 
     Ok(TenantTransaction { transaction })
 }
-
 
 /// Executes a typed row query inside a tenant-scoped transaction.
 ///
