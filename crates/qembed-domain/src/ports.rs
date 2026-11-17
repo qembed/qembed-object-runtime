@@ -115,7 +115,7 @@ pub trait ProviderPort: Send + Sync {
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::future::{Ready, ready};
+    use std::future::ready;
 
     use super::*;
 
@@ -146,7 +146,7 @@ mod tests {
             &self,
             _: &Scope,
             _: InvocationId,
-        ) -> Ready<Result<Option<Invocation>, Self::Error>> {
+        ) -> impl Future<Output = Result<Option<Invocation>, Self::Error>> + Send {
             ready(Ok(None))
         }
 
@@ -156,7 +156,7 @@ mod tests {
             _: u64,
             _: FencingToken,
             _: Invocation,
-        ) -> Ready<Result<bool, Self::Error>> {
+        ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
             ready(Ok(true))
         }
     }
