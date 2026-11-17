@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use qembed_domain::scope::Scope;
 use sqlx::PgPool;
+use sqlx::Transaction;
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgConnection, PgPoolOptions, Postgres};
-use sqlx::Transaction;
 
 /// Connection-pool settings shared by application and migration entry points.
 #[derive(Clone, Debug)]
