@@ -33,6 +33,11 @@ async fn create_rls_fixture(
     .await
     .expect("the temporary fixture table should be created");
 
+    sqlx::query("GRANT USAGE ON SCHEMA pg_temp TO qembed_tenant_rls_test")
+        .execute(transaction.connection())
+        .await
+        .expect("the test role should be allowed to resolve the temporary table");
+
     sqlx::query(
         "INSERT INTO tenant_query_probe (tenant_id, payload)
          VALUES ($1, 'tenant-a'), ($2, 'tenant-b')",
