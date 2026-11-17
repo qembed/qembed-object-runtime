@@ -1,6 +1,7 @@
 //! Object aggregate and lifecycle state machine.
 
 use crate::ids::{ObjectId, ObjectVersionId, TenantId};
+use crate::object_version::{ObjectVersion, ObjectVersionStatus};
 
 /// Lifecycle states of an object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -108,7 +109,7 @@ impl Object {
     }
 
     /// Activates a validated object with its first published version.
-    pub fn activate(&mut self, published_version_id: ObjectVersionId) -> Result<(), ObjectError> {
+    pub fn activate(&mut self, published_version: &ObjectVersion) -> Result<(), ObjectError> {
         if self.state != ObjectState::Validating {
             return Err(ObjectError::InvalidTransition {
                 from: self.state,
@@ -116,7 +117,8 @@ impl Object {
             });
         }
 
-        self.published_version_id = Some(published_version_id);
+        self.ensure_usable_published_version(published_version)?;
+        self.published_version_id = Some(published_version.id());
         self.state = ObjectState::Active;
         Ok(())
     }
@@ -145,7 +147,7 @@ impl Object {
     pub fn replace_published_version(
         &mut self,
         expected_current: ObjectVersionId,
-        next: ObjectVersionId,
+        next: &ObjectVersion,
     ) -> Result<(), ObjectError> {
         if !matches!(self.state, ObjectState::Active | ObjectState::Suspended) {
             return Err(ObjectError::CannotReplacePublishedVersion);
@@ -155,7 +157,23 @@ impl Object {
             return Err(ObjectError::PublishedVersionMismatch);
         }
 
-        self.published_version_id = Some(next);
+        self.ensure_usable_published_version(next)?;
+        self.published_version_id = Some(next.id());
+        Ok(())
+    }
+
+    fn ensure_usable_published_version(
+        &self,
+        version: &ObjectVersion,
+    ) -> Result<(), ObjectError> {
+        if version.tenant_id() != self.tenant_id || version.object_id() != self.id {
+            return Err(ObjectError::PublishedVersionDoesNotBelongToObject);
+        }
+
+        if version.status() != ObjectVersionStatus::Published {
+            return Err(ObjectError::VersionIsNotPublished);
+        }
+
         Ok(())
     }
 }
@@ -167,12 +185,26 @@ pub enum ObjectError {
     PublishedVersionRequired,
     CannotReplacePublishedVersion,
     PublishedVersionMismatch,
+    PublishedVersionDoesNotBelongToObject,
+    VersionIsNotPublished,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ids::ObjectVersionId;
+
+    fn published_version_for(object: &Object) -> ObjectVersion {
+        let mut version = ObjectVersion::new(
+            ObjectVersionId::new(),
+            object.tenant_id(),
+            object.id(),
+            1,
+        )
+        .expect("version number is positive");
+        version.publish().expect("draft version can be published");
+        version
+    }
 
     #[test]
     fn object_lifecycle_accepts_only_specified_transitions() {
@@ -205,12 +237,12 @@ mod tests {
             Err(ObjectError::PublishedVersionRequired)
         );
 
-        let version_id = ObjectVersionId::new();
+        let version = published_version_for(&object);
         object
-            .activate(version_id)
+            .activate(&version)
             .expect("validated object can activate");
         assert_eq!(object.state(), ObjectState::Active);
-        assert_eq!(object.published_version_id(), Some(version_id));
+        assert_eq!(object.published_version_id(), Some(version.id()));
     }
 
     #[test]
@@ -225,8 +257,9 @@ mod tests {
     fn archived_is_terminal() {
         let mut object = Object::new(ObjectId::new(), TenantId::new());
         object.begin_validation().expect("Draft can validate");
+        let version = published_version_for(&object);
         object
-            .activate(ObjectVersionId::new())
+            .activate(&version)
             .expect("validated object can activate");
         object
             .transition_to(ObjectState::Archived)
@@ -237,9 +270,41 @@ mod tests {
     }
 
     #[test]
+    fn activation_rejects_a_version_from_another_object_or_tenant() {
+        let mut object = Object::new(ObjectId::new(), TenantId::new());
+        object.begin_validation().expect("Draft can validate");
+
+        let foreign_object = Object::new(ObjectId::new(), object.tenant_id());
+        let foreign_version = published_version_for(&foreign_object);
+
+        assert_eq!(
+            object.activate(&foreign_version),
+            Err(ObjectError::PublishedVersionDoesNotBelongToObject)
+        );
+        assert_eq!(object.state(), ObjectState::Validating);
+    }
+
+    #[test]
+    fn activation_rejects_a_draft_version() {
+        let mut object = Object::new(ObjectId::new(), TenantId::new());
+        object.begin_validation().expect("Draft can validate");
+        let draft = ObjectVersion::new(
+            ObjectVersionId::new(),
+            object.tenant_id(),
+            object.id(),
+            1,
+        )
+        .expect("version number is positive");
+
+        assert_eq!(
+            object.activate(&draft),
+            Err(ObjectError::VersionIsNotPublished)
+        );
+    }
+
+    #[test]
     fn published_version_replacement_is_compare_and_set() {
         let current = ObjectVersionId::new();
-        let next = ObjectVersionId::new();
         let mut object = Object::from_persisted(
             ObjectId::new(),
             TenantId::new(),
@@ -247,14 +312,15 @@ mod tests {
             Some(current),
         )
         .expect("active object requires a published version");
+        let next = published_version_for(&object);
 
         assert_eq!(
-            object.replace_published_version(ObjectVersionId::new(), next),
+            object.replace_published_version(ObjectVersionId::new(), &next),
             Err(ObjectError::PublishedVersionMismatch)
         );
         object
-            .replace_published_version(current, next)
+            .replace_published_version(current, &next)
             .expect("matching published pointer can be replaced");
-        assert_eq!(object.published_version_id(), Some(next));
+        assert_eq!(object.published_version_id(), Some(next.id()));
     }
 }
