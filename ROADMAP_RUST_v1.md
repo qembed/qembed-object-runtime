@@ -154,9 +154,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: compile-fail tests на `Clone`, Serialize/Deserialize, Default и внешнее создание; unit tests на валидную mint boundary.
   - DoD: тип `!Clone`, `!Serialize`, `!Deserialize`, `!Default`; произвольный caller не может его сконструировать.
 
-- [ ] **RUST-015 (S)** Добавить compile-fail suite для security-sensitive domain contracts.
-  - Тесты: trybuild или эквивалент; проверка запрещённых импортов/конструкторов.
-  - DoD: CI проверяет, что запретные примеры действительно не компилируются.
+- [x] **RUST-015 (S)** Добавить compile-fail suite для security-sensitive domain contracts.
+  - Реализация: единый набор rustdoc `compile_fail` контрактов в документации `qembed-domain`; без дополнительной test-зависимости.
+  - Тесты: внешнее создание `Principal`, `Scope`, `AllowedCommand`; вызов trusted constructors; Deserialize для `Principal`/`Scope`; запрещённые traits `AllowedCommand`.
+  - DoD: отдельный CI step `cargo test -p qembed-domain --doc` проверяет, что все запретные примеры действительно не компилируются.
 
 ---
 
