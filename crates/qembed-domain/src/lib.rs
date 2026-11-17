@@ -130,11 +130,9 @@ pub mod test_support {
     /// authentication boundary.
     #[must_use]
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
-        let principal = Principal::from_verified_auth(
-            CallerId::new(),
-            PrincipalKind::Authenticated,
-        )
-        .expect("a generated caller ID must be valid");
+        let principal =
+            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
+                .expect("a generated caller ID must be valid");
 
         Scope::from_verified_auth(tenant_id, principal)
             .expect("a generated tenant ID must be valid")
