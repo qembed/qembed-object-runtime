@@ -26,10 +26,7 @@ impl Default for PgPoolConfig {
 }
 
 /// Create a PostgreSQL pool without applying or modifying any database schema.
-pub async fn connect_pool(
-    database_url: &str,
-    config: PgPoolConfig,
-) -> Result<PgPool, sqlx::Error> {
+pub async fn connect_pool(database_url: &str, config: PgPoolConfig) -> Result<PgPool, sqlx::Error> {
     PgPoolOptions::new()
         .max_connections(config.max_connections)
         .acquire_timeout(config.acquire_timeout)
