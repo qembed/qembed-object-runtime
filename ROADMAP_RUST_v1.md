@@ -170,9 +170,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration проверяет tenant setting внутри транзакции и его отсутствие после commit и rollback на одном pooled connection; compile-fail doctest доказывает, что начать транзакцию без `&Scope` нельзя.
   - DoD: tenant context устанавливается через transaction-local setting в каждой tenant-транзакции.
 
-- [ ] **RUST-017 (M)** Реализовать repository conventions и typed query helpers.
-  - Тесты: integration tests на tenant A/B; запрос без scope не возвращает tenant rows.
-  - DoD: все tenant-owned операции принимают `&Scope`; tenant ID не извлекается из непроверенного пользовательского payload.
+- [x] **RUST-017 (M)** Реализовать repository conventions и typed query helpers.
+  - Реализация: `fetch_all`, `fetch_optional` и `execute` принимают только `TenantTransaction`; repository convention — принимать trusted `&Scope`, открывать tenant transaction и выполнять запросы через typed SQLx helpers.
+  - Тесты: PostgreSQL integration проверяет RLS isolation для tenant A/B и fail-closed поведение без tenant context; compile-fail doctest запрещает передавать обычный pool вместо tenant transaction.
+  - DoD: tenant-owned query helpers не принимают непроверенный tenant ID или обычный pool; tenant context задаётся только из trusted `Scope`.
 
 - [ ] **RUST-018 (M)** Реализовать principal/caller persistence и минимальный Owner authentication path.
   - Тесты: integration — валидная аутентификация, неверные credentials, disabled principal, tenant mismatch.
