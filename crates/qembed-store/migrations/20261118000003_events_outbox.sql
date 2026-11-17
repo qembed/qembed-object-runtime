@@ -2,16 +2,13 @@
 CREATE TABLE events (
     tenant_id UUID NOT NULL,
     event_id UUID NOT NULL,
-    aggregate_type TEXT NOT NULL CHECK (aggregate_type = 'object'),
+    aggregate_type TEXT NOT NULL,
     aggregate_id UUID NOT NULL,
     event_type TEXT NOT NULL,
     payload JSONB NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, event_id),
-    UNIQUE (event_id),
-    FOREIGN KEY (tenant_id, aggregate_id)
-        REFERENCES objects (tenant_id, object_id)
-        ON DELETE RESTRICT
+    UNIQUE (event_id)
 );
 
 CREATE INDEX events_aggregate_order_idx
