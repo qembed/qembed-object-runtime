@@ -10,7 +10,7 @@ async fn postgres_harness_runs_migrations_and_connects_to_supported_server() {
     // the schema too, so this harness verifies the explicit migration path.
     run_migrations(&pool)
         .await
-        .expect("migrations should run against an empty test database");
+        .expect("migrations should apply idempotently to the test database");
 
     let ready: i32 = sqlx::query_scalar("SELECT 1")
         .fetch_one(&pool)
