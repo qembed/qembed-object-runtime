@@ -144,7 +144,8 @@ mod tests {
 
     #[test]
     fn rfc_8785_number_serialization_vector() {
-        let input = br#"{"numbers":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001]}"#;
+        let input =
+            br#"{"numbers":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001]}"#;
         let expected = br#"{"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27]}"#;
 
         assert_eq!(canonicalize_json(input).expect("valid JSON"), expected);
@@ -173,7 +174,11 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_numbers() {
-        for input in [b"NaN".as_slice(), b"Infinity".as_slice(), b"-Infinity".as_slice()] {
+        for input in [
+            b"NaN".as_slice(),
+            b"Infinity".as_slice(),
+            b"-Infinity".as_slice(),
+        ] {
             assert_eq!(canonicalize_json(input), Err(JcsError::InvalidJson));
         }
     }
@@ -192,7 +197,10 @@ mod tests {
             br#"{"n":1.0}"#.as_slice(),
             br#"{"s":"\/"}"#.as_slice(),
         ] {
-            assert_eq!(validate_canonical_json(input), Err(JcsError::NonCanonicalJson));
+            assert_eq!(
+                validate_canonical_json(input),
+                Err(JcsError::NonCanonicalJson)
+            );
         }
     }
 
