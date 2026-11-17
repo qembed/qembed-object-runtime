@@ -207,6 +207,33 @@ mod tests {
     }
 
     #[test]
+    fn canonicalization_is_idempotent_for_generated_json_values() {
+        let atoms = ["null", "true", "false", "0", "-0", "1.5", "1e+30", "\"a\"", "\"€\""];
+
+        for atom in atoms {
+            let canonical = canonicalize_json(atom.as_bytes()).expect("valid JSON atom");
+            assert_eq!(
+                canonicalize_json(&canonical).expect("canonical atom parses"),
+                canonical
+            );
+            validate_canonical_json(&canonical).expect("canonical atom validates");
+        }
+
+        let keys = ["a", "z", "€", "😀"];
+        for first in keys {
+            for second in keys {
+                let input = format!("{{\"{second}\":{{\"value\":2}},\"{first}\":[1,true]}}");
+                let canonical = canonicalize_json(input.as_bytes()).expect("generated JSON");
+                assert_eq!(
+                    canonicalize_json(&canonical).expect("canonical JSON parses"),
+                    canonical
+                );
+                validate_canonical_json(&canonical).expect("canonical JSON validates");
+            }
+        }
+    }
+
+    #[test]
     fn canonicalization_is_idempotent_for_a_deterministic_corpus() {
         let corpus = [
             br#"{}"#.as_slice(),
