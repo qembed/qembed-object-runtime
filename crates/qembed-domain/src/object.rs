@@ -162,10 +162,7 @@ impl Object {
         Ok(())
     }
 
-    fn ensure_usable_published_version(
-        &self,
-        version: &ObjectVersion,
-    ) -> Result<(), ObjectError> {
+    fn ensure_usable_published_version(&self, version: &ObjectVersion) -> Result<(), ObjectError> {
         if version.tenant_id() != self.tenant_id || version.object_id() != self.id {
             return Err(ObjectError::PublishedVersionDoesNotBelongToObject);
         }
@@ -195,13 +192,9 @@ mod tests {
     use crate::ids::ObjectVersionId;
 
     fn published_version_for(object: &Object) -> ObjectVersion {
-        let mut version = ObjectVersion::new(
-            ObjectVersionId::new(),
-            object.tenant_id(),
-            object.id(),
-            1,
-        )
-        .expect("version number is positive");
+        let mut version =
+            ObjectVersion::new(ObjectVersionId::new(), object.tenant_id(), object.id(), 1)
+                .expect("version number is positive");
         version.publish().expect("draft version can be published");
         version
     }
@@ -288,13 +281,8 @@ mod tests {
     fn activation_rejects_a_draft_version() {
         let mut object = Object::new(ObjectId::new(), TenantId::new());
         object.begin_validation().expect("Draft can validate");
-        let draft = ObjectVersion::new(
-            ObjectVersionId::new(),
-            object.tenant_id(),
-            object.id(),
-            1,
-        )
-        .expect("version number is positive");
+        let draft = ObjectVersion::new(ObjectVersionId::new(), object.tenant_id(), object.id(), 1)
+            .expect("version number is positive");
 
         assert_eq!(
             object.activate(&draft),
