@@ -144,7 +144,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: таблицы допустимых/недопустимых state transitions; property tests для инвариантов.
   - DoD: переходы выражены методами/типами, а не произвольными строками.
 
-- [ ] **RUST-013 (S)** Определить domain ports.
+- [x] **RUST-013 (S)** Определить domain ports.
   - Контракты: authentication, execution store, provider, clock/ID generation там, где это нужно.
   - Тесты: compile tests на реализации test doubles; domain crate собирается без adapter dependencies.
   - DoD: domain не зависит от SQLx, Actix или provider SDK.
