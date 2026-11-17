@@ -4,6 +4,7 @@ pub mod ids;
 pub mod invocation;
 pub mod object;
 pub mod object_version;
+pub mod policy;
 pub mod ports;
 pub mod principal;
 pub mod scope;
