@@ -1,10 +1,10 @@
 mod common;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
+use qembed_domain::jcs::JcsError;
 use qembed_domain::object::Object;
 use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
-use qembed_domain::jcs::JcsError;
 use qembed_domain::snapshot::{SnapshotBuilder, SnapshotError};
 use sha2::{Digest, Sha256};
 use qembed_domain::test_support::scope_for_tenant;
