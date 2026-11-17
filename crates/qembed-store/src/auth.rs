@@ -7,6 +7,8 @@ use qembed_domain::ports::{AuthenticatedIdentity, AuthenticationPort};
 use qembed_domain::principal::PrincipalKind;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::fmt;
+use std::future::Future;
 
 /// Credentials for the minimal Owner path.
 ///
@@ -66,7 +68,9 @@ impl fmt::Display for OwnerAuthenticationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidCredentials => formatter.write_str("invalid credentials"),
-            Self::Database(error) => write!(formatter, "owner authentication database error: {error}"),
+            Self::Database(error) => {
+                write!(formatter, "owner authentication database error: {error}")
+            }
         }
     }
 }
