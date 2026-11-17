@@ -42,13 +42,8 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     .expect("the object should be persisted");
     assert_eq!(stored_state, "draft");
 
-    let version = ObjectVersion::new(
-        ObjectVersionId::new(),
-        tenant_a,
-        object.id(),
-        1,
-    )
-    .expect("version number must be positive");
+    let version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
+        .expect("version number must be positive");
     repository
         .create_draft_version(&scope_a, &version)
         .await
@@ -98,13 +93,8 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
 
     // Even with a matching scope tenant, a version cannot reference an object
     // owned by another tenant: the composite foreign key rejects the insert.
-    let foreign_reference = ObjectVersion::new(
-        ObjectVersionId::new(),
-        tenant_b,
-        object.id(),
-        1,
-    )
-    .expect("version number must be positive");
+    let foreign_reference = ObjectVersion::new(ObjectVersionId::new(), tenant_b, object.id(), 1)
+        .expect("version number must be positive");
     let foreign_error = repository
         .create_draft_version(&scope_b, &foreign_reference)
         .await
@@ -112,13 +102,8 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     assert!(is_database_constraint(foreign_error, "23503"));
 
     // A failed insert rolls its transaction back and leaves no partial row.
-    let missing_object_version = ObjectVersion::new(
-        ObjectVersionId::new(),
-        tenant_a,
-        ObjectId::new(),
-        1,
-    )
-    .expect("version number must be positive");
+    let missing_object_version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, ObjectId::new(), 1)
+        .expect("version number must be positive");
     let failed_id = missing_object_version.id();
     let rollback_error = repository
         .create_draft_version(&scope_a, &missing_object_version)
