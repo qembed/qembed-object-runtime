@@ -16,10 +16,9 @@ use crate::principal::Principal;
 ///
 /// ```compile_fail
 /// use qembed_domain::ids::TenantId;
-/// use qembed_domain::principal::Principal;
 /// use qembed_domain::scope::Scope;
 ///
-/// let _ = Scope::from_verified_auth(TenantId::new(), todo!() as Principal);
+/// let _ = Scope::from_verified_auth(TenantId::new(), todo!());
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scope {
@@ -114,5 +113,4 @@ mod tests {
 
         assert_eq!(error, ScopeError::NilTenantId);
     }
-
 }
