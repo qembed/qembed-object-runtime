@@ -110,7 +110,8 @@ mod tests {
         fn authenticate(
             &self,
             (): Self::Credentials,
-        ) -> impl std::future::Future<Output = Result<AuthenticatedIdentity, Self::Error>> + Send {
+        ) -> impl std::future::Future<Output = Result<AuthenticatedIdentity, Self::Error>> + Send
+        {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
                 CallerId::new(),
