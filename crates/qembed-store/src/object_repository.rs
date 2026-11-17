@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use qembed_domain::ids::ObjectVersionId;
 use qembed_domain::object::{Object, ObjectState};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
