@@ -2,12 +2,13 @@
 
 use std::fmt;
 
-use qembed_domain::ids::{ObjectId, ObjectVersionId};
+use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 
+use crate::event_outbox::{ObjectEvent, append_object_event};
 use crate::{begin_tenant_transaction, execute, fetch_optional};
 
 /// Persists tenant-owned objects and their draft versions.
@@ -125,6 +126,21 @@ impl ObjectRepository {
         if result.rows_affected() != 1 {
             return Err(ObjectRepositoryError::InvalidObjectState);
         }
+
+        append_object_event(
+            &mut transaction,
+            scope,
+            ObjectEvent {
+                event_id: EventId::new(),
+                object_id,
+                event_type: "object.validation_started",
+                state: "validating",
+                previous_version_id: None,
+                version_id: None,
+            },
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
 
         transaction
             .commit()
@@ -285,6 +301,21 @@ impl ObjectRepository {
         if result.rows_affected() != 1 {
             return Err(ObjectRepositoryError::PublishedVersionMismatch);
         }
+
+        append_object_event(
+            &mut transaction,
+            scope,
+            ObjectEvent {
+                event_id: EventId::new(),
+                object_id,
+                event_type: "object.version_published",
+                state: next_state,
+                previous_version_id: expected_current,
+                version_id: Some(version_id),
+            },
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
 
         transaction
             .commit()
