@@ -7,8 +7,8 @@ use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{SnapshotBuilder, SnapshotError};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::ObjectRepository;
-use qembed_store::snapshot_repository::{SnapshotRepository, SnapshotRepositoryError};
 use qembed_store::run_migrations;
+use qembed_store::snapshot_repository::{SnapshotRepository, SnapshotRepositoryError};
 use sqlx::PgPool;
 
 struct Fixture {
@@ -99,20 +99,25 @@ async fn snapshot_insert_read_is_immutable_and_preserves_exact_bytes() {
     .await
     .expect_err("snapshot updates must be rejected");
     assert_eq!(
-        update.as_database_error().and_then(|error| error.code()).as_deref(),
+        update
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
         Some("55000")
     );
 
-    let delete = sqlx::query(
-        "DELETE FROM snapshots WHERE tenant_id = $1::uuid AND snapshot_id = $2::uuid",
-    )
-    .bind(fixture.scope.tenant_id().to_string())
-    .bind(snapshot_id.to_string())
-    .execute(&fixture.pool)
-    .await
-    .expect_err("snapshot deletes must be rejected");
+    let delete =
+        sqlx::query("DELETE FROM snapshots WHERE tenant_id = $1::uuid AND snapshot_id = $2::uuid")
+            .bind(fixture.scope.tenant_id().to_string())
+            .bind(snapshot_id.to_string())
+            .execute(&fixture.pool)
+            .await
+            .expect_err("snapshot deletes must be rejected");
     assert_eq!(
-        delete.as_database_error().and_then(|error| error.code()).as_deref(),
+        delete
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
         Some("55000")
     );
 
@@ -172,7 +177,10 @@ async fn database_rejects_a_mismatched_jsonb_projection() {
     .expect_err("projection guard must reject a mismatch");
 
     assert_eq!(
-        error.as_database_error().and_then(|database| database.code()).as_deref(),
+        error
+            .as_database_error()
+            .and_then(|database| database.code())
+            .as_deref(),
         Some("23514")
     );
 
