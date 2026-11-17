@@ -129,6 +129,7 @@ impl AuthenticationPort for OwnerAuthenticator {
             caller_id,
             PrincipalKind::TenantOwner,
         ))
+    }
 }
 
 #[cfg(test)]
