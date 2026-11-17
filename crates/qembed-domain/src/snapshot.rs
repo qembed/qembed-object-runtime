@@ -110,6 +110,56 @@ impl Snapshot {
     }
 }
 
+
+/// Builds an immutable snapshot from already-canonical JSON bytes.
+///
+/// Canonicalization and RFC 8785 validation belong to the dedicated boundary
+/// introduced in RUST-022. This builder deliberately preserves the supplied
+/// bytes exactly; it never parses, normalizes, or reserializes the JSON.
+#[derive(Debug)]
+pub struct SnapshotBuilder {
+    id: SnapshotId,
+    tenant_id: TenantId,
+    object_id: ObjectId,
+    object_version_id: ObjectVersionId,
+    schema_version: u32,
+    canonical_json: Box<[u8]>,
+}
+
+impl SnapshotBuilder {
+    /// Creates a builder with the identity and exact canonical byte sequence.
+    #[must_use]
+    pub fn new(
+        id: SnapshotId,
+        tenant_id: TenantId,
+        object_id: ObjectId,
+        object_version_id: ObjectVersionId,
+        schema_version: u32,
+        canonical_json: impl Into<Box<[u8]>>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            object_id,
+            object_version_id,
+            schema_version,
+            canonical_json: canonical_json.into(),
+        }
+    }
+
+    /// Builds a snapshot and computes SHA-256 over the exact supplied bytes.
+    pub fn build(self) -> Result<Snapshot, SnapshotError> {
+        Snapshot::new(
+            self.id,
+            self.tenant_id,
+            self.object_id,
+            self.object_version_id,
+            self.schema_version,
+            self.canonical_json,
+        )
+    }
+}
+
 /// Snapshot invariant error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotError {
