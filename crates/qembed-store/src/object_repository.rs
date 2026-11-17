@@ -8,7 +8,7 @@ use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVer
 use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 
-use crate::event_outbox::append_object_event;
+use crate::event_outbox::{ObjectEvent, append_object_event};
 use crate::{begin_tenant_transaction, execute, fetch_optional};
 
 /// Persists tenant-owned objects and their draft versions.
@@ -130,12 +130,14 @@ impl ObjectRepository {
         append_object_event(
             &mut transaction,
             scope,
-            EventId::new(),
-            object_id,
-            "object.validation_started",
-            "validating",
-            None,
-            None,
+            ObjectEvent {
+                event_id: EventId::new(),
+                object_id,
+                event_type: "object.validation_started",
+                state: "validating",
+                previous_version_id: None,
+                version_id: None,
+            },
         )
         .await
         .map_err(ObjectRepositoryError::Database)?;
@@ -303,12 +305,14 @@ impl ObjectRepository {
         append_object_event(
             &mut transaction,
             scope,
-            EventId::new(),
-            object_id,
-            "object.version_published",
-            next_state,
-            expected_current,
-            Some(version_id),
+            ObjectEvent {
+                event_id: EventId::new(),
+                object_id,
+                event_type: "object.version_published",
+                state: next_state,
+                previous_version_id: expected_current,
+                version_id: Some(version_id),
+            },
         )
         .await
         .map_err(ObjectRepositoryError::Database)?;
