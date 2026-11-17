@@ -7,8 +7,8 @@ use crate::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 /// Immutable configuration snapshot used to reproduce an invocation's behavior.
 ///
 /// `canonical_json` is the source of truth. The hash is SHA-256 over its exact
-/// bytes. RFC 8785 canonical-form validation is performed by the snapshot
-/// builder/validation boundary introduced in the persistence work.
+/// bytes. RFC 8785 canonical-form validation is a separate boundary implemented
+/// in RUST-022; this type only preserves bytes and verifies their digest.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Snapshot {
     id: SnapshotId,
