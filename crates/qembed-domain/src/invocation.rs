@@ -203,6 +203,10 @@ impl Invocation {
         &mut self,
         next: FencingToken,
     ) -> Result<(), InvocationError> {
+        if self.status.is_terminal() {
+            return Err(InvocationError::TerminalInvocationCannotBeReclaimed);
+        }
+
         if next <= self.fencing_token {
             return Err(InvocationError::FencingTokenDidNotAdvance);
         }
@@ -225,6 +229,7 @@ pub enum InvocationError {
     },
     StaleFencingToken,
     FencingTokenDidNotAdvance,
+    TerminalInvocationCannotBeReclaimed,
     VersionOverflow,
 }
 
@@ -349,6 +354,19 @@ mod tests {
         invocation
             .transition_to(InvocationStatus::ContextLoading, new_token)
             .expect("new lease holder can transition");
+    }
+
+    #[test]
+    fn terminal_invocation_cannot_be_reclaimed() {
+        let mut invocation = invocation();
+        invocation
+            .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
+            .expect("received can fail");
+
+        assert_eq!(
+            invocation.advance_fencing_token(FencingToken::from_value(1)),
+            Err(InvocationError::TerminalInvocationCannotBeReclaimed)
+        );
     }
 
     #[test]

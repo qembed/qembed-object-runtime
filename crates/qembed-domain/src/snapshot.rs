@@ -135,10 +135,8 @@ mod tests {
         .expect("positive schema version is valid");
 
         assert_eq!(snapshot.canonical_json(), bytes);
-        assert_eq!(
-            snapshot.content_hash(),
-            &<[u8; 32]>::from(Sha256::digest(&bytes))
-        );
+        let expected_hash: [u8; 32] = Sha256::digest(&bytes).into();
+        assert_eq!(snapshot.content_hash(), &expected_hash);
     }
 
     #[test]
