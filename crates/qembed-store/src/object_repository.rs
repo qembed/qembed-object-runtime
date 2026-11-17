@@ -141,4 +141,3 @@ impl From<sqlx::Error> for ObjectRepositoryError {
         Self::Database(error)
     }
 }
-
