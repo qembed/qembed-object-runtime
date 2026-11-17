@@ -149,7 +149,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: compile tests на реализации test doubles; domain crate собирается без adapter dependencies.
   - DoD: domain не зависит от SQLx, Actix или provider SDK.
 
-- [ ] **RUST-014 (M)** Реализовать `AllowedCommand` capability.
+- [x] **RUST-014 (M)** Реализовать `AllowedCommand` capability.
   - Реализация: приватные поля; mint boundary только в `qembed-domain::policy`.
   - Тесты: compile-fail tests на `Clone`, Serialize/Deserialize, Default и внешнее создание; unit tests на валидную mint boundary.
   - DoD: тип `!Clone`, `!Serialize`, `!Deserialize`, `!Default`; произвольный caller не может его сконструировать.
