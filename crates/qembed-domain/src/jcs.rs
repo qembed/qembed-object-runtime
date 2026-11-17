@@ -218,7 +218,9 @@ mod tests {
 
     #[test]
     fn canonicalization_is_idempotent_for_generated_json_values() {
-        let atoms = ["null", "true", "false", "0", "-0", "1.5", "1e+30", "\"a\"", "\"€\""];
+        let atoms = [
+            "null", "true", "false", "0", "-0", "1.5", "1e+30", "\"a\"", "\"€\"",
+        ];
 
         for atom in atoms {
             let canonical = canonicalize_json(atom.as_bytes()).expect("valid JSON atom");
