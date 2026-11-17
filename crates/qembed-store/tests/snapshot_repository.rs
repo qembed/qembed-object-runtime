@@ -4,7 +4,9 @@ use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::object::Object;
 use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
+use qembed_domain::jcs::JcsError;
 use qembed_domain::snapshot::{SnapshotBuilder, SnapshotError};
+use sha2::{Digest, Sha256};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::ObjectRepository;
 use qembed_store::run_migrations;
@@ -120,6 +122,86 @@ async fn snapshot_insert_read_is_immutable_and_preserves_exact_bytes() {
             .as_deref(),
         Some("55000")
     );
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn repository_reads_source_bytes_instead_of_jsonb_projection() {
+    let fixture = setup().await;
+    let repository = SnapshotRepository::new(fixture.pool.clone());
+    let bytes = br#"{\"a\":1,\"z\":0}"#;
+    let snapshot = build_snapshot(&fixture, bytes);
+
+    repository
+        .insert(&fixture.scope, &snapshot)
+        .await
+        .expect("snapshot should be inserted");
+
+    let (stored_bytes, stored_hash, projection): (Vec<u8>, Vec<u8>, String) =
+        sqlx::query_as(
+            "SELECT canonical_json, content_hash, json_projection::text FROM snapshots WHERE tenant_id = $1::uuid AND snapshot_id = $2::uuid",
+        )
+        .bind(fixture.scope.tenant_id().to_string())
+        .bind(snapshot.id().to_string())
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("stored snapshot columns should be readable");
+
+    assert_eq!(stored_bytes, bytes);
+    assert_eq!(
+        stored_hash,
+        Sha256::digest(bytes).as_slice(),
+        "the persisted digest must cover the exact BYTEA source"
+    );
+    assert_ne!(
+        projection.as_bytes(),
+        bytes,
+        "JSONB's textual projection must not be mistaken for the source bytes"
+    );
+
+    let loaded = repository
+        .get(&fixture.scope, snapshot.id())
+        .await
+        .expect("repository read should succeed")
+        .expect("snapshot should exist");
+    assert_eq!(loaded.canonical_json(), bytes);
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn repository_rejects_noncanonical_source_even_when_hash_and_projection_match() {
+    let fixture = setup().await;
+    let repository = SnapshotRepository::new(fixture.pool.clone());
+    let snapshot_id = SnapshotId::new();
+    let bytes = br#"{ "a":1}"#;
+    let content_hash = Sha256::digest(bytes).to_vec();
+
+    // Bypass the repository to simulate a legacy/corrupt row. The database
+    // projection and digest are internally consistent, but the source bytes
+    // are not RFC 8785 canonical and must be rejected by Domain on read.
+    sqlx::query(
+        "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, convert_from($5, 'UTF8')::jsonb)",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(snapshot_id.to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(fixture.version_id.to_string())
+    .bind(bytes.as_slice())
+    .bind(content_hash)
+    .execute(&fixture.pool)
+    .await
+    .expect("database projection guard should accept matching JSON values");
+
+    let error = repository
+        .get(&fixture.scope, snapshot_id)
+        .await
+        .expect_err("noncanonical source bytes must be rejected");
+    assert!(matches!(
+        error,
+        SnapshotRepositoryError::Domain(SnapshotError::Jcs(JcsError::NonCanonicalJson))
+    ));
 
     fixture.pool.close().await;
 }
