@@ -18,7 +18,7 @@ No runtime behavior or dependencies have been implemented yet.
 
 ```bash
 cargo check --workspace
-cargo test --workspace
+bash scripts/test-postgres.sh
 ```
 
 ## PostgreSQL integration tests
