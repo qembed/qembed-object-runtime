@@ -45,6 +45,7 @@ pub enum JcsError {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(untagged)]
 enum StrictValue {
     Null,
     Bool(bool),
