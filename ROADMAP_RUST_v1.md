@@ -206,8 +206,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL round-trip сравнивает исходные байты, SHA-256 и отличающуюся текстовую JSONB-проекцию; projection mismatch отвергается DB guard; hash mismatch отвергается Domain при чтении; корректные hash/projection не позволяют принять неканоничные source bytes.
   - DoD: store не подменяет canonical bytes JSONB projection.
 
-- [ ] **RUST-024 (M)** Реализовать append-only event write и transactional outbox insert.  - Тесты: DB integration — event+outbox+state commit; forced rollback; duplicate delivery identity.
-  - DoD: critical event и outbox создаются в той же транзакции, что и state transition.
+- [x] **RUST-024 (M)** Реализовать append-only event write и transactional outbox insert.
+  - Реализация: ObjectRepository записывает события начала validation и публикации версии вместе с outbox message в той же tenant-транзакции, что и state transition; delivery identity привязана к EventId; события защищены DB trigger от UPDATE/DELETE.
+  - Тесты: PostgreSQL integration — state+event+outbox commit; forced failure откатывает state/event/outbox; duplicate delivery identity отклоняется unique constraint.
+  - DoD: critical event и outbox создаются атомарно с state transition; повторная delivery identity не создаёт вторую outbox запись.
 
 - [ ] **RUST-025 (S)** Реализовать typed event DTO и payload allowlist.
   - Тесты: serialization tests; негативные tests на запрещённые поля/секреты/raw payload.
