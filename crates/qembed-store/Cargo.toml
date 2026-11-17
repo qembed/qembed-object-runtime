@@ -8,9 +8,6 @@ lints.workspace = true
 
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
+sqlx.workspace = true
+tokio.workspace = true
 
-[dev-dependencies]
-postgres = "=0.19.9"
-# Keep the protocol stack on versions compatible with the workspace MSRV (Rust 1.85).
-postgres-protocol = "=0.6.7"
-postgres-types = "=0.2.8"
