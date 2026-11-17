@@ -2,12 +2,13 @@
 
 use std::fmt;
 
+use qembed_domain::ids::{ObjectId, ObjectVersionId};
 use qembed_domain::object::{Object, ObjectState};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 
-use crate::{begin_tenant_transaction, execute};
+use crate::{begin_tenant_transaction, execute, fetch_optional};
 
 /// Persists tenant-owned objects and their draft versions.
 #[derive(Clone, Debug)]
@@ -96,6 +97,162 @@ impl ObjectRepository {
             .await
             .map_err(ObjectRepositoryError::Database)
     }
+    /// Moves a Draft object into Validating before external validation begins.
+    ///
+    /// The state change is guarded by the current persisted state so concurrent
+    /// callers cannot start validation twice or revive an object.
+    pub async fn begin_validation(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+    ) -> Result<(), ObjectRepositoryError> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE objects SET state = 'validating' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND state = 'draft' AND published_version_id IS NULL",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
+
+        if result.rows_affected() != 1 {
+            return Err(ObjectRepositoryError::InvalidObjectState);
+        }
+
+        transaction
+            .commit()
+            .await
+            .map_err(ObjectRepositoryError::Database)
+    }
+
+    /// Atomically publishes a Draft version and updates its object's pointer.
+    ///
+    /// The expected current version is None for first publication and the
+    /// currently published version ID when replacing it. The object row is
+    /// locked first, serializing concurrent publications for the same object.
+    /// Replacements supersede the previous version, publish the new one, and
+    /// move the pointer in the same transaction.
+    pub async fn publish_version(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+        expected_current: Option<ObjectVersionId>,
+    ) -> Result<(), ObjectRepositoryError> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        let object = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?
+        .ok_or(ObjectRepositoryError::ObjectNotFound)?;
+
+        let (state, current_id) = object;
+        let expected_id = expected_current.map(|id| id.to_string());
+        if current_id != expected_id {
+            return Err(ObjectRepositoryError::PublishedVersionMismatch);
+        }
+
+        match (state.as_str(), expected_current) {
+            ("validating", None) => {}
+            ("active" | "suspended", Some(_)) => {}
+            _ => return Err(ObjectRepositoryError::InvalidObjectState),
+        }
+
+        let version_status = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT status FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
+            .bind(version_id.to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?
+        .ok_or(ObjectRepositoryError::VersionNotFound)?;
+
+        if version_status.0 != "draft" {
+            return Err(ObjectRepositoryError::VersionMustBeDraft);
+        }
+
+        if let Some(previous_id) = expected_current {
+            let result = execute(
+                &mut transaction,
+                sqlx::query(
+                    "UPDATE object_versions SET status = 'superseded' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid AND status = 'published'",
+                )
+                .bind(scope.tenant_id().to_string())
+                .bind(object_id.to_string())
+                .bind(previous_id.to_string()),
+            )
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+            if result.rows_affected() != 1 {
+                return Err(ObjectRepositoryError::CurrentVersionNotPublished);
+            }
+        }
+
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_versions SET status = 'published' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid AND status = 'draft'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
+            .bind(version_id.to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
+
+        if result.rows_affected() != 1 {
+            return Err(ObjectRepositoryError::VersionMustBeDraft);
+        }
+
+        let next_state = if expected_current.is_none() {
+            "active"
+        } else {
+            state.as_str()
+        };
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE objects SET state = $4, published_version_id = $3::uuid WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND published_version_id IS NOT DISTINCT FROM $5::uuid",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
+            .bind(version_id.to_string())
+            .bind(next_state)
+            .bind(expected_id),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
+
+        if result.rows_affected() != 1 {
+            return Err(ObjectRepositoryError::PublishedVersionMismatch);
+        }
+
+        transaction
+            .commit()
+            .await
+            .map_err(ObjectRepositoryError::Database)
+    }
+
 }
 
 /// Validation or persistence failure while creating an Object or Draft version.
@@ -109,6 +266,16 @@ pub enum ObjectRepositoryError {
     VersionMustBeDraft,
     /// The domain's unsigned version number does not fit PostgreSQL BIGINT.
     VersionNumberOutOfRange,
+    /// The requested object does not exist in this tenant.
+    ObjectNotFound,
+    /// The requested version does not belong to this object and tenant.
+    VersionNotFound,
+    /// The persisted object state does not permit this operation.
+    InvalidObjectState,
+    /// The current published pointer differs from the expected value.
+    PublishedVersionMismatch,
+    /// The version expected to be current is not currently Published.
+    CurrentVersionNotPublished,
     /// PostgreSQL rejected the operation or could not complete it.
     Database(sqlx::Error),
 }
@@ -122,6 +289,11 @@ impl fmt::Display for ObjectRepositoryError {
             Self::VersionNumberOutOfRange => {
                 formatter.write_str("object version number exceeds PostgreSQL BIGINT")
             }
+            Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
+            Self::VersionNotFound => formatter.write_str("version does not belong to this object and tenant"),
+            Self::InvalidObjectState => formatter.write_str("object state does not permit this operation"),
+            Self::PublishedVersionMismatch => formatter.write_str("published version does not match expected value"),
+            Self::CurrentVersionNotPublished => formatter.write_str("current object version is not Published"),
             Self::Database(error) => write!(formatter, "object repository database error: {error}"),
         }
     }
