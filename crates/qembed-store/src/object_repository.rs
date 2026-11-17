@@ -3,8 +3,8 @@
 use std::fmt;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId};
-use qembed_domain::object::{Object, ObjectState};
-use qembed_domain::object_version::{ObjectVersion, ObjectVersionStatus};
+use qembed_domain::object::{Object, ObjectError, ObjectState};
+use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 
@@ -173,10 +173,10 @@ impl ObjectRepository {
             _ => return Err(ObjectRepositoryError::InvalidObjectState),
         }
 
-        let version_status = fetch_optional(
+        let version_row = fetch_optional(
             &mut transaction,
-            sqlx::query_as::<_, (String,)>(
-                "SELECT status FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid FOR UPDATE",
+            sqlx::query_as::<_, (String, i64)>(
+                "SELECT status, version_number FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid FOR UPDATE",
             )
             .bind(scope.tenant_id().to_string())
             .bind(object_id.to_string())
@@ -186,11 +186,51 @@ impl ObjectRepository {
         .map_err(ObjectRepositoryError::Database)?
         .ok_or(ObjectRepositoryError::VersionNotFound)?;
 
-        if version_status.0 != "draft" {
-            return Err(ObjectRepositoryError::VersionMustBeDraft);
-        }
+        let version_status = parse_version_status(&version_row.0)?;
+        let version_number = u64::try_from(version_row.1)
+            .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?;
+        let mut next_version = ObjectVersion::from_persisted(
+            version_id,
+            scope.tenant_id(),
+            object_id,
+            version_number,
+            version_status,
+        )?;
+        next_version.publish()?;
+
+        let mut object = Object::from_persisted(
+            object_id,
+            scope.tenant_id(),
+            parse_object_state(&state)?,
+            expected_current,
+        )?;
 
         if let Some(previous_id) = expected_current {
+            let previous_row = fetch_optional(
+                &mut transaction,
+                sqlx::query_as::<_, (String, i64)>(
+                    "SELECT status, version_number FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid FOR UPDATE",
+                )
+                .bind(scope.tenant_id().to_string())
+                .bind(object_id.to_string())
+                .bind(previous_id.to_string()),
+            )
+            .await
+            .map_err(ObjectRepositoryError::Database)?
+            .ok_or(ObjectRepositoryError::VersionNotFound)?;
+            let previous_status = parse_version_status(&previous_row.0)?;
+            let previous_number = u64::try_from(previous_row.1)
+                .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?;
+            let mut previous_version = ObjectVersion::from_persisted(
+                previous_id,
+                scope.tenant_id(),
+                object_id,
+                previous_number,
+                previous_status,
+            )?;
+            previous_version.supersede()?;
+            object.replace_published_version(previous_id, &next_version)?;
+
             let result = execute(
                 &mut transaction,
                 sqlx::query(
@@ -206,6 +246,8 @@ impl ObjectRepository {
             if result.rows_affected() != 1 {
                 return Err(ObjectRepositoryError::CurrentVersionNotPublished);
             }
+        } else {
+            object.activate(&next_version)?;
         }
 
         let result = execute(
@@ -224,11 +266,7 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::VersionMustBeDraft);
         }
 
-        let next_state = if expected_current.is_none() {
-            "active"
-        } else {
-            state.as_str()
-        };
+        let next_state = object_state_as_str(object.state());
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -268,6 +306,10 @@ pub enum ObjectRepositoryError {
     VersionNumberOutOfRange,
     /// The requested object does not exist in this tenant.
     ObjectNotFound,
+    /// A persisted object lifecycle state is unknown or violates domain invariants.
+    DomainObject(ObjectError),
+    /// A persisted version lifecycle state is unknown or violates domain invariants.
+    DomainVersion(ObjectVersionError),
     /// The requested version does not belong to this object and tenant.
     VersionNotFound,
     /// The persisted object state does not permit this operation.
@@ -290,6 +332,8 @@ impl fmt::Display for ObjectRepositoryError {
                 formatter.write_str("object version number exceeds PostgreSQL BIGINT")
             }
             Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
+            Self::DomainObject(error) => write!(formatter, "object lifecycle error: {error:?}"),
+            Self::DomainVersion(error) => write!(formatter, "object version lifecycle error: {error:?}"),
             Self::VersionNotFound => formatter.write_str("version does not belong to this object and tenant"),
             Self::InvalidObjectState => formatter.write_str("object state does not permit this operation"),
             Self::PublishedVersionMismatch => formatter.write_str("published version does not match expected value"),
@@ -308,8 +352,50 @@ impl std::error::Error for ObjectRepositoryError {
     }
 }
 
+impl From<ObjectError> for ObjectRepositoryError {
+    fn from(error: ObjectError) -> Self {
+        Self::DomainObject(error)
+    }
+}
+
+impl From<ObjectVersionError> for ObjectRepositoryError {
+    fn from(error: ObjectVersionError) -> Self {
+        Self::DomainVersion(error)
+    }
+}
+
 impl From<sqlx::Error> for ObjectRepositoryError {
     fn from(error: sqlx::Error) -> Self {
         Self::Database(error)
+    }
+}
+
+fn parse_object_state(value: &str) -> Result<ObjectState, ObjectRepositoryError> {
+    match value {
+        "draft" => Ok(ObjectState::Draft),
+        "validating" => Ok(ObjectState::Validating),
+        "active" => Ok(ObjectState::Active),
+        "suspended" => Ok(ObjectState::Suspended),
+        "archived" => Ok(ObjectState::Archived),
+        _ => Err(ObjectRepositoryError::InvalidObjectState),
+    }
+}
+
+fn parse_version_status(value: &str) -> Result<ObjectVersionStatus, ObjectRepositoryError> {
+    match value {
+        "draft" => Ok(ObjectVersionStatus::Draft),
+        "published" => Ok(ObjectVersionStatus::Published),
+        "superseded" => Ok(ObjectVersionStatus::Superseded),
+        _ => Err(ObjectRepositoryError::VersionMustBeDraft),
+    }
+}
+
+const fn object_state_as_str(state: ObjectState) -> &'static str {
+    match state {
+        ObjectState::Draft => "draft",
+        ObjectState::Validating => "validating",
+        ObjectState::Active => "active",
+        ObjectState::Suspended => "suspended",
+        ObjectState::Archived => "archived",
     }
 }
