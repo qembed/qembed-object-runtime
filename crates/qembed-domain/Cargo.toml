@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 lints.workspace = true
 
+[features]
+# Exposes trusted-identity constructors only for adapter integration tests.
+# Never enable this feature in production builds.
+test-support = []
+
 [dependencies]
 serde.workspace = true
 sha2.workspace = true

@@ -165,8 +165,9 @@ SQLX_OFFLINE=true cargo check --workspace
 
 **Результат:** реальные repository operations с tenant isolation и атомарными записями.
 
-- [ ] **RUST-016 (M)** Реализовать SQLx transaction wrapper, принимающий `&Scope`.
-  - Тесты: DB integration — tenant setting присутствует внутри транзакции; отсутствующий scope отклоняется; после commit/rollback setting не протекает в следующее соединение.
+- [x] **RUST-016 (M)** Реализовать SQLx transaction wrapper, принимающий `&Scope`.
+  - Реализация: `begin_tenant_transaction` создаёт SQLx transaction и устанавливает `app.tenant_id` через parameterized `set_config(..., true)`; wrapper предоставляет connection и consuming commit/rollback.
+  - Тесты: PostgreSQL integration проверяет tenant setting внутри транзакции и его отсутствие после commit и rollback на одном pooled connection; compile-fail doctest доказывает, что начать транзакцию без `&Scope` нельзя.
   - DoD: tenant context устанавливается через transaction-local setting в каждой tenant-транзакции.
 
 - [ ] **RUST-017 (M)** Реализовать repository conventions и typed query helpers.

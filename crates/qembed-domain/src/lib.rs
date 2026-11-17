@@ -115,3 +115,26 @@ pub mod ports;
 pub mod principal;
 pub mod scope;
 pub mod snapshot;
+
+/// Test-only constructors for integration tests in adapter crates.
+///
+/// This module is available only when the `test-support` Cargo feature is
+/// enabled. Production builds must not enable that feature.
+#[cfg(feature = "test-support")]
+pub mod test_support {
+    use crate::ids::{CallerId, TenantId};
+    use crate::principal::{Principal, PrincipalKind};
+    use crate::scope::Scope;
+
+    /// Creates a scope for a test using the same trusted constructors as the
+    /// authentication boundary.
+    #[must_use]
+    pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
+        let principal =
+            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
+                .expect("a generated caller ID must be valid");
+
+        Scope::from_verified_auth(tenant_id, principal)
+            .expect("a generated tenant ID must be valid")
+    }
+}
