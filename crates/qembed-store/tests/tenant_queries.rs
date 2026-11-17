@@ -7,11 +7,7 @@ use qembed_store::{
 };
 use sqlx::PgPool;
 
-async fn create_rls_fixture(
-    transaction: &mut TenantTransaction,
-    tenant_a: &str,
-    tenant_b: &str,
-) {
+async fn create_rls_fixture(transaction: &mut TenantTransaction, tenant_a: &str, tenant_b: &str) {
     sqlx::query(
         "DO $role$ BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'qembed_tenant_rls_test') THEN
@@ -70,10 +66,7 @@ async fn create_rls_fixture(
         .expect("the test role should be allowed to read the fixture");
 }
 
-async fn tenant_transaction(
-    pool: &PgPool,
-    tenant_id: TenantId,
-) -> TenantTransaction {
+async fn tenant_transaction(pool: &PgPool, tenant_id: TenantId) -> TenantTransaction {
     let scope = scope_for_tenant(tenant_id);
     begin_tenant_transaction(pool, &scope)
         .await
@@ -109,17 +102,15 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
         .expect("tenant A should use the non-bypass RLS role");
     let rows_a: Vec<(String, String)> = fetch_all(
         &mut transaction_a,
-        sqlx::query_as(
-            "SELECT tenant_id, payload FROM tenant_query_probe ORDER BY tenant_id",
-        ),
+        sqlx::query_as("SELECT tenant_id, payload FROM tenant_query_probe ORDER BY tenant_id"),
     )
     .await
     .expect("typed query should return tenant A rows");
-    assert_eq!(
-        rows_a,
-        vec![(tenant_a_text.clone(), "tenant-a".to_owned())]
-    );
-    transaction_a.commit().await.expect("tenant A should commit");
+    assert_eq!(rows_a, vec![(tenant_a_text.clone(), "tenant-a".to_owned())]);
+    transaction_a
+        .commit()
+        .await
+        .expect("tenant A should commit");
 
     let mut transaction_b = tenant_transaction(&pool, tenant_b).await;
     sqlx::query("SET LOCAL ROLE qembed_tenant_rls_test")
@@ -128,9 +119,7 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
         .expect("tenant B should use the non-bypass RLS role");
     let rows_b: Vec<(String, String)> = fetch_all(
         &mut transaction_b,
-        sqlx::query_as(
-            "SELECT tenant_id, payload FROM tenant_query_probe ORDER BY tenant_id",
-        ),
+        sqlx::query_as("SELECT tenant_id, payload FROM tenant_query_probe ORDER BY tenant_id"),
     )
     .await
     .expect("typed query should return tenant B rows");
@@ -139,7 +128,10 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
         vec![(tenant_b_text, "tenant-b".to_owned())],
         "tenant B must see only its own row"
     );
-    transaction_b.commit().await.expect("tenant B should commit");
+    transaction_b
+        .commit()
+        .await
+        .expect("tenant B should commit");
 
     let mut unscoped = pool
         .begin()
@@ -149,12 +141,13 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
         .execute(&mut *unscoped)
         .await
         .expect("the negative test should use the non-bypass RLS role");
-    let unscoped_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT tenant_id, payload FROM tenant_query_probe ORDER BY tenant_id",
-    )
-    .fetch_all(&mut *unscoped)
-    .await
-    .expect("RLS should return an empty result rather than an error without tenant context");
+    let unscoped_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT tenant_id, payload FROM tenant_query_probe ORDER BY tenant_id")
+            .fetch_all(&mut *unscoped)
+            .await
+            .expect(
+                "RLS should return an empty result rather than an error without tenant context",
+            );
     assert!(
         unscoped_rows.is_empty(),
         "an operation without tenant context must not see tenant-owned rows"
