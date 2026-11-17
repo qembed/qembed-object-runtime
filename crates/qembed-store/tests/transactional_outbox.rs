@@ -11,7 +11,9 @@ use sqlx::PgPool;
 
 async fn setup() -> (PgPool, ObjectRepository, Scope, ObjectId) {
     let pool = common::connect().await;
-    run_migrations(&pool).await.expect("migrations should apply");
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
     let repository = ObjectRepository::new(pool.clone());
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
@@ -74,7 +76,10 @@ async fn state_event_and_outbox_commit_together() {
     assert_eq!(
         events,
         vec![
-            ("object.validation_started".to_owned(), "validating".to_owned()),
+            (
+                "object.validation_started".to_owned(),
+                "validating".to_owned()
+            ),
             ("object.version_published".to_owned(), "active".to_owned())
         ]
     );
@@ -163,7 +168,10 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
     .fetch_one(&pool)
     .await
     .expect("state should remain queryable");
-    assert_eq!(persisted, ("validating".to_owned(), None, "draft".to_owned()));
+    assert_eq!(
+        persisted,
+        ("validating".to_owned(), None, "draft".to_owned())
+    );
 
     sqlx::query(&format!("DROP TRIGGER {trigger_name} ON outbox_messages"))
         .execute(&pool)
@@ -203,14 +211,13 @@ async fn persisted_events_reject_update_and_delete() {
     .expect_err("append-only event must reject UPDATE");
     assert!(matches!(update, sqlx::Error::Database(_)));
 
-    let delete = sqlx::query(
-        "DELETE FROM events WHERE tenant_id = $1::uuid AND event_id = $2::uuid",
-    )
-    .bind(scope.tenant_id().to_string())
-    .bind(event_id)
-    .execute(&pool)
-    .await
-    .expect_err("append-only event must reject DELETE");
+    let delete =
+        sqlx::query("DELETE FROM events WHERE tenant_id = $1::uuid AND event_id = $2::uuid")
+            .bind(scope.tenant_id().to_string())
+            .bind(event_id)
+            .execute(&pool)
+            .await
+            .expect_err("append-only event must reject DELETE");
     assert!(matches!(delete, sqlx::Error::Database(_)));
 
     pool.close().await;
@@ -254,7 +261,10 @@ async fn duplicate_delivery_identity_is_rejected() {
     .await
     .expect_err("duplicate delivery identity must violate unique constraint");
     assert!(matches!(duplicate, sqlx::Error::Database(_)));
-    transaction.rollback().await.expect("failed attempt should roll back");
+    transaction
+        .rollback()
+        .await
+        .expect("failed attempt should roll back");
 
     let event_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM events WHERE tenant_id = $1::uuid AND event_id = $2::uuid",
