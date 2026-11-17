@@ -6,11 +6,11 @@ use qembed_domain::object::Object;
 use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{SnapshotBuilder, SnapshotError};
-use sha2::{Digest, Sha256};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::ObjectRepository;
 use qembed_store::run_migrations;
 use qembed_store::snapshot_repository::{SnapshotRepository, SnapshotRepositoryError};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
 struct Fixture {
