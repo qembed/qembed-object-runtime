@@ -3,9 +3,9 @@
 use std::path::Path;
 use std::time::Duration;
 
+use sqlx::PgPool;
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
 
 /// Connection-pool settings shared by application and migration entry points.
 #[derive(Clone, Debug)]
