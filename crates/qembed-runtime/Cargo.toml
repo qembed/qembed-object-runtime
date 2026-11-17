@@ -7,6 +7,7 @@ license.workspace = true
 lints.workspace = true
 
 [dependencies]
+qembed-domain = { path = "../qembed-domain" }
 
 [[bin]]
 name = "qembed-eval"
