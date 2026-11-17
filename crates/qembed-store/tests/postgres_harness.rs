@@ -7,12 +7,11 @@ async fn postgres_harness_runs_migrations_and_connects_to_supported_server() {
     let pool = common::connect().await;
 
     // Pool creation must not mutate the database schema as a side effect.
-    let migration_table_before_connecting: bool = sqlx::query_scalar(
-        "SELECT to_regclass('public._sqlx_migrations') IS NOT NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("the initial database state should be queryable");
+    let migration_table_before_connecting: bool =
+        sqlx::query_scalar("SELECT to_regclass('public._sqlx_migrations') IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("the initial database state should be queryable");
     assert!(!migration_table_before_connecting);
 
     // The test runner creates a fresh database. Applying migrations here proves
@@ -40,12 +39,11 @@ async fn postgres_harness_runs_migrations_and_connects_to_supported_server() {
         "expected PostgreSQL 16.x, got server_version_num={version}"
     );
 
-    let migration_table_exists: bool = sqlx::query_scalar(
-        "SELECT to_regclass('public._sqlx_migrations') IS NOT NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("the SQLx migration history table should be queryable");
+    let migration_table_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('public._sqlx_migrations') IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .expect("the SQLx migration history table should be queryable");
     assert!(migration_table_exists);
 
     pool.close().await;
