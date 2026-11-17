@@ -135,7 +135,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: parse/format/serde round-trip; некорректные значения; compile-time проверки несовместимости разных ID.
   - DoD: нельзя случайно передать ID одного типа вместо другого.
 
-- [ ] **RUST-011 (S)** Реализовать `Scope` и `Principal`.
+- [x] **RUST-011 (S)** Реализовать `Scope` и `Principal`.
   - Тесты: unit tests на создание scope из доверенного auth context; отрицательные тесты на пустой/некорректный scope.
   - DoD: HTTP DTO не может самостоятельно создать доверенный `Scope`.
 
