@@ -256,6 +256,23 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_rejects_noncanonical_json_before_construction() {
+        let result = Snapshot::new(
+            SnapshotId::new(),
+            TenantId::new(),
+            ObjectId::new(),
+            ObjectVersionId::new(),
+            1,
+            br#"{ "a":1}"#.to_vec(),
+        );
+
+        assert_eq!(
+            result,
+            Err(SnapshotError::Jcs(JcsError::NonCanonicalJson))
+        );
+    }
+
+    #[test]
     fn snapshot_exposes_bytes_only_as_immutable_slice() {
         let snapshot = Snapshot::new(
             SnapshotId::new(),
