@@ -7,3 +7,8 @@ license.workspace = true
 lints.workspace = true
 
 [dependencies]
+qembed-domain = { path = "../qembed-domain" }
+qembed-runtime = { path = "../qembed-runtime" }
+qembed-store = { path = "../qembed-store" }
+qembed-llm = { path = "../qembed-llm" }
+qembed-tools = { path = "../qembed-tools" }
