@@ -2,12 +2,14 @@ mod common;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId, TenantId};
 use qembed_domain::object::Object;
+use qembed_domain::object_version::ObjectVersion;
+use qembed_domain::scope::Scope;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::{ObjectRepository, ObjectRepositoryError};
 use qembed_store::run_migrations;
 use sqlx::PgPool;
 
-async fn setup() -> (PgPool, ObjectRepository, qembed_domain::scope::Scope, ObjectId) {
+async fn setup() -> (PgPool, ObjectRepository, Scope, ObjectId) {
     let pool = common::connect().await;
     run_migrations(&pool)
         .await
@@ -33,19 +35,14 @@ async fn setup() -> (PgPool, ObjectRepository, qembed_domain::scope::Scope, Obje
 
 async fn create_draft_version(
     repository: &ObjectRepository,
-    scope: &qembed_domain::scope::Scope,
+    scope: &Scope,
     object_id: ObjectId,
     tenant_id: TenantId,
     number: u64,
 ) -> ObjectVersionId {
     let version_id = ObjectVersionId::new();
-    let version = qembed_domain::object_version::ObjectVersion::new(
-        version_id,
-        tenant_id,
-        object_id,
-        number,
-    )
-    .expect("version number must be positive");
+    let version = ObjectVersion::new(version_id, tenant_id, object_id, number)
+        .expect("version number must be positive");
     repository
         .create_draft_version(scope, &version)
         .await
@@ -99,7 +96,10 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
     .fetch_one(&pool)
     .await
     .expect("object should remain active");
-    assert_eq!(final_object, ("active".to_owned(), Some(second.to_string())));
+    assert_eq!(
+        final_object,
+        ("active".to_owned(), Some(second.to_string()))
+    );
 
     let statuses: Vec<(String,)> = sqlx::query_as(
         "SELECT status FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid ORDER BY version_number",
@@ -109,7 +109,10 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
     .fetch_all(&pool)
     .await
     .expect("both versions should exist");
-    assert_eq!(statuses, vec![("superseded".to_owned(),), ("published".to_owned(),)]);
+    assert_eq!(
+        statuses,
+        vec![("superseded".to_owned(),), ("published".to_owned(),)]
+    );
 
     let stale = repository
         .publish_version(&scope, object_id, first, Some(first))
