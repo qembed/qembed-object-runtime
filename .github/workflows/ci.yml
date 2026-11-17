@@ -23,6 +23,9 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Install SQLx CLI
+        run: cargo install sqlx-cli --version 0.8.6 --no-default-features --features rustls,postgres --locked
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -37,6 +40,19 @@ jobs:
 
       - name: Check crate dependency boundaries
         run: python3 scripts/check_architecture.py
+
+      - name: Start PostgreSQL for SQLx metadata validation
+        run: docker compose --project-name qembed-rust-test --file compose.test.yaml up --detach --wait
+
+      - name: Check SQLx offline metadata
+        env:
+          DATABASE_URL: postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test
+        run: cargo sqlx prepare --check --workspace
+
+      - name: Check workspace in SQLx offline mode
+        env:
+          SQLX_OFFLINE: "true"
+        run: cargo check --workspace --all-targets
 
       - name: Run workspace tests with PostgreSQL
         run: bash scripts/test-postgres.sh
