@@ -8,7 +8,10 @@ CREATE TABLE events (
     payload JSONB NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, event_id),
-    UNIQUE (event_id)
+    UNIQUE (event_id),
+    FOREIGN KEY (tenant_id, aggregate_id)
+        REFERENCES objects (tenant_id, object_id)
+        ON DELETE RESTRICT
 );
 
 CREATE INDEX events_aggregate_order_idx
