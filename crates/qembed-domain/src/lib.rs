@@ -1,1 +1,3 @@
-// Intentionally empty; implement according to ROADMAP_RUST_v1.md.
+//! Domain types and contracts shared across the Qembed workspace.
+
+pub mod ids;
