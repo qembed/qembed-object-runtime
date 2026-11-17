@@ -16,8 +16,8 @@ rust-version = "1.85"
 license = "UNLICENSED"
 
 [workspace.dependencies]
-# Add third-party dependencies here with explicit versions.
-# Crates should consume them with `dependency.workspace = true`.
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate"] }
+tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
