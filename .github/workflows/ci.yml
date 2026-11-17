@@ -26,8 +26,11 @@ jobs:
       - name: Report duplicate dependencies
         run: cargo tree -d
 
-      - name: Check workspace
-        run: cargo check --workspace
+      - name: Check crate dependency boundaries
+        run: python3 scripts/check_architecture.py
+
+      - name: Check workspace targets
+        run: cargo check --workspace --all-targets
 
       - name: Run workspace tests
         run: cargo test --workspace
