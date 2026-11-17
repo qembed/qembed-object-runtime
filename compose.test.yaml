@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: qembed_test
+      POSTGRES_USER: qembed_test
+      POSTGRES_PASSWORD: qembed_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qembed_test -d qembed_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
