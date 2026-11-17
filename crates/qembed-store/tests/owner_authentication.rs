@@ -42,7 +42,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     // Valid credentials resolve the persisted caller and tenant into a trusted Scope.
     let tenant_a = TenantId::new();
     let caller_a = CallerId::new();
-    let token_a = format!("owner-token-{tenant_a}");
+    let token_a = format!("owner-token-{}", CallerId::new());
     seed_owner(&pool, tenant_a, caller_a, &token_a).await;
 
     let authenticator = OwnerAuthenticator::new(pool.clone());
@@ -84,7 +84,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     // A disabled principal cannot authenticate even with its correct token.
     let disabled_tenant = TenantId::new();
     let disabled_caller = CallerId::new();
-    let disabled_token = format!("disabled-token-{disabled_tenant}");
+    let disabled_token = format!("disabled-token-{}", CallerId::new());
     seed_owner(&pool, disabled_tenant, disabled_caller, &disabled_token).await;
     sqlx::query(
         "UPDATE owner_principals SET disabled_at = now() WHERE tenant_id = $1::uuid AND caller_id = $2::uuid",
