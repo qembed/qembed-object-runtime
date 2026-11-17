@@ -190,9 +190,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: DB integration — первая публикация, замена версии, stale pointer rejection, injected failure на финальном pointer update с проверкой rollback всех изменений, две конкурентные первые публикации с ровно одним победителем.
   - DoD: публикация и обновление object pointer/state атомарны; repository принимает к публикации только Draft version, а ранее опубликованная версия переводится в Superseded без редактирования её содержимого.
 
-- [ ] **RUST-021 (M)** Реализовать Snapshot builder и repository.
-  - Тесты: unit — deterministic snapshot; DB integration — immutable insert/read, hash mismatch, projection mismatch.
-  - DoD: `canonical_json BYTEA` — source of truth; hash вычисляется по точным bytes.
+- [x] **RUST-021 (M)** Реализовать Snapshot builder и repository.
+  - Реализация: `SnapshotBuilder` сохраняет переданные canonical bytes без parse/normalize/re-serialize; `SnapshotRepository` tenant-scoped insert/read, SHA-256 проверяется повторно при reconstitution через `Snapshot::from_persisted`.
+  - DB: `snapshots.canonical_json BYTEA` — source of truth; `content_hash BYTEA` хранит SHA-256 точных bytes; `json_projection JSONB` строится из bytes и сверяется trigger guard; UPDATE/DELETE snapshots запрещены.
+  - Тесты: deterministic builder; PostgreSQL immutable insert/read и exact-byte round-trip; hash mismatch обнаруживается при read; projection mismatch отклоняется DB guard; UPDATE/DELETE отклоняются.
+  - DoD: canonical bytes не подменяются JSONB projection; repository возвращает Snapshot только после проверки hash.
 
 - [ ] **RUST-022 (M)** Реализовать JCS canonicalization/validation boundary.
   - Тесты: RFC 8785 test vectors; duplicate keys; NaN/Infinity; invalid UTF-8; noncanonical bytes; property/fuzz tests.
