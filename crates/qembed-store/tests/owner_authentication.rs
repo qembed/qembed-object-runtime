@@ -107,7 +107,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     let tenant_b = TenantId::new();
     let mismatch = authenticate_owner(&authenticator, OwnerCredentials::new(tenant_b, token_a))
         .await
-    .expect_err("tenant A token must not authenticate as tenant B");
+        .expect_err("tenant A token must not authenticate as tenant B");
     assert!(matches!(
         mismatch,
         DomainAuthError::Rejected(OwnerAuthenticationError::InvalidCredentials)
