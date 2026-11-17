@@ -110,7 +110,6 @@ impl Snapshot {
     }
 }
 
-
 /// Builds an immutable snapshot from already-canonical JSON bytes.
 ///
 /// Canonicalization and RFC 8785 validation belong to the dedicated boundary
@@ -218,7 +217,6 @@ mod tests {
             Err(SnapshotError::InvalidSchemaVersion)
         );
     }
-
 
     #[test]
     fn snapshot_builder_is_deterministic_for_identical_inputs() {
