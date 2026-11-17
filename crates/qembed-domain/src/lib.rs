@@ -40,12 +40,10 @@
 //! External callers cannot construct a `Scope` from fields:
 //!
 //! ```compile_fail
-//! use qembed_domain::ids::{CallerId, TenantId};
-//! use qembed_domain::principal::{Principal, PrincipalKind};
+//! use qembed_domain::ids::TenantId;
 //! use qembed_domain::scope::Scope;
 //!
-//! let principal = Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated).unwrap();
-//! let _ = Scope { tenant_id: TenantId::new(), principal };
+//! let _ = Scope { tenant_id: TenantId::new(), principal: todo!() };
 //! ```
 //!
 //! External callers cannot invoke the trusted-scope constructor:
