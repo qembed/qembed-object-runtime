@@ -180,9 +180,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration — валидная аутентификация, неверные credentials, disabled principal, tenant mismatch и persistence только digest; unit — redacted credentials Debug, Owner scope и отказ non-Owner.
   - DoD: runtime получает Principal только после успешной проверки auth boundary; неизвестные, отключённые, отозванные и tenant-mismatched credentials дают одинаковый отказ.
 
-- [ ] **RUST-019 (M)** Реализовать Object repository: create object и create draft version.
-  - Тесты: DB integration — happy path, duplicate IDs/constraints, cross-tenant access, rollback.
-  - DoD: создание объекта и draft version выполняется в tenant scope.
+- [x] **RUST-019 (M)** Реализовать Object repository: create object и create draft version.
+  - Реализация: `ObjectRepository` принимает только trusted `Scope`, сохраняет Draft Object и Draft ObjectVersion через `TenantTransaction`; PostgreSQL schema использует tenant/object composite FK, глобальную уникальность IDs, уникальный version number в пределах объекта и FK опубликованного version pointer.
+  - Тесты: DB integration — создание объекта и draft version, duplicate object/version IDs and version number, tenant mismatch, cross-tenant object reference через composite FK, failed insert rollback; unit/domain boundary — repository отвергает не-Draft сущности.
+  - DoD: создание объекта и draft version выполняется в tenant scope; PostgreSQL не допускает dangling или cross-tenant version references.
 
 - [ ] **RUST-020 (M)** Реализовать publish operation.
   - Тесты: DB integration — публикация первой версии, замена опубликованной версии, rollback при ошибке, конкурентная публикация.
