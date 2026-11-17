@@ -2,8 +2,6 @@
 
 use std::fmt;
 use std::future::Future;
-use std::str::FromStr;
-
 use qembed_domain::ids::{CallerId, TenantId};
 use qembed_domain::ports::{AuthenticatedIdentity, AuthenticationPort};
 use qembed_domain::principal::PrincipalKind;
