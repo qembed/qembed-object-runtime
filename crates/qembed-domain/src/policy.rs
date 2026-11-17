@@ -91,11 +91,7 @@ impl AllowedCommand {
     /// Kept private so this module remains the sole minting boundary. The
     /// Authorizer introduced later must call this only after a positive policy
     /// decision; adapters and executors receive, but cannot manufacture, it.
-    fn mint(
-        command_id: CommandId,
-        invocation_id: InvocationId,
-        action_hash: [u8; 32],
-    ) -> Self {
+    fn mint(command_id: CommandId, invocation_id: InvocationId, action_hash: [u8; 32]) -> Self {
         Self {
             command_id,
             invocation_id,
