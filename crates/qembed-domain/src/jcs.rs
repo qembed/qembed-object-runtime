@@ -153,8 +153,10 @@ mod tests {
 
     #[test]
     fn sorts_object_keys_using_utf16_order() {
-        let input = "{\"😀\":1,\"€\":2}".as_bytes();
-        let expected = "{\"€\":2,\"😀\":1}".as_bytes();
+        // U+10000 sorts before U+E000 by UTF-16 code units, but after it by
+        // Unicode scalar value. This distinguishes RFC 8785 ordering.
+        let input = "{\"\\u{e000}\":1,\"\\u{10000}\":2}".as_bytes();
+        let expected = "{\"\\u{10000}\":2,\"\\u{e000}\":1}".as_bytes();
 
         assert_eq!(canonicalize_json(input).expect("valid JSON"), expected);
     }
