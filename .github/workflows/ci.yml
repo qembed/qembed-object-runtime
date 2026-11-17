@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   rust:
-    name: Format, check, and test
+    name: Format, dependency audit, check, and test (stable)
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -23,8 +23,27 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Report duplicate dependencies
+        run: cargo tree -d
+
       - name: Check workspace
         run: cargo check --workspace
 
       - name: Run workspace tests
+        run: cargo test --workspace
+
+  msrv:
+    name: Minimum supported Rust version (1.85.0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install minimum supported Rust
+        uses: dtolnay/rust-toolchain@1.85.0
+
+      - name: Check workspace on MSRV
+        run: cargo check --workspace
+
+      - name: Run workspace tests on MSRV
         run: cargo test --workspace

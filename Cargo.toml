@@ -10,9 +10,18 @@ members = [
 ]
 
 [workspace.package]
-edition = "2024"
-license = "UNLICENSED"
 version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "UNLICENSED"
 
 [workspace.dependencies]
-# Shared dependency versions will be added incrementally with roadmap tasks.
+# Add third-party dependencies here with explicit versions.
+# Crates should consume them with `dependency.workspace = true`.
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
