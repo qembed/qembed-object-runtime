@@ -2,7 +2,7 @@ mod common;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId, TenantId};
 use qembed_domain::object::{Object, ObjectState};
-use qembed_domain::object_version::{ObjectVersion, ObjectVersionStatus};
+use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::{ObjectRepository, ObjectRepositoryError};
 use qembed_store::run_migrations;
