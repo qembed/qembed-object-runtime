@@ -1,7 +1,7 @@
 use std::env;
 use std::error::Error;
 
-use qembed_store::{connect_pool, run_migrations, PgPoolConfig};
+use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
