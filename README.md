@@ -12,7 +12,7 @@ This is an intentionally minimal Rust workspace scaffold for implementing
 - `qembed-runtime` (also hosts the `qembed-eval` binary target)
 - `qembed-api`
 
-No runtime behavior or dependencies have been implemented yet.
+No application orchestration or provider behavior has been implemented yet. The store crate now contains the PostgreSQL pool and explicit SQLx migration infrastructure.
 
 ## Build and test
 
@@ -34,8 +34,9 @@ bash scripts/test-postgres.sh
 ```
 
 To use a different connection string, set `DATABASE_URL` before running the
-script. The integration-test fixture is shared under
-`crates/qembed-store/tests/common`.
+script. It must point to a disposable, empty PostgreSQL 16 database because
+the harness verifies the initial migration state. The integration-test fixture
+is shared under `crates/qembed-store/tests/common`.
 
 ### Run database migrations explicitly
 
