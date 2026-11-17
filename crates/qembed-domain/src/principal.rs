@@ -92,9 +92,8 @@ mod tests {
     fn verified_auth_context_creates_principal() {
         let caller_id = CallerId::new();
 
-        let principal =
-            Principal::from_verified_auth(caller_id, PrincipalKind::Authenticated)
-                .expect("non-nil caller ID must be accepted");
+        let principal = Principal::from_verified_auth(caller_id, PrincipalKind::Authenticated)
+            .expect("non-nil caller ID must be accepted");
 
         assert_eq!(principal.caller_id(), caller_id);
         assert_eq!(principal.kind(), PrincipalKind::Authenticated);
