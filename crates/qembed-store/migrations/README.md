@@ -10,3 +10,8 @@ The owner-authentication migration persists tenant-bound owner principals and
 SHA-256 digests of high-entropy API tokens. Raw tokens are never stored. The
 digest is appropriate for random API credentials, not for human passwords;
 password authentication would require a dedicated password-hashing scheme.
+
+The object repository migration adds tenant-owned objects and numbered object
+versions. Composite foreign keys keep every version attached to an object in
+the same tenant; database uniqueness constraints prevent duplicate object IDs
+and per-object version numbers.

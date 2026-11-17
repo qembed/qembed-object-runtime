@@ -1,6 +1,7 @@
 //! PostgreSQL persistence infrastructure.
 
 pub mod auth;
+pub mod object_repository;
 
 use std::time::Duration;
 
