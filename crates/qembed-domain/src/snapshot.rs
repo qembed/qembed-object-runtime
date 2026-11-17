@@ -266,10 +266,7 @@ mod tests {
             br#"{ "a":1}"#.to_vec(),
         );
 
-        assert_eq!(
-            result,
-            Err(SnapshotError::Jcs(JcsError::NonCanonicalJson))
-        );
+        assert_eq!(result, Err(SnapshotError::Jcs(JcsError::NonCanonicalJson)));
     }
 
     #[test]
