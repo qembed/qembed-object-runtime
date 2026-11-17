@@ -10,4 +10,7 @@ lints.workspace = true
 qembed-domain = { path = "../qembed-domain" }
 
 [dev-dependencies]
-postgres = "0.19"
+postgres = "=0.19.9"
+# Keep the protocol stack on versions compatible with the workspace MSRV (Rust 1.85).
+postgres-protocol = "=0.6.7"
+postgres-types = "=0.2.8"
