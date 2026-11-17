@@ -38,8 +38,8 @@ jobs:
       - name: Check crate dependency boundaries
         run: python3 scripts/check_architecture.py
 
-      - name: Run workspace tests
-        run: cargo test --workspace
+      - name: Run workspace tests with PostgreSQL
+        run: bash scripts/test-postgres.sh
 
   msrv:
     name: Minimum supported Rust version (1.85.0)
@@ -54,5 +54,5 @@ jobs:
       - name: Check workspace on MSRV
         run: cargo check --workspace
 
-      - name: Run workspace tests on MSRV
-        run: cargo test --workspace
+      - name: Run workspace tests on MSRV with PostgreSQL
+        run: bash scripts/test-postgres.sh
