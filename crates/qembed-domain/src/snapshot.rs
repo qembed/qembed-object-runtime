@@ -7,8 +7,8 @@ use crate::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 /// Immutable configuration snapshot used to reproduce an invocation's behavior.
 ///
 /// `canonical_json` is the source of truth. The hash is SHA-256 over its exact
-/// bytes. RFC 8785 canonical-form validation is performed by the snapshot
-/// builder/validation boundary introduced in the persistence work.
+/// bytes. RFC 8785 canonical-form validation is a separate boundary implemented
+/// in RUST-022; this type only preserves bytes and verifies their digest.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Snapshot {
     id: SnapshotId,
@@ -110,6 +110,55 @@ impl Snapshot {
     }
 }
 
+/// Builds an immutable snapshot from already-canonical JSON bytes.
+///
+/// Canonicalization and RFC 8785 validation belong to the dedicated boundary
+/// introduced in RUST-022. This builder deliberately preserves the supplied
+/// bytes exactly; it never parses, normalizes, or reserializes the JSON.
+#[derive(Debug)]
+pub struct SnapshotBuilder {
+    id: SnapshotId,
+    tenant_id: TenantId,
+    object_id: ObjectId,
+    object_version_id: ObjectVersionId,
+    schema_version: u32,
+    canonical_json: Box<[u8]>,
+}
+
+impl SnapshotBuilder {
+    /// Creates a builder with the identity and exact canonical byte sequence.
+    #[must_use]
+    pub fn new(
+        id: SnapshotId,
+        tenant_id: TenantId,
+        object_id: ObjectId,
+        object_version_id: ObjectVersionId,
+        schema_version: u32,
+        canonical_json: impl Into<Box<[u8]>>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            object_id,
+            object_version_id,
+            schema_version,
+            canonical_json: canonical_json.into(),
+        }
+    }
+
+    /// Builds a snapshot and computes SHA-256 over the exact supplied bytes.
+    pub fn build(self) -> Result<Snapshot, SnapshotError> {
+        Snapshot::new(
+            self.id,
+            self.tenant_id,
+            self.object_id,
+            self.object_version_id,
+            self.schema_version,
+            self.canonical_json,
+        )
+    }
+}
+
 /// Snapshot invariant error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotError {
@@ -167,6 +216,40 @@ mod tests {
             ),
             Err(SnapshotError::InvalidSchemaVersion)
         );
+    }
+
+    #[test]
+    fn snapshot_builder_is_deterministic_for_identical_inputs() {
+        let id = SnapshotId::new();
+        let tenant_id = TenantId::new();
+        let object_id = ObjectId::new();
+        let object_version_id = ObjectVersionId::new();
+        let bytes = br#"{"config":{"enabled":true},"name":"demo"}"#;
+
+        let first = SnapshotBuilder::new(
+            id,
+            tenant_id,
+            object_id,
+            object_version_id,
+            1,
+            bytes.to_vec(),
+        )
+        .build()
+        .expect("valid snapshot input");
+
+        let second = SnapshotBuilder::new(
+            id,
+            tenant_id,
+            object_id,
+            object_version_id,
+            1,
+            bytes.to_vec(),
+        )
+        .build()
+        .expect("same input must build");
+
+        assert_eq!(first, second);
+        assert_eq!(first.canonical_json(), bytes);
     }
 
     #[test]

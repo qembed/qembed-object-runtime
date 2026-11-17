@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod object_repository;
+pub mod snapshot_repository;
 
 use std::time::Duration;
 
