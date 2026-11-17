@@ -188,7 +188,7 @@ mod tests {
             br#"{ "a":1}"#.as_slice(),
             br#"{"b":2,"a":1}"#.as_slice(),
             br#"{"n":1.0}"#.as_slice(),
-            br#"{"s":"\\/"}"#.as_slice(),
+            br#"{"s":"\/"}"#.as_slice(),
         ] {
             assert_eq!(validate_canonical_json(input), Err(JcsError::NonCanonicalJson));
         }
