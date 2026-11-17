@@ -69,13 +69,8 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
         .expect_err("duplicate object IDs must be rejected");
     assert!(is_database_constraint(duplicate, "23505"));
 
-    let duplicate_number = ObjectVersion::new(
-        ObjectVersionId::new(),
-        tenant_a,
-        object.id(),
-        1,
-    )
-    .expect("version number must be positive");
+    let duplicate_number = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
+        .expect("version number must be positive");
     let duplicate = repository
         .create_draft_version(&scope_a, &duplicate_number)
         .await
@@ -102,8 +97,9 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     assert!(is_database_constraint(foreign_error, "23503"));
 
     // A failed insert rolls its transaction back and leaves no partial row.
-    let missing_object_version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, ObjectId::new(), 1)
-        .expect("version number must be positive");
+    let missing_object_version =
+        ObjectVersion::new(ObjectVersionId::new(), tenant_a, ObjectId::new(), 1)
+            .expect("version number must be positive");
     let failed_id = missing_object_version.id();
     let rollback_error = repository
         .create_draft_version(&scope_a, &missing_object_version)
