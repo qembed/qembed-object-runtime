@@ -2,9 +2,11 @@
 
 use std::time::Duration;
 
+use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 use sqlx::migrate::{MigrateError, Migrator};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnection, PgPoolOptions, Postgres};
+use sqlx::Transaction;
 
 /// Connection-pool settings shared by application and migration entry points.
 #[derive(Clone, Debug)]
@@ -42,11 +44,6 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     let migrator = Migrator::new(migrations_path).await?;
     migrator.run(pool).await
 }
-
-
-use qembed_domain::scope::Scope;
-use sqlx::postgres::{PgConnection, Postgres};
-use sqlx::Transaction;
 
 /// A PostgreSQL transaction with its tenant context established transaction-locally.
 ///
