@@ -42,3 +42,64 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     let migrator = Migrator::new(migrations_path).await?;
     migrator.run(pool).await
 }
+
+
+use qembed_domain::scope::Scope;
+use sqlx::postgres::{PgConnection, Postgres};
+use sqlx::Transaction;
+
+/// A PostgreSQL transaction with its tenant context established transaction-locally.
+///
+/// The wrapped connection is available only while this value is borrowed. Commit
+/// and rollback consume the wrapper so a tenant-scoped transaction cannot be
+/// accidentally reused after it has ended.
+pub struct TenantTransaction {
+    transaction: Transaction<'static, Postgres>,
+}
+
+impl TenantTransaction {
+    /// Returns the PostgreSQL connection carrying this transaction's tenant context.
+    ///
+    /// Queries must be executed through this connection, not through the pool,
+    /// so they participate in the transaction and inherit its tenant setting.
+    pub fn connection(&mut self) -> &mut PgConnection {
+        &mut self.transaction
+    }
+
+    /// Commits the tenant-scoped transaction.
+    pub async fn commit(self) -> Result<(), sqlx::Error> {
+        self.transaction.commit().await
+    }
+
+    /// Rolls back the tenant-scoped transaction.
+    pub async fn rollback(self) -> Result<(), sqlx::Error> {
+        self.transaction.rollback().await
+    }
+}
+
+/// Begins a transaction and binds it to the tenant from a trusted Scope.
+///
+/// PostgreSQL's transaction-local setting is applied with `set_config(..., true)`.
+/// The value is passed as a bind parameter; it is never interpolated into SQL.
+///
+/// A scope is mandatory. Callers cannot begin a tenant transaction without one:
+///
+/// ```compile_fail
+/// use qembed_store::begin_tenant_transaction;
+///
+/// async fn missing_scope(pool: &sqlx::PgPool) {
+///     let _ = begin_tenant_transaction(pool, None).await;
+/// }
+/// ```
+pub async fn begin_tenant_transaction(
+    pool: &PgPool,
+    scope: &Scope,
+) -> Result<TenantTransaction, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(scope.tenant_id().to_string())
+        .execute(&mut *transaction)
+        .await?;
+
+    Ok(TenantTransaction { transaction })
+}
