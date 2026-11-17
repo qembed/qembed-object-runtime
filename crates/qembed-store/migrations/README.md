@@ -15,3 +15,10 @@ The object repository migration adds tenant-owned objects and numbered object
 versions. Composite foreign keys keep every version attached to an object in
 the same tenant; database uniqueness constraints prevent duplicate object IDs
 and per-object version numbers.
+
+The snapshot migration stores the exact canonical JSON byte sequence in
+`snapshots.canonical_json BYTEA`. Its SHA-256 digest is stored separately in
+`content_hash BYTEA`, while `json_projection JSONB` is derived from those
+bytes and checked by a database trigger. Snapshot rows reject UPDATE and
+DELETE; the repository verifies the stored digest again when reconstructing a
+domain Snapshot. JSONB is never used to recreate canonical bytes.
