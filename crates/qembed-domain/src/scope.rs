@@ -16,14 +16,10 @@ use crate::principal::Principal;
 ///
 /// ```compile_fail
 /// use qembed_domain::ids::TenantId;
-/// use qembed_domain::principal::{Principal, PrincipalKind};
+/// use qembed_domain::principal::Principal;
 /// use qembed_domain::scope::Scope;
 ///
-/// let principal = Principal::from_verified_auth(
-///     qembed_domain::ids::CallerId::new(),
-///     PrincipalKind::Authenticated,
-/// ).unwrap();
-/// let _ = Scope::from_verified_auth(TenantId::new(), principal);
+/// let _ = Scope::from_verified_auth(TenantId::new(), todo!() as Principal);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scope {
