@@ -219,6 +219,41 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn snapshot_builder_is_deterministic_for_identical_inputs() {
+        let id = SnapshotId::new();
+        let tenant_id = TenantId::new();
+        let object_id = ObjectId::new();
+        let object_version_id = ObjectVersionId::new();
+        let bytes = br#"{\"config\":{\"enabled\":true},\"name\":\"demo\"}"#;
+
+        let first = SnapshotBuilder::new(
+            id,
+            tenant_id,
+            object_id,
+            object_version_id,
+            1,
+            bytes.to_vec(),
+        )
+        .build()
+        .expect("valid snapshot input");
+
+        let second = SnapshotBuilder::new(
+            id,
+            tenant_id,
+            object_id,
+            object_version_id,
+            1,
+            bytes.to_vec(),
+        )
+        .build()
+        .expect("same input must build");
+
+        assert_eq!(first, second);
+        assert_eq!(first.canonical_json(), bytes);
+    }
+
     #[test]
     fn snapshot_exposes_bytes_only_as_immutable_slice() {
         let snapshot = Snapshot::new(
