@@ -42,7 +42,6 @@ impl Principal {
     /// This is crate-private so transport code cannot manufacture a principal
     /// directly from an HTTP request body.
     #[allow(dead_code)] // Used by the trusted authentication boundary as it is introduced.
-///
     pub(crate) fn from_verified_auth(
         caller_id: CallerId,
         kind: PrincipalKind,
