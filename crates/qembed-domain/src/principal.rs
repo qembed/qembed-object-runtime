@@ -21,6 +21,15 @@ pub enum PrincipalKind {
 /// deserialization implementation. Only trusted code inside this crate can
 /// mint a principal; request DTOs must never turn client-supplied fields into
 /// an authenticated identity.
+///
+/// External callers cannot mint one:
+///
+/// ```compile_fail
+/// use qembed_domain::ids::CallerId;
+/// use qembed_domain::principal::{Principal, PrincipalKind};
+///
+/// let _ = Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Principal {
     caller_id: CallerId,
@@ -32,6 +41,8 @@ impl Principal {
     ///
     /// This is crate-private so transport code cannot manufacture a principal
     /// directly from an HTTP request body.
+    #[allow(dead_code)] // Used by the trusted authentication boundary as it is introduced.
+///
     pub(crate) fn from_verified_auth(
         caller_id: CallerId,
         kind: PrincipalKind,
