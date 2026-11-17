@@ -29,10 +29,17 @@ async fn create_rls_fixture(transaction: &mut TenantTransaction, tenant_a: &str,
     .await
     .expect("the temporary fixture table should be created");
 
-    sqlx::query("GRANT USAGE ON SCHEMA pg_temp TO qembed_tenant_rls_test")
-        .execute(transaction.connection())
-        .await
-        .expect("the test role should be allowed to resolve the temporary table");
+    sqlx::query(
+        "DO $grant$ DECLARE temp_schema TEXT; BEGIN
+            SELECT nspname INTO temp_schema
+            FROM pg_namespace
+            WHERE oid = pg_my_temp_schema();
+            EXECUTE format('GRANT USAGE ON SCHEMA %I TO qembed_tenant_rls_test', temp_schema);
+        END $grant$",
+    )
+    .execute(transaction.connection())
+    .await
+    .expect("the test role should be allowed to resolve the temporary table");
 
     sqlx::query(
         "INSERT INTO tenant_query_probe (tenant_id, payload)
