@@ -16,6 +16,8 @@ rust-version = "1.85"
 license = "UNLICENSED"
 
 [workspace.dependencies]
+serde = { version = "=1.0.219", features = ["derive"] }
+uuid = { version = "=1.16.0", features = ["serde", "v4"] }
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate"] }
 tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread"] }
 # Keep SQLx's transitive URL/IDNA stack compatible with Rust 1.85.
