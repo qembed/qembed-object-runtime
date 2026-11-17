@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::future::Future;
+use std::str::FromStr;
 
 use qembed_domain::ids::{CallerId, TenantId};
 use qembed_domain::ports::{AuthenticatedIdentity, AuthenticationPort};
@@ -48,7 +49,7 @@ pub struct OwnerAuthenticator {
 impl OwnerAuthenticator {
     /// Creates the adapter using the application's PostgreSQL pool.
     #[must_use]
-    pub const fn new(pool: PgPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
@@ -101,7 +102,7 @@ impl AuthenticationPort for OwnerAuthenticator {
                 INNER JOIN owner_credentials AS credential
                     ON credential.tenant_id = principal.tenant_id
                     AND credential.caller_id = principal.caller_id
-                WHERE principal.tenant_id = $1
+                WHERE principal.tenant_id = $1::uuid
                     AND credential.token_hash = $2
                     AND principal.principal_kind = 'tenant_owner'
                     AND principal.disabled_at IS NULL
@@ -119,12 +120,10 @@ impl AuthenticationPort for OwnerAuthenticator {
             };
 
             let tenant_id = tenant_id
-                .parse::<uuid::Uuid>()
-                .map(TenantId::from_uuid)
+                .parse::<TenantId>()
                 .map_err(|_| OwnerAuthenticationError::InvalidCredentials)?;
             let caller_id = caller_id
-                .parse::<uuid::Uuid>()
-                .map(CallerId::from_uuid)
+                .parse::<CallerId>()
                 .map_err(|_| OwnerAuthenticationError::InvalidCredentials)?;
 
             Ok(AuthenticatedIdentity::new(
