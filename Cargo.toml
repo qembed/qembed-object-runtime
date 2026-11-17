@@ -18,6 +18,16 @@ license = "UNLICENSED"
 [workspace.dependencies]
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate"] }
 tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread"] }
+# Keep SQLx's transitive URL/IDNA stack compatible with Rust 1.85.
+home = "=0.5.11"
+idna_adapter = "=1.2.1"
+icu_collections = "=2.1.1"
+icu_locale_core = "=2.1.1"
+icu_normalizer = "=2.1.1"
+icu_normalizer_data = "=2.1.1"
+icu_properties = "=2.1.1"
+icu_properties_data = "=2.1.1"
+icu_provider = "=2.1.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
