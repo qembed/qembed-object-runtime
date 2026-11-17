@@ -11,6 +11,20 @@ use crate::principal::Principal;
 /// DTOs: the only constructor is crate-private and requires a trusted
 /// `Principal` minted by the authentication boundary. Scope is intentionally
 /// not deserializable.
+///
+/// External callers cannot construct a scope from request data:
+///
+/// ```compile_fail
+/// use qembed_domain::ids::TenantId;
+/// use qembed_domain::principal::{Principal, PrincipalKind};
+/// use qembed_domain::scope::Scope;
+///
+/// let principal = Principal::from_verified_auth(
+///     qembed_domain::ids::CallerId::new(),
+///     PrincipalKind::Authenticated,
+/// ).unwrap();
+/// let _ = Scope::from_verified_auth(TenantId::new(), principal);
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Scope {
     tenant_id: TenantId,
@@ -23,6 +37,7 @@ impl Scope {
     ///
     /// This is crate-private to prevent HTTP handlers from constructing a
     /// trusted scope directly from untrusted request data.
+    #[allow(dead_code)] // Used by the trusted authentication boundary as it is introduced.
     pub(crate) fn from_verified_auth(
         tenant_id: TenantId,
         principal: Principal,
