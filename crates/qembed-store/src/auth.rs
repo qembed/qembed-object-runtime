@@ -8,7 +8,6 @@ use sqlx::PgPool;
 use std::fmt;
 use std::future::Future;
 
-
 /// Credentials for the minimal Owner path.
 ///
 /// The token is a high-entropy API credential, not a human password. Only its
