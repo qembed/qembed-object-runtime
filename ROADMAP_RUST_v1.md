@@ -175,9 +175,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration проверяет RLS isolation для tenant A/B и fail-closed поведение без tenant context; compile-fail doctest запрещает передавать обычный pool вместо tenant transaction.
   - DoD: tenant-owned query helpers не принимают непроверенный tenant ID или обычный pool; tenant context задаётся только из trusted `Scope`.
 
-- [ ] **RUST-018 (M)** Реализовать principal/caller persistence и минимальный Owner authentication path.
-  - Тесты: integration — валидная аутентификация, неверные credentials, disabled principal, tenant mismatch.
-  - DoD: runtime получает Principal только после успешной проверки auth boundary.
+- [x] **RUST-018 (M)** Реализовать principal/caller persistence и минимальный Owner authentication path.
+  - Реализация: PostgreSQL хранит tenant-bound Owner principals и SHA-256 digests высокоэнтропийных API-токенов; SQLx AuthenticationPort adapter проверяет tenant, token, disabled/revoked state; domain `authenticate_owner` создаёт Principal и Scope только после проверки adapter и отклоняет не-Owner identity.
+  - Тесты: PostgreSQL integration — валидная аутентификация, неверные credentials, disabled principal, tenant mismatch и persistence только digest; unit — redacted credentials Debug, Owner scope и отказ non-Owner.
+  - DoD: runtime получает Principal только после успешной проверки auth boundary; неизвестные, отключённые, отозванные и tenant-mismatched credentials дают одинаковый отказ.
 
 - [ ] **RUST-019 (M)** Реализовать Object repository: create object и create draft version.
   - Тесты: DB integration — happy path, duplicate IDs/constraints, cross-tenant access, rollback.

@@ -1,5 +1,7 @@
 //! PostgreSQL persistence infrastructure.
 
+pub mod auth;
+
 use std::time::Duration;
 
 use qembed_domain::scope::Scope;

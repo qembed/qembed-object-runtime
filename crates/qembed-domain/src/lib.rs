@@ -106,6 +106,7 @@
 //! require_default::<AllowedCommand>();
 //! ```
 
+pub mod auth;
 pub mod ids;
 pub mod invocation;
 pub mod object;
