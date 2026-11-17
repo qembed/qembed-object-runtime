@@ -3,13 +3,17 @@ use std::time::Duration;
 use qembed_domain::ids::TenantId;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::{
-    PgPoolConfig, TenantTransaction, begin_tenant_transaction, connect_pool, execute, fetch_all,
+    PgPoolConfig, TenantTransaction, begin_tenant_transaction, connect_pool, fetch_all,
 };
 use sqlx::PgPool;
 
 const RLS_TEST_ROLE: &str = "qembed_tenant_rls_test";
 
-async fn create_rls_fixture(pool: &PgPool, transaction: &mut TenantTransaction) {
+async fn create_rls_fixture(
+    transaction: &mut TenantTransaction,
+    tenant_a: &str,
+    tenant_b: &str,
+) {
     sqlx::query(
         "DO $role$ BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'qembed_tenant_rls_test') THEN
@@ -35,8 +39,8 @@ async fn create_rls_fixture(pool: &PgPool, transaction: &mut TenantTransaction) 
         "INSERT INTO tenant_query_probe (tenant_id, payload)
          VALUES ($1, 'tenant-a'), ($2, 'tenant-b')",
     )
-    .bind("tenant-a")
-    .bind("tenant-b")
+    .bind(tenant_a)
+    .bind(tenant_b)
     .execute(transaction.connection())
     .await
     .expect("fixture rows should be inserted before RLS is enabled");
@@ -61,7 +65,6 @@ async fn create_rls_fixture(pool: &PgPool, transaction: &mut TenantTransaction) 
         .execute(transaction.connection())
         .await
         .expect("the test role should be allowed to read the fixture");
-    let _ = pool;
 }
 
 async fn tenant_transaction(
@@ -90,7 +93,10 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
 
     let tenant_a = TenantId::new();
     let mut setup = tenant_transaction(&pool, tenant_a).await;
-    create_rls_fixture(&pool, &mut setup).await;
+    let tenant_a_text = tenant_a.to_string();
+    let tenant_b = TenantId::new();
+    let tenant_b_text = tenant_b.to_string();
+    create_rls_fixture(&mut setup, &tenant_a_text, &tenant_b_text).await;
     setup.commit().await.expect("fixture setup should commit");
 
     let mut transaction_a = tenant_transaction(&pool, tenant_a).await;
@@ -106,10 +112,12 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
     )
     .await
     .expect("typed query should return tenant A rows");
-    assert_eq!(rows_a, vec![("tenant-a".to_owned(), "tenant-a".to_owned())]);
+    assert_eq!(
+        rows_a,
+        vec![(tenant_a_text.clone(), "tenant-a".to_owned())]
+    );
     transaction_a.commit().await.expect("tenant A should commit");
 
-    let tenant_b = TenantId::new();
     let mut transaction_b = tenant_transaction(&pool, tenant_b).await;
     sqlx::query("SET LOCAL ROLE qembed_tenant_rls_test")
         .execute(transaction_b.connection())
@@ -123,7 +131,11 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
     )
     .await
     .expect("typed query should return tenant B rows");
-    assert!(rows_b.is_empty(), "tenant B must not see tenant A's rows");
+    assert_eq!(
+        rows_b,
+        vec![(tenant_b_text, "tenant-b".to_owned())],
+        "tenant B must see only its own row"
+    );
     transaction_b.commit().await.expect("tenant B should commit");
 
     let mut unscoped = pool
