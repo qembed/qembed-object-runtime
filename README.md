@@ -65,12 +65,11 @@ To check the declared minimum supported Rust version:
 
 ```bash
 cargo +1.85.0 check --workspace
-bash scripts/test-postgres.sh
+RUSTUP_TOOLCHAIN=1.85.0 bash scripts/test-postgres.sh
 ```
 
-The second command uses the currently selected default Rust toolchain. To run
-the full test suite specifically on MSRV, select the 1.85.0 toolchain first
-(e.g. `cargo +1.85.0 test --workspace` with the PostgreSQL service available).
+The environment override makes every `cargo` invocation inside the test
+script use Rust 1.85.0 as well.
 
 ## PostgreSQL integration tests
 
