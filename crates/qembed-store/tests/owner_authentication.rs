@@ -7,12 +7,7 @@ use qembed_store::auth::{OwnerAuthenticationError, OwnerAuthenticator, OwnerCred
 use qembed_store::run_migrations;
 use sha2::{Digest, Sha256};
 
-async fn seed_owner(
-    pool: &sqlx::PgPool,
-    tenant_id: TenantId,
-    caller_id: CallerId,
-    token: &str,
-) {
+async fn seed_owner(pool: &sqlx::PgPool, tenant_id: TenantId, caller_id: CallerId, token: &str) {
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )
@@ -37,7 +32,9 @@ async fn seed_owner(
 #[tokio::test]
 async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     let pool = common::connect().await;
-    run_migrations(&pool).await.expect("migrations should be applied");
+    run_migrations(&pool)
+        .await
+        .expect("migrations should be applied");
 
     // Valid credentials resolve the persisted caller and tenant into a trusted Scope.
     let tenant_a = TenantId::new();
@@ -108,11 +105,8 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
 
     // A valid token cannot be replayed under another tenant ID.
     let tenant_b = TenantId::new();
-    let mismatch = authenticate_owner(
-        &authenticator,
-        OwnerCredentials::new(tenant_b, token_a),
-    )
-    .await
+    let mismatch = authenticate_owner(&authenticator, OwnerCredentials::new(tenant_b, token_a))
+        .await
     .expect_err("tenant A token must not authenticate as tenant B");
     assert!(matches!(
         mismatch,
