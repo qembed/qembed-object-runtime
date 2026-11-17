@@ -109,18 +109,20 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
         .await
         .expect("validation transition should commit");
 
+    // Fail after the state update and event insert, at the outbox insert.
+    // This proves all three writes share one transaction.
     let suffix = object_id.to_string().replace('-', "");
     let function_name = format!("test_reject_outbox_{suffix}");
     let trigger_name = format!("test_reject_outbox_trigger_{suffix}");
     let function_ddl = format!(
-        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN IF NEW.object_id = '{object_id}'::uuid AND NEW.published_version_id IS DISTINCT FROM OLD.published_version_id THEN RAISE EXCEPTION 'forced publication failure'; END IF; RETURN NEW; END $function$"
+        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $function$ BEGIN RAISE EXCEPTION 'forced outbox failure'; END $function$"
     );
     sqlx::query(&function_ddl)
         .execute(&pool)
         .await
         .expect("failure trigger function should be installed");
     let trigger_ddl = format!(
-        "CREATE TRIGGER {trigger_name} BEFORE UPDATE ON objects FOR EACH ROW EXECUTE FUNCTION {function_name}()"
+        "CREATE TRIGGER {trigger_name} BEFORE INSERT ON outbox_messages FOR EACH ROW EXECUTE FUNCTION {function_name}()"
     );
     sqlx::query(&trigger_ddl)
         .execute(&pool)
@@ -140,7 +142,7 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
             .publish_version(&scope, object_id, version_id, None)
             .await
             .is_err(),
-        "injected failure should abort publication"
+        "injected outbox failure should abort publication"
     );
 
     let after: (i64, i64) = sqlx::query_as(
@@ -163,7 +165,7 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
     .expect("state should remain queryable");
     assert_eq!(persisted, ("validating".to_owned(), None, "draft".to_owned()));
 
-    sqlx::query(&format!("DROP TRIGGER {trigger_name} ON objects"))
+    sqlx::query(&format!("DROP TRIGGER {trigger_name} ON outbox_messages"))
         .execute(&pool)
         .await
         .expect("failure trigger should be removed");
@@ -171,6 +173,45 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
         .execute(&pool)
         .await
         .expect("failure trigger function should be removed");
+
+    pool.close().await;
+}
+#[tokio::test]
+async fn persisted_events_reject_update_and_delete() {
+    let (pool, repository, scope, object_id) = setup().await;
+    repository
+        .begin_validation(&scope, object_id)
+        .await
+        .expect("validation event should commit");
+
+    let event_id: String = sqlx::query_scalar(
+        "SELECT event_id::text FROM events WHERE tenant_id = $1::uuid AND aggregate_id = $2::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("event should exist");
+
+    let update = sqlx::query(
+        "UPDATE events SET event_type = 'object.forged' WHERE tenant_id = $1::uuid AND event_id = $2::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(&event_id)
+    .execute(&pool)
+    .await
+    .expect_err("append-only event must reject UPDATE");
+    assert!(matches!(update, sqlx::Error::Database(_)));
+
+    let delete = sqlx::query(
+        "DELETE FROM events WHERE tenant_id = $1::uuid AND event_id = $2::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(event_id)
+    .execute(&pool)
+    .await
+    .expect_err("append-only event must reject DELETE");
+    assert!(matches!(delete, sqlx::Error::Database(_)));
 
     pool.close().await;
 }
