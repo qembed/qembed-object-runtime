@@ -130,7 +130,7 @@ async fn snapshot_insert_read_is_immutable_and_preserves_exact_bytes() {
 async fn repository_reads_source_bytes_instead_of_jsonb_projection() {
     let fixture = setup().await;
     let repository = SnapshotRepository::new(fixture.pool.clone());
-    let bytes = br#"{\"a\":1,\"z\":0}"#;
+    let bytes = br#"{"a":1,"z":0}"#;
     let snapshot = build_snapshot(&fixture, bytes);
 
     repository
