@@ -68,7 +68,7 @@ fn build_snapshot(fixture: &Fixture, bytes: &[u8]) -> qembed_domain::snapshot::S
 async fn snapshot_insert_read_is_immutable_and_preserves_exact_bytes() {
     let fixture = setup().await;
     let repository = SnapshotRepository::new(fixture.pool.clone());
-    let bytes = br#"{ "config" : {"enabled":true}, "name":"demo" }"#;
+    let bytes = br#"{"config":{"enabled":true},"name":"demo"}"#;
     let snapshot = build_snapshot(&fixture, bytes);
     let snapshot_id = snapshot.id();
     let expected_hash = *snapshot.content_hash();

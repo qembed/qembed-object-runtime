@@ -3,12 +3,13 @@
 use sha2::{Digest, Sha256};
 
 use crate::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
+use crate::jcs::{JcsError, validate_canonical_json};
 
 /// Immutable configuration snapshot used to reproduce an invocation's behavior.
 ///
 /// `canonical_json` is the source of truth. The hash is SHA-256 over its exact
-/// bytes. RFC 8785 canonical-form validation is a separate boundary implemented
-/// in RUST-022; this type only preserves bytes and verifies their digest.
+/// bytes. The bytes must pass the RFC 8785 validation boundary before this
+/// value can be constructed; the hash is then computed over those exact bytes.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Snapshot {
     id: SnapshotId,
@@ -35,6 +36,7 @@ impl Snapshot {
         }
 
         let canonical_json = canonical_json.into();
+        validate_canonical_json(&canonical_json).map_err(SnapshotError::Jcs)?;
         let content_hash = Sha256::digest(&canonical_json).into();
 
         Ok(Self {
@@ -110,11 +112,11 @@ impl Snapshot {
     }
 }
 
-/// Builds an immutable snapshot from already-canonical JSON bytes.
+/// Builds an immutable snapshot from RFC 8785 canonical JSON bytes.
 ///
-/// Canonicalization and RFC 8785 validation belong to the dedicated boundary
-/// introduced in RUST-022. This builder deliberately preserves the supplied
-/// bytes exactly; it never parses, normalizes, or reserializes the JSON.
+/// The builder preserves the supplied bytes exactly and rejects malformed or
+/// noncanonical input. Use the JCS canonicalize_json function when starting
+/// from ordinary JSON that needs canonicalization.
 #[derive(Debug)]
 pub struct SnapshotBuilder {
     id: SnapshotId,
@@ -164,6 +166,7 @@ impl SnapshotBuilder {
 pub enum SnapshotError {
     InvalidSchemaVersion,
     HashMismatch,
+    Jcs(JcsError),
 }
 
 #[cfg(test)]
@@ -250,6 +253,20 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(first.canonical_json(), bytes);
+    }
+
+    #[test]
+    fn snapshot_rejects_noncanonical_json_before_construction() {
+        let result = Snapshot::new(
+            SnapshotId::new(),
+            TenantId::new(),
+            ObjectId::new(),
+            ObjectVersionId::new(),
+            1,
+            br#"{ "a":1}"#.to_vec(),
+        );
+
+        assert_eq!(result, Err(SnapshotError::Jcs(JcsError::NonCanonicalJson)));
     }
 
     #[test]

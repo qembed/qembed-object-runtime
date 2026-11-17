@@ -196,9 +196,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: deterministic builder; PostgreSQL immutable insert/read и exact-byte round-trip; hash mismatch обнаруживается при read; projection mismatch отклоняется DB guard; UPDATE/DELETE отклоняются.
   - DoD: canonical bytes не подменяются JSONB projection; repository возвращает Snapshot только после проверки hash.
 
-- [ ] **RUST-022 (M)** Реализовать JCS canonicalization/validation boundary.
-  - Тесты: RFC 8785 test vectors; duplicate keys; NaN/Infinity; invalid UTF-8; noncanonical bytes; property/fuzz tests.
-  - DoD: Rust отвергает некорректный или неканонический snapshot до persistence.
+- [x] **RUST-022 (M)** Реализовать JCS canonicalization/validation boundary.
+  - Реализация: domain module jcs предоставляет canonicalize_json и validate_canonical_json на базе serde_jcs (RFC 8785); строгий Serde visitor отклоняет duplicate object keys до сериализации; Snapshot::new и from_persisted требуют уже канонические bytes.
+  - Тесты: RFC 8785 number vector; UTF-16 key ordering; duplicate keys на вложенных уровнях; NaN/Infinity; invalid UTF-8 и malformed JSON; noncanonical whitespace/key order/number/string escapes; idempotence corpus; Snapshot construction rejects noncanonical bytes.
+  - DoD: Rust отвергает некорректный или неканонический snapshot до persistence; canonicalization выдаёт RFC 8785 bytes, validation не переписывает вход.
 
 - [ ] **RUST-023 (S)** Реализовать DB hash/projection integration tests и store mapping.
   - Тесты: реальные PostgreSQL cases на несовпадение hash/projection и round-trip canonical bytes.
