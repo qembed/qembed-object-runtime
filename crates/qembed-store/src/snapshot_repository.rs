@@ -161,11 +161,19 @@ impl fmt::Display for SnapshotRepositoryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TenantMismatch => formatter.write_str("snapshot tenant does not match scope"),
-            Self::InvalidSchemaVersion => formatter.write_str("snapshot schema version is out of range"),
-            Self::InvalidIdentifier => formatter.write_str("persisted snapshot contains an invalid identifier"),
-            Self::InvalidHashLength => formatter.write_str("persisted snapshot hash is not 32 bytes"),
+            Self::InvalidSchemaVersion => {
+                formatter.write_str("snapshot schema version is out of range")
+            }
+            Self::InvalidIdentifier => {
+                formatter.write_str("persisted snapshot contains an invalid identifier")
+            }
+            Self::InvalidHashLength => {
+                formatter.write_str("persisted snapshot hash is not 32 bytes")
+            }
             Self::Domain(error) => write!(formatter, "snapshot domain invariant failed: {error:?}"),
-            Self::Database(error) => write!(formatter, "snapshot repository database error: {error}"),
+            Self::Database(error) => {
+                write!(formatter, "snapshot repository database error: {error}")
+            }
         }
     }
 }
