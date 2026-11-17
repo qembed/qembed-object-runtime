@@ -8,9 +8,16 @@ lints.workspace = true
 
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
+sqlx.workspace = true
+tokio.workspace = true
+# Resolver pins for transitive SQLx dependencies; see workspace Cargo.toml.
+home.workspace = true
+idna_adapter.workspace = true
+icu_collections.workspace = true
+icu_locale_core.workspace = true
+icu_normalizer.workspace = true
+icu_normalizer_data.workspace = true
+icu_properties.workspace = true
+icu_properties_data.workspace = true
+icu_provider.workspace = true
 
-[dev-dependencies]
-postgres = "=0.19.9"
-# Keep the protocol stack on versions compatible with the workspace MSRV (Rust 1.85).
-postgres-protocol = "=0.6.7"
-postgres-types = "=0.2.8"
