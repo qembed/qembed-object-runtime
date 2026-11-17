@@ -234,6 +234,9 @@ mod tests {
         let keys = ["a", "z", "€", "😀"];
         for first in keys {
             for second in keys {
+                if first == second {
+                    continue;
+                }
                 let input = format!("{{\"{second}\":{{\"value\":2}},\"{first}\":[1,true]}}");
                 let canonical = canonicalize_json(input.as_bytes()).expect("generated JSON");
                 assert_eq!(
