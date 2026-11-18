@@ -122,10 +122,7 @@ impl MockChatProvider {
 impl ChatProvider for MockChatProvider {
     type Error = MockChatProviderError;
 
-    async fn complete(
-        &self,
-        request: ChatRequest,
-    ) -> Result<ChatResponse, Self::Error> {
+    async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
         let script = self
             .scripts
             .iter()
