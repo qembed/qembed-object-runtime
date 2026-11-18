@@ -13,7 +13,7 @@ use crate::{begin_tenant_transaction, execute, fetch_all, fetch_optional};
 
 #[derive(Clone)]
 pub struct PgExecutionStore {
-    pool: PgPool,
+    pub(crate) pool: PgPool,
 }
 
 impl PgExecutionStore {
