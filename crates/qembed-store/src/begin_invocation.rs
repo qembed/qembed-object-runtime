@@ -172,19 +172,6 @@ pub async fn begin_invocation(
     scope: &Scope,
     command: BeginInvocationCommand,
 ) -> Result<BeginInvocationOutcome, BeginInvocationError> {
-    if command.input_message.trim().is_empty() || command.input_message.len() > 65_536 {
-        return Err(BeginInvocationError::InvalidInputMessage);
-    }
-    let message_expiry_micros = command.message_expires_at
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?
-        .as_micros();
-    let message_expiry_micros = i64::try_from(message_expiry_micros)
-        .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?;
-    if command.message_expires_at <= SystemTime::now() {
-        return Err(BeginInvocationError::InvalidMessageExpiry);
-    }
-
     let mut transaction = begin_tenant_transaction(pool, scope)
         .await
         .map_err(BeginInvocationError::Database)?;
@@ -212,6 +199,19 @@ pub async fn begin_invocation(
         }
         IdempotencyReservation::Reserved { invocation_id } => invocation_id,
     };
+
+        if command.input_message.trim().is_empty() || command.input_message.len() > 65_536 {
+            return Err(BeginInvocationError::InvalidInputMessage);
+        }
+        let message_expiry_micros = command.message_expires_at
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?
+            .as_micros();
+        let message_expiry_micros = i64::try_from(message_expiry_micros)
+            .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?;
+        if command.message_expires_at <= SystemTime::now() {
+            return Err(BeginInvocationError::InvalidMessageExpiry);
+        }
 
     // Lock the object pointer while checking the snapshot. Publication locks
     // the same row first, so this transaction observes one consistent version.
