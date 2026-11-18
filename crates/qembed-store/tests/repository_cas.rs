@@ -7,8 +7,7 @@ use qembed_domain::object::Object;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::ObjectRepository;
 use qembed_store::{
-    CasError, PgPoolConfig, begin_tenant_transaction, connect_pool,
-    execute_cas, run_migrations,
+    CasError, PgPoolConfig, begin_tenant_transaction, connect_pool, execute_cas, run_migrations,
 };
 use sqlx::PgPool;
 
@@ -60,7 +59,10 @@ async fn stale_compare_and_set_conflicts_across_independent_sessions() {
         .fetch_one(second.connection())
         .await
         .expect("second backend PID should be available");
-    assert_ne!(first_pid, second_pid, "CAS test must use independent sessions");
+    assert_ne!(
+        first_pid, second_pid,
+        "CAS test must use independent sessions"
+    );
 
     let guarded_update = || {
         sqlx::query(
