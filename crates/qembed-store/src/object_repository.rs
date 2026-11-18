@@ -303,7 +303,7 @@ impl ObjectRepository {
                 object_id,
                 expected_current,
                 version_id,
-                next_state,
+                object.state(),
             ),
         )
         .await
