@@ -138,8 +138,14 @@ mod tests {
         let object = json.as_object().expect("payload should be a JSON object");
 
         assert_eq!(object.len(), 3);
-        assert_eq!(object.get("type").and_then(|value| value.as_str()), Some("validation_started"));
-        assert_eq!(object.get("state").and_then(|value| value.as_str()), Some("validating"));
+        assert_eq!(
+            object.get("type").and_then(|value| value.as_str()),
+            Some("validation_started")
+        );
+        assert_eq!(
+            object.get("state").and_then(|value| value.as_str()),
+            Some("validating")
+        );
         assert!(object.contains_key("object_id"));
         assert!(!contains_sensitive_key(object));
     }
@@ -157,8 +163,14 @@ mod tests {
         let object = json.as_object().expect("payload should be a JSON object");
 
         assert_eq!(object.len(), 5);
-        assert_eq!(object.get("type").and_then(|value| value.as_str()), Some("version_published"));
-        assert_eq!(object.get("state").and_then(|value| value.as_str()), Some("active"));
+        assert_eq!(
+            object.get("type").and_then(|value| value.as_str()),
+            Some("version_published")
+        );
+        assert_eq!(
+            object.get("state").and_then(|value| value.as_str()),
+            Some("active")
+        );
         assert!(object.contains_key("object_id"));
         assert!(object.contains_key("previous_version_id"));
         assert!(object.contains_key("version_id"));
