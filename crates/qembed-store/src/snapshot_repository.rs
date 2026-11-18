@@ -1,4 +1,27 @@
 //! Tenant-scoped persistence for immutable, content-addressed snapshots.
+//!
+//! The public repository surface intentionally supports insertion and retrieval,
+//! not mutation. Attempts to add update/delete operations are compile-time errors:
+//!
+//! ```compile_fail
+//! use qembed_domain::ids::SnapshotId;
+//! use qembed_domain::scope::Scope;
+//! use qembed_store::snapshot_repository::SnapshotRepository;
+//!
+//! async fn mutate(repository: &SnapshotRepository, scope: &Scope, id: SnapshotId) {
+//!     repository.delete(scope, id).await;
+//! }
+//! ```
+//!
+//! ```compile_fail
+//! use qembed_domain::ids::SnapshotId;
+//! use qembed_domain::scope::Scope;
+//! use qembed_store::snapshot_repository::SnapshotRepository;
+//!
+//! async fn mutate(repository: &SnapshotRepository, scope: &Scope, id: SnapshotId) {
+//!     repository.update(scope, id).await;
+//! }
+//! ```
 
 use std::fmt;
 use std::str::FromStr;

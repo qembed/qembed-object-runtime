@@ -1,4 +1,11 @@
 //! PostgreSQL persistence infrastructure.
+//!
+//! Event append operations are deliberately internal to the store adapter. The
+//! public API does not expose a generic event writer or mutable event repository:
+//!
+//! ```compile_fail
+//! use qembed_store::event_outbox::append_object_event;
+//! ```
 
 pub mod auth;
 mod cas;
