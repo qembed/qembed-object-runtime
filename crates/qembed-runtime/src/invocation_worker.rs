@@ -174,13 +174,20 @@ where
                 .ok_or(InvocationWorkerError::NotFound)?;
             return match existing.status() {
                 InvocationStatus::Completed | InvocationStatus::CompletedDegraded => {
-                    let content = self.store.load_assistant_output(scope, invocation_id)
-                        .await.map_err(InvocationWorkerError::Store)?
+                    let content = self
+                        .store
+                        .load_assistant_output(scope, invocation_id)
+                        .await
+                        .map_err(InvocationWorkerError::Store)?
                         .ok_or(InvocationWorkerError::MissingPersistedOutput)?;
-                    Ok(InvocationWorkerOutcome::Completed { invocation_id, content })
+                    Ok(InvocationWorkerOutcome::Completed {
+                        invocation_id,
+                        content,
+                    })
                 }
                 status if status.is_terminal() => Ok(InvocationWorkerOutcome::AlreadyTerminal {
-                    invocation_id, status,
+                    invocation_id,
+                    status,
                 }),
                 _ => Err(InvocationWorkerError::Conflict),
             };
@@ -193,13 +200,17 @@ where
                 .await
                 .map_err(InvocationWorkerError::Store)?
                 .ok_or(InvocationWorkerError::NotFound)?;
-            let live = self.store.heartbeat_invocation(
-                scope,
-                invocation_id,
-                &self.config.worker_id,
-                invocation.fencing_token(),
-                self.config.lease_seconds,
-            ).await.map_err(InvocationWorkerError::Store)?;
+            let live = self
+                .store
+                .heartbeat_invocation(
+                    scope,
+                    invocation_id,
+                    &self.config.worker_id,
+                    invocation.fencing_token(),
+                    self.config.lease_seconds,
+                )
+                .await
+                .map_err(InvocationWorkerError::Store)?;
             if !live {
                 return Err(InvocationWorkerError::Conflict);
             }
@@ -235,7 +246,8 @@ where
 
                     let provider_future = self.provider.complete(request);
                     tokio::pin!(provider_future);
-                    let heartbeat_period = Duration::from_secs(u64::from((self.config.lease_seconds / 3).max(1)));
+                    let heartbeat_period =
+                        Duration::from_secs(u64::from((self.config.lease_seconds / 3).max(1)));
                     let mut heartbeat = tokio::time::interval(heartbeat_period);
                     heartbeat.tick().await;
                     let provider_result = loop {
@@ -374,7 +386,13 @@ where
             .map_err(InvocationWorkerError::InvalidTransition)?;
         let changed = self
             .store
-            .compare_and_set_owned(scope, &self.config.worker_id, current.version(), current.fencing_token(), next)
+            .compare_and_set_owned(
+                scope,
+                &self.config.worker_id,
+                current.version(),
+                current.fencing_token(),
+                next,
+            )
             .await
             .map_err(InvocationWorkerError::Store)?;
         if changed {
@@ -625,10 +643,18 @@ mod lifecycle_tests {
             token: FencingToken,
             next: Invocation,
         ) -> Result<bool, Self::Error> {
-            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+            if self
+                .0
+                .lock()
+                .expect("fake store lock")
+                .lease_owner
+                .as_deref()
+                != Some(owner)
+            {
                 return Ok(false);
             }
-            self.compare_and_set_invocation(scope, version, token, next).await
+            self.compare_and_set_invocation(scope, version, token, next)
+                .await
         }
 
         async fn persist_assistant_output_owned(
@@ -643,7 +669,8 @@ mod lifecycle_tests {
             if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
                 return Ok(false);
             }
-            self.persist_assistant_output(scope, version, token, next, content).await
+            self.persist_assistant_output(scope, version, token, next, content)
+                .await
         }
 
         async fn complete_invocation_owned(
@@ -672,7 +699,8 @@ mod lifecycle_tests {
             if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
                 return Ok(false);
             }
-            self.fail_invocation(scope, version, token, next, error_code).await
+            self.fail_invocation(scope, version, token, next, error_code)
+                .await
         }
     }
 
