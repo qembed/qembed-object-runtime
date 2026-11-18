@@ -383,13 +383,11 @@ mod tests {
                 .unwrap_err(),
             ChatContractError::MessageTooLarge
         );
+        let total_oversized = (0..5)
+            .map(|index| user_message(&format!("{index}{}", "z".repeat(MAX_CHAT_MESSAGE_BYTES - 1))))
+            .collect();
         assert_eq!(
-            ChatRequest::new(
-                "default-chat",
-                vec![oversized, user_message(&"y".repeat(MAX_CHAT_MESSAGE_BYTES))],
-                100,
-            )
-            .unwrap_err(),
+            ChatRequest::new("default-chat", total_oversized, 100).unwrap_err(),
             ChatContractError::RequestTooLarge
         );
     }
