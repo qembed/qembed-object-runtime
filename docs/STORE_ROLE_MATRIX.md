@@ -16,6 +16,8 @@ used by runtime, dispatcher, or admin processes.
 | `objects` | SELECT, INSERT, UPDATE | — | SELECT |
 | `object_versions` | SELECT, INSERT, UPDATE | — | SELECT |
 | `snapshots` | SELECT, INSERT | — | SELECT |
+| `object_invocations` | SELECT, INSERT, UPDATE | — | — |
+| `invocation_idempotency` | SELECT, INSERT, UPDATE | — | — |
 | `events` | SELECT, INSERT | — | SELECT |
 | `outbox_messages` | INSERT | SELECT, UPDATE(`delivered_at`) | SELECT |
 | `owner_principals` | SELECT | — | — |
