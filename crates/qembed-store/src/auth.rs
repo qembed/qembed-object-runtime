@@ -1,6 +1,6 @@
 //! PostgreSQL-backed tenant-owner API-token authentication.
 
-use qembed_domain::ids::{CallerId, TenantId};
+use qembed_domain::ids::{PrincipalId, TenantId};
 use qembed_domain::ports::{AuthenticatedIdentity, AuthenticationPort};
 use qembed_domain::principal::PrincipalKind;
 use sha2::{Digest, Sha256};
@@ -139,13 +139,13 @@ impl AuthenticationPort for OwnerAuthenticator {
         let tenant_id = tenant_id
             .parse::<TenantId>()
             .map_err(|_| OwnerAuthenticationError::InvalidCredentials)?;
-        let caller_id = caller_id
-            .parse::<CallerId>()
+        let principal_id = caller_id
+            .parse::<PrincipalId>()
             .map_err(|_| OwnerAuthenticationError::InvalidCredentials)?;
 
         Ok(AuthenticatedIdentity::new(
             tenant_id,
-            caller_id,
+            principal_id,
             PrincipalKind::TenantOwner,
         ))
     }
