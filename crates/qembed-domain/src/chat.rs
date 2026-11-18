@@ -65,6 +65,21 @@ pub enum ChatRole {
     Assistant,
 }
 
+/// Requested shape of a provider response.
+///
+/// This is a provider-neutral contract. `JsonOnly` requires the normalized
+/// response content to contain exactly one valid JSON value; `None` leaves
+/// response content unconstrained plain text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuredOutputMode {
+    /// No structured-output constraint; any non-empty text response is valid.
+    #[default]
+    None,
+    /// The response content must be valid JSON without surrounding prose.
+    JsonOnly,
+}
+
 /// One provider-neutral message.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ChatMessage {
@@ -122,6 +137,7 @@ pub struct ChatRequest {
     model_key: String,
     messages: Vec<ChatMessage>,
     max_output_tokens: u32,
+    structured_output: StructuredOutputMode,
 }
 
 impl ChatRequest {
@@ -159,6 +175,7 @@ impl ChatRequest {
             model_key,
             messages,
             max_output_tokens,
+            structured_output: StructuredOutputMode::None,
         })
     }
 
@@ -176,6 +193,18 @@ impl ChatRequest {
     pub const fn max_output_tokens(&self) -> u32 {
         self.max_output_tokens
     }
+
+    /// Returns a copy with the requested provider-neutral output constraint.
+    #[must_use]
+    pub const fn with_structured_output(mut self, mode: StructuredOutputMode) -> Self {
+        self.structured_output = mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn structured_output(&self) -> StructuredOutputMode {
+        self.structured_output
+    }
 }
 
 impl<'de> Deserialize<'de> for ChatRequest {
@@ -189,10 +218,13 @@ impl<'de> Deserialize<'de> for ChatRequest {
             model_key: String,
             messages: Vec<ChatMessage>,
             max_output_tokens: u32,
+            #[serde(default)]
+            structured_output: StructuredOutputMode,
         }
 
         let raw = RawRequest::deserialize(deserializer)?;
         Self::new(raw.model_key, raw.messages, raw.max_output_tokens)
+            .map(|request| request.with_structured_output(raw.structured_output))
             .map_err(serde::de::Error::custom)
     }
 }
@@ -326,6 +358,26 @@ mod tests {
         assert_eq!(decoded, request);
         assert!(json.contains("\"model_key\":\"default-chat\""));
         assert!(!json.contains("openai"));
+    }
+
+    #[test]
+    fn structured_output_mode_defaults_to_none_and_round_trips() {
+        let default = ChatRequest::new("default-chat", vec![user_message("hello")], 100)
+            .expect("valid request");
+        assert_eq!(default.structured_output(), StructuredOutputMode::None);
+
+        let json_only = default.with_structured_output(StructuredOutputMode::JsonOnly);
+        let serialized = serde_json::to_string(&json_only).expect("request serializes");
+        let decoded: ChatRequest = serde_json::from_str(&serialized).expect("request deserializes");
+        assert_eq!(decoded, json_only);
+        assert_eq!(decoded.structured_output(), StructuredOutputMode::JsonOnly);
+    }
+
+    #[test]
+    fn legacy_request_json_without_output_mode_defaults_to_none() {
+        let json = r#"{"model_key":"default-chat","messages":[{"role":"user","content":"hello"}],"max_output_tokens":100}"#;
+        let decoded: ChatRequest = serde_json::from_str(json).expect("legacy request is valid");
+        assert_eq!(decoded.structured_output(), StructuredOutputMode::None);
     }
 
     #[test]
