@@ -3,7 +3,7 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use qembed_domain::caller::InvocationPool;
-use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
+use qembed_domain::ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
 use qembed_domain::ports::{ExecutionStore, InvocationCancellationOutcome, InvocationCancellationStore, InvocationReadStore, InvocationWorkStore};
@@ -1030,6 +1030,11 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
     assert!(!store.heartbeat_invocation(&fixture.scope, invocation_id, "worker-cancel", claim.fencing_token(), 60).await.expect("stale heartbeat"));
     assert_eq!(store.cancel_invocation(&fixture.scope, invocation_id).await.expect("repeat"), InvocationCancellationOutcome::Cancelled { newly_cancelled: false });
     assert_eq!(store.cancel_invocation(&fixture.scope, InvocationId::new()).await.expect("missing"), InvocationCancellationOutcome::NotFound);
+    let other_tenant = scope_for_tenant(TenantId::new());
+    assert_eq!(
+        store.cancel_invocation(&other_tenant, invocation_id).await.expect("cross-tenant miss"),
+        InvocationCancellationOutcome::NotFound
+    );
     teardown(fixture).await;
 }
 
