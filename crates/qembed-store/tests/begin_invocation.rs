@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use qembed_domain::caller::InvocationPool;
 use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
+use qembed_domain::invocation_lease::InvocationLeaseStore;
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
@@ -564,5 +565,260 @@ async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
         .expect_err("blank user input must be rejected");
     assert!(matches!(error, BeginInvocationError::InvalidInputMessage));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "lease-fencing"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let schema = fixture.schema.clone();
+    let second_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await
+        .expect("second independent worker session should connect");
+
+    let worker_a = PgExecutionStore::new(fixture.pool.clone());
+    let worker_b = PgExecutionStore::new(second_pool.clone());
+
+    let first_claim = worker_a
+        .claim_invocation(&fixture.scope, invocation_id, "worker-a", 60)
+        .await
+        .expect("worker A claim")
+        .expect("unleased invocation is claimable");
+    assert_eq!(first_claim.fencing_token(), FencingToken::INITIAL);
+    assert_eq!(first_claim.version(), 0);
+
+    assert!(
+        worker_b
+            .claim_invocation(&fixture.scope, invocation_id, "worker-b", 60)
+            .await
+            .expect("worker B competing claim")
+            .is_none(),
+        "a live lease cannot be stolen"
+    );
+
+    let mut unowned_transition = first_claim.clone();
+    unowned_transition
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("legacy candidate transition");
+    assert!(
+        !worker_a
+            .compare_and_set_invocation(
+                &fixture.scope,
+                first_claim.version(),
+                first_claim.fencing_token(),
+                unowned_transition,
+            )
+            .await
+            .expect("unowned write should be a CAS miss"),
+        "legacy token-only writes must not bypass an active lease"
+    );
+
+    let mut context_loading = first_claim.clone();
+    context_loading
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("worker A starts context loading");
+    assert!(
+        worker_a
+            .compare_and_set_owned(
+                &fixture.scope,
+                "worker-a",
+                first_claim.version(),
+                first_claim.fencing_token(),
+                context_loading,
+            )
+            .await
+            .expect("worker A context transition")
+    );
+
+    let after_context = worker_a
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload after context")
+        .expect("invocation exists");
+    let mut processing = after_context.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .expect("worker A starts processing");
+    assert!(
+        worker_a
+            .compare_and_set_owned(
+                &fixture.scope,
+                "worker-a",
+                after_context.version(),
+                after_context.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("worker A processing transition")
+    );
+
+    let old_claim = worker_a
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load stale worker snapshot")
+        .expect("invocation exists");
+    assert_eq!(old_claim.status(), InvocationStatus::Processing);
+
+    sqlx::query(
+        "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("expire worker A lease for deterministic reclaim");
+
+    assert!(
+        !worker_a
+            .heartbeat_invocation(
+                &fixture.scope,
+                invocation_id,
+                "worker-a",
+                old_claim.fencing_token(),
+                60,
+            )
+            .await
+            .expect("expired heartbeat is a normal miss"),
+        "an expired lease must be reclaimed, not revived"
+    );
+
+    let new_claim = worker_b
+        .claim_invocation(&fixture.scope, invocation_id, "worker-b", 60)
+        .await
+        .expect("worker B reclaim")
+        .expect("expired lease can be reclaimed");
+    assert_eq!(new_claim.fencing_token().value(), 1);
+    assert_eq!(new_claim.version(), old_claim.version() + 1);
+    assert_eq!(new_claim.status(), InvocationStatus::Processing);
+
+    let mut stale_output = old_claim.clone();
+    stale_output
+        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .expect("old in-memory state can form a candidate response transition");
+    assert!(
+        !worker_a
+            .persist_assistant_output_owned(
+                &fixture.scope,
+                "worker-a",
+                old_claim.version(),
+                old_claim.fencing_token(),
+                stale_output,
+                "stale answer".to_owned(),
+            )
+            .await
+            .expect("stale response write is a normal CAS miss"),
+        "old owner and old token must not persist a response after reclaim"
+    );
+
+    assert!(
+        !worker_a
+            .heartbeat_invocation(
+                &fixture.scope,
+                invocation_id,
+                "worker-a",
+                FencingToken::INITIAL,
+                60,
+            )
+            .await
+            .expect("stale heartbeat is a normal miss")
+    );
+
+    let mut valid_response = new_claim.clone();
+    valid_response
+        .transition_to(InvocationStatus::Verifying, new_claim.fencing_token())
+        .expect("new lease owner can persist provider response");
+    assert!(
+        worker_b
+            .persist_assistant_output_owned(
+                &fixture.scope,
+                "worker-b",
+                new_claim.version(),
+                new_claim.fencing_token(),
+                valid_response,
+                "current answer".to_owned(),
+            )
+            .await
+            .expect("new owner response CAS")
+    );
+    assert_eq!(
+        worker_b
+            .load_assistant_output(&fixture.scope, invocation_id)
+            .await
+            .expect("load assistant output")
+            .as_deref(),
+        Some("current answer")
+    );
+    assert!(
+        worker_b
+            .heartbeat_invocation(
+                &fixture.scope,
+                invocation_id,
+                "worker-b",
+                new_claim.fencing_token(),
+                60,
+            )
+            .await
+            .expect("new owner heartbeat")
+    );
+
+    let verifying = worker_b
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load verifying invocation")
+        .expect("invocation exists");
+    let mut completed = verifying.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
+        .expect("Verifying can complete");
+    assert!(
+        worker_b
+            .complete_invocation_owned(
+                &fixture.scope,
+                "worker-b",
+                verifying.version(),
+                verifying.fencing_token(),
+                completed,
+            )
+            .await
+            .expect("terminal completion and lease release")
+    );
+    let terminal = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+        "SELECT status, lease_owner, lease_until::text FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read terminal invocation");
+    assert_eq!(terminal.0, "Completed");
+    assert_eq!(terminal.1, None);
+    assert_eq!(terminal.2, None);
+
+    second_pool.close().await;
     teardown(fixture).await;
 }

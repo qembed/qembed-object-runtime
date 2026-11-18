@@ -284,15 +284,16 @@ SQLX_OFFLINE=true cargo check --workspace
   - Документация: PRINCIPAL_CALLER_DELEGATION.md, BEGIN_INVOCATION_TRANSACTION.md, idempotency contract and Store role matrix.
   - DoD: либо фиксируется весь begin-invocation, либо ничего; provider I/O начинается только после commit.
 
-- [ ] **RUST-037 (M, implementation in progress)** Реализовать минимальный invocation worker lifecycle.
+- [x] **RUST-037 (M)** Реализовать минимальный invocation worker lifecycle.
   - Реализация: durable user input is committed with begin-invocation; worker resumes from persisted Invocation status; provider output is persisted before Verifying → Completed; terminal status/result are committed together where possible. No lease/reclaim semantics here (RUST-038).
   - Тесты: runtime mock-provider tests — claim/process/finish and provider failure; PostgreSQL integration — persisted input, CAS transitions, response durability, restart at Verifying, terminal result retrieval, idempotent replay does not duplicate input.
   - Документация: INVOCATION_WORKER_LIFECYCLE.md, BEGIN_INVOCATION_TRANSACTION.md, README.
   - DoD: invocation lifecycle сохраняется в PostgreSQL и переживает рестарт процесса.
 
-- [ ] **RUST-038 (M)** Реализовать invocation lease и fencing-token CAS.
-  - Тесты: две независимые worker sessions; lease expiry/reclaim; старый worker не может записать результат после выдачи нового token.
-  - DoD: stale worker не завершает invocation.
+- [ ] **RUST-038 (M, implementation in progress)** Реализовать invocation lease и fencing-token CAS.
+  - Реализация: initial owner claim без смены token; heartbeat только активного владельца; reclaim истёкшей lease с атомарным увеличением token/version; все worker writes проверяют owner, expiry, token и version.
+  - Тесты: две независимые PostgreSQL sessions; конкурентный claim; heartbeat; expiry/reclaim; старый worker не может записать assistant output после выдачи нового token.
+  - DoD: stale worker не записывает результат и не завершает invocation после reclaim.
 
 - [ ] **RUST-039 (S)** Реализовать `GET invocation`.
   - Тесты: API integration — queued/running/succeeded/failed; tenant isolation; скрытие внутренних payloads.

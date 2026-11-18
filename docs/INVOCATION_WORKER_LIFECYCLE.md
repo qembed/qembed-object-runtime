@@ -29,7 +29,7 @@ A process restart at `Received` or `ContextLoading` resumes from the last commit
 
 If a process dies after a provider response arrives but before the response transaction commits, the database remains in `Processing`; a later worker pass may call the provider again. The mock-first chat completion path has no external write side effect, but duplicate provider cost is possible. RUST-037 does not claim exactly-once provider execution.
 
-There is no lease owner, heartbeat, lease expiry, or reclaim in this task. Two workers may both reach the provider while the row is `Processing`; only one can commit the response/status CAS. RUST-038 adds lease ownership and fencing so a stale worker cannot commit after reclaim.
+RUST-038 adds PostgreSQL-backed lease ownership, heartbeat, expiry, and reclaim. A worker must claim before processing; every lifecycle write checks owner, unexpired lease, fencing token, and optimistic version. Reclaim increments token and version, so a stale worker cannot persist a response or terminal state. Heartbeats continue while waiting for provider I/O. The provider call itself may still complete after ownership is lost, and the result is then discarded.
 
 ## Persistence boundary
 
