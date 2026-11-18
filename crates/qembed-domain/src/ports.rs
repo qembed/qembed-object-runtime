@@ -7,7 +7,9 @@
 use std::error::Error;
 use std::future::Future;
 
-use crate::chat::{ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse};
+use crate::chat::{
+    ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse, ProviderRequestContext,
+};
 use crate::ids::{InvocationId, PrincipalId, TenantId};
 use crate::invocation::{FencingToken, Invocation};
 use crate::principal::PrincipalKind;
@@ -162,6 +164,19 @@ pub trait ChatProvider: Send + Sync {
         &self,
         request: ChatRequest,
     ) -> impl Future<Output = Result<ChatResponse, ChatProviderError>> + Send;
+
+    /// Completes a request with stable operation context.
+    ///
+    /// The default preserves compatibility for providers without idempotency
+    /// support. An adapter advertising idempotency-key support must override
+    /// this method and forward the supplied key unchanged to its provider.
+    fn complete_with_context(
+        &self,
+        request: ChatRequest,
+        _context: ProviderRequestContext,
+    ) -> impl Future<Output = Result<ChatResponse, ChatProviderError>> + Send {
+        self.complete(request)
+    }
 }
 
 #[cfg(test)]
