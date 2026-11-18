@@ -126,16 +126,16 @@ impl ChatProvider for MockChatProvider {
         &self,
         request: ChatRequest,
     ) -> Result<ChatResponse, Self::Error> {
-            let script = self
-                .scripts
-                .iter()
-                .find(|script| script.request == request)
-                .ok_or(MockChatProviderError::UnscriptedRequest)?;
+        let script = self
+            .scripts
+            .iter()
+            .find(|script| script.request == request)
+            .ok_or(MockChatProviderError::UnscriptedRequest)?;
 
-            match &script.outcome {
-                ScriptedOutcome::Response(response) => Ok(response.clone()),
-                ScriptedOutcome::Error(error) => Err(*error),
-            }
+        match &script.outcome {
+            ScriptedOutcome::Response(response) => Ok(response.clone()),
+            ScriptedOutcome::Error(error) => Err(*error),
+        }
     }
 }
 
