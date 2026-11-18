@@ -176,10 +176,15 @@ impl InvocationLeaseStore for PgExecutionStore {
             ));
         }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
-        let result = execute(
+
+        // The canonical SQL trigger permits release of an expired lease on a
+        // terminal transition, but rejects changing the owner of a live lease.
+        // Expire it and release it in two updates under the same row lock and
+        // transaction so no competing worker can observe the intermediate row.
+        let expired = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status='Completed', finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until > now() AND version=$5 AND fencing_token=$6 AND status='Verifying' AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
+                "UPDATE object_invocations SET lease_until=now()-interval '1 microsecond' WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until > now() AND version=$5 AND fencing_token=$6 AND status='Verifying'",
             )
             .bind(scope.tenant_id().to_string())
             .bind(next.object_id().to_string())
@@ -189,8 +194,30 @@ impl InvocationLeaseStore for PgExecutionStore {
             .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
         )
         .await?;
+        if expired.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET status='Completed', finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until <= now() AND version=$5 AND fencing_token=$6 AND status='Verifying' AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
         transaction.commit().await?;
-        Ok(result.rows_affected() == 1)
+        Ok(true)
     }
 
     async fn fail_invocation_owned(
@@ -218,10 +245,29 @@ impl InvocationLeaseStore for PgExecutionStore {
             ));
         }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+
+        let expired = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET lease_until=now()-interval '1 microsecond' WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until > now() AND version=$5 AND fencing_token=$6 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        if expired.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+
         let result = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status='Failed', error_code=$1, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$2::uuid AND object_id=$3::uuid AND id=$4::uuid AND lease_owner=$5 AND lease_until > now() AND version=$6 AND fencing_token=$7 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
+                "UPDATE object_invocations SET status='Failed', error_code=$1, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$2::uuid AND object_id=$3::uuid AND id=$4::uuid AND lease_owner=$5 AND lease_until <= now() AND version=$6 AND fencing_token=$7 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
             )
             .bind(error_code)
             .bind(scope.tenant_id().to_string())
@@ -232,9 +278,14 @@ impl InvocationLeaseStore for PgExecutionStore {
             .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
         )
         .await?;
+        if result.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
         transaction.commit().await?;
-        Ok(result.rows_affected() == 1)
+        Ok(true)
     }
+
 }
 
 fn validate_lease_request(owner: &str, lease_seconds: u32) -> Result<(), InvocationStoreError> {
