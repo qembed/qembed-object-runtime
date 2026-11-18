@@ -25,7 +25,7 @@
 //! use qembed_domain::ids::CallerId;
 //! use qembed_domain::principal::{Principal, PrincipalKind};
 //!
-//! let _ = Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated);
+//! let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated);
 //! ```
 //!
 //! A `Principal` cannot be reconstructed from serialized input:
@@ -125,7 +125,7 @@ pub mod snapshot;
 /// enabled. Production builds must not enable that feature.
 #[cfg(feature = "test-support")]
 pub mod test_support {
-    use crate::ids::{CallerId, TenantId};
+    use crate::ids::{PrincipalId, TenantId};
     use crate::principal::{Principal, PrincipalKind};
     use crate::scope::Scope;
 
