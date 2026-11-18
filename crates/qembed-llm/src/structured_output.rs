@@ -6,11 +6,14 @@
 
 use std::fmt;
 
-use qembed_domain::chat::{ChatResponse, StructuredOutputMode};
+use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse, StructuredOutputMode};
 
 /// Failure while applying a structured-output contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StructuredOutputError {
+    /// The selected provider configuration cannot satisfy this output mode.
+    /// No provider configuration exists for the requested routing key.
+    UnconfiguredModel,
     /// The selected provider configuration cannot satisfy this output mode.
     UnsupportedMode(StructuredOutputMode),
     /// The provider returned content that is not exactly one valid JSON value.
@@ -20,6 +23,7 @@ pub enum StructuredOutputError {
 impl fmt::Display for StructuredOutputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnconfiguredModel => formatter.write_str("no provider is configured for the model routing key"),
             Self::UnsupportedMode(mode) => {
                 write!(
                     formatter,
@@ -34,6 +38,22 @@ impl fmt::Display for StructuredOutputError {
 }
 
 impl std::error::Error for StructuredOutputError {}
+
+/// Negotiation failure before a provider request is sent.
+///
+/// The caller obtains the capability profile from the adapter's local
+/// configuration, then calls this function before invoking ChatProvider.
+pub fn negotiate_request(
+    request: &ChatRequest,
+    capabilities: Option<&ChatCapabilities>,
+) -> Result<(), StructuredOutputError> {
+    let capabilities = capabilities.ok_or(StructuredOutputError::UnconfiguredModel)?;
+    if capabilities.supports(request.structured_output()) {
+        Ok(())
+    } else {
+        Err(StructuredOutputError::UnsupportedMode(request.structured_output()))
+    }
+}
 
 /// Rejects a mode that the selected provider configuration cannot honor.
 ///
@@ -119,6 +139,19 @@ mod tests {
 
     #[test]
     fn unsupported_mode_is_rejected_before_provider_request() {
+        let request = qembed_domain::chat::ChatRequest::new(
+            "route-json",
+            vec![qembed_domain::chat::ChatMessage::new(qembed_domain::chat::ChatRole::User, "hello").unwrap()],
+            16,
+        ).unwrap().with_structured_output(StructuredOutputMode::JsonOnly);
+        let plain_profile = ChatCapabilities::default();
+        assert_eq!(
+            negotiate_request(&request, Some(&plain_profile)),
+            Err(StructuredOutputError::UnsupportedMode(StructuredOutputMode::JsonOnly))
+        );
+        assert_eq!(negotiate_request(&request, None), Err(StructuredOutputError::UnconfiguredModel));
+        let json_profile = ChatCapabilities::new([StructuredOutputMode::JsonOnly]);
+        assert_eq!(negotiate_request(&request, Some(&json_profile)), Ok(()));
         assert_eq!(
             ensure_mode_supported(
                 StructuredOutputMode::JsonOnly,
