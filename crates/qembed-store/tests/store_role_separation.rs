@@ -2,9 +2,9 @@ mod common;
 
 use std::str::FromStr;
 
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::PgPool;
 use qembed_store::run_migrations;
+use sqlx::PgPool;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
 
 const RUNTIME_PASSWORD: &str = "runtime-test-only";
@@ -47,8 +47,8 @@ async fn provision_test_logins(owner: &PgPool) {
 }
 
 async fn connect_as(login: &str, password: &str) -> PgPool {
-    let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
     let options = PgConnectOptions::from_str(&database_url)
         .expect("DATABASE_URL should be a valid PostgreSQL URL")
         .username(login)
@@ -104,14 +104,12 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         (tenant_a, object_a, version_a, event_a, delivery_a),
         (tenant_b, object_b, version_b, event_b, delivery_b),
     ] {
-        sqlx::query(
-            "INSERT INTO objects (tenant_id, object_id) VALUES ($1, $2)",
-        )
-        .bind(tenant)
-        .bind(object)
-        .execute(&owner)
-        .await
-        .expect("owner should seed object fixtures");
+        sqlx::query("INSERT INTO objects (tenant_id, object_id) VALUES ($1, $2)")
+            .bind(tenant)
+            .bind(object)
+            .execute(&owner)
+            .await
+            .expect("owner should seed object fixtures");
         sqlx::query(
             "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number)
              VALUES ($1, $2, $3, 1)",
@@ -150,12 +148,11 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
 
     // Runtime can see and mutate only the selected tenant's object.
     let mut tx = set_tenant(&runtime, tenant_a).await;
-    let own_objects: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM objects WHERE tenant_id = $1")
-            .bind(tenant_a)
-            .fetch_one(&mut *tx)
-            .await
-            .expect("runtime should read its tenant");
+    let own_objects: i64 = sqlx::query_scalar("SELECT count(*) FROM objects WHERE tenant_id = $1")
+        .bind(tenant_a)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("runtime should read its tenant");
     let foreign_objects: i64 =
         sqlx::query_scalar("SELECT count(*) FROM objects WHERE tenant_id = $1")
             .bind(tenant_b)
@@ -176,7 +173,9 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .await
         .expect("RLS should hide foreign tenant rows from UPDATE");
     assert_eq!(hidden_update.rows_affected(), 0);
-    tx.rollback().await.expect("runtime transaction should roll back");
+    tx.rollback()
+        .await
+        .expect("runtime transaction should roll back");
 
     // Runtime may append event/outbox records but cannot rewrite immutable rows
     // or acknowledge delivery (that capability belongs to the dispatcher).
@@ -215,11 +214,12 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .execute(&mut *tx)
     .await
     .expect("runtime should append immutable snapshots");
-    let error = sqlx::query("UPDATE snapshots SET json_projection = '{}'::jsonb WHERE tenant_id = $1")
-        .bind(tenant_a)
-        .execute(&mut *tx)
-        .await
-        .expect_err("runtime must not update immutable snapshots");
+    let error =
+        sqlx::query("UPDATE snapshots SET json_projection = '{}'::jsonb WHERE tenant_id = $1")
+            .bind(tenant_a)
+            .execute(&mut *tx)
+            .await
+            .expect_err("runtime must not update immutable snapshots");
     assert_sqlstate(error, "42501");
     let error = sqlx::query("DELETE FROM events WHERE tenant_id = $1")
         .bind(tenant_a)
@@ -239,35 +239,47 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .await
         .expect_err("runtime must not acknowledge outbox delivery");
     assert_sqlstate(error, "42501");
-    tx.rollback().await.expect("runtime append test should roll back");
+    tx.rollback()
+        .await
+        .expect("runtime append test should roll back");
 
     // Dispatcher has a deliberate cross-tenant view of the outbox only.
-    let mut tx = dispatcher.begin().await.expect("dispatcher transaction should begin");
-    let queue_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox_messages WHERE tenant_id IN ($1, $2)")
-        .bind(tenant_a)
-        .bind(tenant_b)
-        .fetch_one(&mut *tx)
+    let mut tx = dispatcher
+        .begin()
         .await
-        .expect("dispatcher should read the global outbox");
+        .expect("dispatcher transaction should begin");
+    let queue_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM outbox_messages WHERE tenant_id IN ($1, $2)")
+            .bind(tenant_a)
+            .bind(tenant_b)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("dispatcher should read the global outbox");
     assert_eq!(queue_rows, 2);
-    sqlx::query("UPDATE outbox_messages SET delivered_at = now() WHERE tenant_id = $1 AND delivery_id = $2")
-        .bind(tenant_b)
-        .bind(delivery_b)
-        .execute(&mut *tx)
-        .await
-        .expect("dispatcher should acknowledge delivery for any tenant");
-    let error = sqlx::query("UPDATE outbox_messages SET payload = '{\"forged\":true}'::jsonb WHERE tenant_id = $1")
-        .bind(tenant_a)
-        .execute(&mut *tx)
-        .await
-        .expect_err("dispatcher must not rewrite message payload");
+    sqlx::query(
+        "UPDATE outbox_messages SET delivered_at = now() WHERE tenant_id = $1 AND delivery_id = $2",
+    )
+    .bind(tenant_b)
+    .bind(delivery_b)
+    .execute(&mut *tx)
+    .await
+    .expect("dispatcher should acknowledge delivery for any tenant");
+    let error = sqlx::query(
+        "UPDATE outbox_messages SET payload = '{\"forged\":true}'::jsonb WHERE tenant_id = $1",
+    )
+    .bind(tenant_a)
+    .execute(&mut *tx)
+    .await
+    .expect_err("dispatcher must not rewrite message payload");
     assert_sqlstate(error, "42501");
     let error = sqlx::query("SELECT count(*) FROM objects")
         .fetch_one(&mut *tx)
         .await
         .expect_err("dispatcher must not read domain objects");
     assert_sqlstate(error, "42501");
-    tx.rollback().await.expect("dispatcher transaction should roll back");
+    tx.rollback()
+        .await
+        .expect("dispatcher transaction should roll back");
 
     // Admin is read-only and tenant-scoped; credential tables are not exposed.
     let mut tx = set_tenant(&admin, tenant_a).await;
@@ -287,16 +299,23 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .await
         .expect_err("admin must not read credential hashes");
     assert_sqlstate(error, "42501");
-    tx.rollback().await.expect("admin transaction should roll back");
+    tx.rollback()
+        .await
+        .expect("admin transaction should roll back");
 
     // Tenant-scoped runtime fails closed when no transaction-local context exists.
-    let mut tx = runtime.begin().await.expect("unscoped runtime transaction should begin");
+    let mut tx = runtime
+        .begin()
+        .await
+        .expect("unscoped runtime transaction should begin");
     let unscoped: i64 = sqlx::query_scalar("SELECT count(*) FROM objects")
         .fetch_one(&mut *tx)
         .await
         .expect("missing tenant context should yield no rows, not a bypass");
     assert_eq!(unscoped, 0);
-    tx.rollback().await.expect("unscoped transaction should roll back");
+    tx.rollback()
+        .await
+        .expect("unscoped transaction should roll back");
 
     runtime.close().await;
     dispatcher.close().await;
