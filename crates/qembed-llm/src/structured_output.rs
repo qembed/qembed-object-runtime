@@ -96,7 +96,7 @@ pub fn validate_response(
 
 #[cfg(test)]
 mod tests {
-    use qembed_domain::chat::{ChatCapabilities, ChatFinishReason};
+    use qembed_domain::chat::{ChatCapabilities, ChatFinishReason, ChatProviderError};
 
     use super::*;
 
@@ -165,7 +165,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_rejects_unsupported_capability_before_completion() {
-        use crate::mock::{MockChatProvider, MockChatProviderError};
+        use crate::mock::MockChatProvider;
         use qembed_domain::chat::{ChatFinishReason, ChatMessage, ChatRole};
 
         let request = ChatRequest::new(
@@ -183,7 +183,7 @@ mod tests {
 
         assert_eq!(
             provider.complete(request).await.unwrap_err(),
-            MockChatProviderError::UnsupportedCapability
+            ChatProviderError::Other
         );
     }
 
