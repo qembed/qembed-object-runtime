@@ -78,6 +78,7 @@ define_id!(ObjectVersionId);
 define_id!(PrincipalId);
 define_id!(CallerId);
 define_id!(InvocationId);
+define_id!(TraceId);
 define_id!(SnapshotId);
 define_id!(EventId);
 define_id!(CommandId);
@@ -126,6 +127,7 @@ mod tests {
         assert_round_trip(PrincipalId::new());
         assert_round_trip(CallerId::new());
         assert_round_trip(InvocationId::new());
+        assert_round_trip(TraceId::new());
         assert_round_trip(SnapshotId::new());
         assert_round_trip(EventId::new());
         assert_round_trip(CommandId::new());
@@ -141,6 +143,7 @@ mod tests {
         assert_rejects_invalid::<PrincipalId>();
         assert_rejects_invalid::<CallerId>();
         assert_rejects_invalid::<InvocationId>();
+        assert_rejects_invalid::<TraceId>();
         assert_rejects_invalid::<SnapshotId>();
         assert_rejects_invalid::<EventId>();
         assert_rejects_invalid::<CommandId>();
