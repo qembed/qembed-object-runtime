@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use qembed_domain::chat::{
     ChatContractError, ChatMessage, ChatProviderError, ChatRequest, ChatRole,
+    ProviderRequestContext,
 };
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::{Invocation, InvocationError, InvocationStatus};
@@ -244,7 +245,10 @@ where
                         return Err(InvocationWorkerError::ProviderRouteNotConfigured);
                     }
 
-                    let provider_future = self.provider.complete(request);
+                    let provider_context = ProviderRequestContext::for_invocation(invocation_id);
+                    let provider_future = self
+                        .provider
+                        .complete_with_context(request, provider_context);
                     tokio::pin!(provider_future);
                     let heartbeat_period =
                         Duration::from_secs(u64::from((self.config.lease_seconds / 3).max(1)));
