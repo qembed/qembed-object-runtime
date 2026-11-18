@@ -8,6 +8,8 @@
 //! ```
 
 pub mod auth;
+pub mod begin_invocation;
+pub mod caller;
 mod cas;
 pub mod idempotency;
 pub use cas::{CasError, execute_cas};
@@ -15,8 +17,10 @@ mod event_outbox;
 pub mod object_repository;
 pub mod snapshot_repository;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use qembed_domain::ids::{PrincipalId, TenantId};
 use qembed_domain::scope::Scope;
 use sqlx::FromRow;
 use sqlx::PgPool;
@@ -62,16 +66,40 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     migrator.run(pool).await
 }
 
-/// A PostgreSQL transaction with its tenant context established transaction-locally.
+/// A PostgreSQL transaction with trusted tenant and authenticated Principal context established transaction-locally.
 ///
 /// The wrapped connection is available only while this value is borrowed. Commit
 /// and rollback consume the wrapper so a tenant-scoped transaction cannot be
 /// accidentally reused after it has ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TransactionToken(u64);
+
+static NEXT_TRANSACTION_TOKEN: AtomicU64 = AtomicU64::new(1);
+
 pub struct TenantTransaction {
     transaction: Transaction<'static, Postgres>,
+    tenant_id: TenantId,
+    principal_id: PrincipalId,
+    transaction_token: TransactionToken,
 }
 
 impl TenantTransaction {
+    pub(crate) const fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
+
+    pub(crate) const fn principal_id(&self) -> PrincipalId {
+        self.principal_id
+    }
+
+    pub(crate) const fn transaction_token(&self) -> TransactionToken {
+        self.transaction_token
+    }
+
+    pub(crate) fn matches_scope(&self, scope: &Scope) -> bool {
+        self.tenant_id == scope.tenant_id() && self.principal_id == scope.principal().principal_id()
+    }
+
     /// Returns the PostgreSQL connection carrying this transaction's tenant context.
     ///
     /// Queries must be executed through this connection, not through the pool,
@@ -91,10 +119,10 @@ impl TenantTransaction {
     }
 }
 
-/// Begins a transaction and binds it to the tenant from a trusted Scope.
+/// Begins a transaction and binds tenant and authenticated Principal from a trusted Scope.
 ///
 /// PostgreSQL's transaction-local setting is applied with `set_config(..., true)`.
-/// The value is passed as a bind parameter; it is never interpolated into SQL.
+/// Both values are passed as bind parameters; neither is interpolated into SQL.
 ///
 /// A scope is mandatory. Callers cannot begin a tenant transaction without one:
 ///
@@ -110,12 +138,20 @@ pub async fn begin_tenant_transaction(
     scope: &Scope,
 ) -> Result<TenantTransaction, sqlx::Error> {
     let mut transaction = pool.begin().await?;
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
-        .bind(scope.tenant_id().to_string())
-        .execute(&mut *transaction)
-        .await?;
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), set_config('app.principal_id', $2, true)",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(scope.principal().principal_id().to_string())
+    .execute(&mut *transaction)
+    .await?;
 
-    Ok(TenantTransaction { transaction })
+    Ok(TenantTransaction {
+        transaction,
+        tenant_id: scope.tenant_id(),
+        principal_id: scope.principal().principal_id(),
+        transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
+    })
 }
 
 /// Executes a typed row query inside a tenant-scoped transaction.

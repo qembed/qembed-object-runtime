@@ -2,17 +2,15 @@
 
 use std::fmt;
 
-use crate::ids::CallerId;
+use crate::ids::PrincipalId;
 
 /// The trust level established by the authentication boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PrincipalKind {
-    /// A caller authenticated without tenant-owner privileges.
+    /// An authenticated Principal without tenant-owner privileges.
     Authenticated,
-    /// A caller authenticated as the tenant owner.
+    /// An authenticated Principal representing the tenant owner.
     TenantOwner,
-    /// An unauthenticated caller represented by a server-issued caller ID.
-    Anonymous,
 }
 
 /// Identity and trust level established by authentication.
@@ -25,14 +23,14 @@ pub enum PrincipalKind {
 /// External callers cannot mint one:
 ///
 /// ```compile_fail
-/// use qembed_domain::ids::CallerId;
+/// use qembed_domain::ids::PrincipalId;
 /// use qembed_domain::principal::{Principal, PrincipalKind};
 ///
-/// let _ = Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated);
+/// let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Principal {
-    caller_id: CallerId,
+    principal_id: PrincipalId,
     kind: PrincipalKind,
 }
 
@@ -43,20 +41,20 @@ impl Principal {
     /// directly from an HTTP request body.
     #[allow(dead_code)] // Used by the trusted authentication boundary as it is introduced.
     pub(crate) fn from_verified_auth(
-        caller_id: CallerId,
+        principal_id: PrincipalId,
         kind: PrincipalKind,
     ) -> Result<Self, PrincipalError> {
-        if caller_id.as_uuid().is_nil() {
-            return Err(PrincipalError::NilCallerId);
+        if principal_id.as_uuid().is_nil() {
+            return Err(PrincipalError::NilPrincipalId);
         }
 
-        Ok(Self { caller_id, kind })
+        Ok(Self { principal_id, kind })
     }
 
-    /// Returns the server-established caller identity.
+    /// Returns the server-established principal identity.
     #[must_use]
-    pub const fn caller_id(&self) -> CallerId {
-        self.caller_id
+    pub const fn principal_id(&self) -> PrincipalId {
+        self.principal_id
     }
 
     /// Returns the trust level established by authentication.
@@ -69,14 +67,14 @@ impl Principal {
 /// Errors produced while establishing a trusted principal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrincipalError {
-    /// The authentication boundary supplied the nil UUID as caller identity.
-    NilCallerId,
+    /// The authentication boundary supplied the nil UUID as principal identity.
+    NilPrincipalId,
 }
 
 impl fmt::Display for PrincipalError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NilCallerId => formatter.write_str("caller ID must not be nil"),
+            Self::NilPrincipalId => formatter.write_str("principal ID must not be nil"),
         }
     }
 }
@@ -90,23 +88,23 @@ mod tests {
 
     #[test]
     fn verified_auth_context_creates_principal() {
-        let caller_id = CallerId::new();
+        let principal_id = PrincipalId::new();
 
-        let principal = Principal::from_verified_auth(caller_id, PrincipalKind::Authenticated)
-            .expect("non-nil caller ID must be accepted");
+        let principal = Principal::from_verified_auth(principal_id, PrincipalKind::Authenticated)
+            .expect("non-nil principal ID must be accepted");
 
-        assert_eq!(principal.caller_id(), caller_id);
+        assert_eq!(principal.principal_id(), principal_id);
         assert_eq!(principal.kind(), PrincipalKind::Authenticated);
     }
 
     #[test]
-    fn verified_auth_context_rejects_nil_caller_id() {
+    fn verified_auth_context_rejects_nil_principal_id() {
         let error = Principal::from_verified_auth(
-            CallerId::from_uuid(Uuid::nil()),
+            PrincipalId::from_uuid(Uuid::nil()),
             PrincipalKind::Authenticated,
         )
-        .expect_err("nil caller ID must be rejected");
+        .expect_err("nil principal ID must be rejected");
 
-        assert_eq!(error, PrincipalError::NilCallerId);
+        assert_eq!(error, PrincipalError::NilPrincipalId);
     }
 }

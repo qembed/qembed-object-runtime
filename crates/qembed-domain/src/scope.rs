@@ -80,29 +80,29 @@ impl std::error::Error for ScopeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::CallerId;
+    use crate::ids::PrincipalId;
     use crate::principal::{Principal, PrincipalKind};
     use uuid::Uuid;
 
     #[test]
     fn trusted_auth_context_creates_scope() {
         let tenant_id = TenantId::new();
-        let caller_id = CallerId::new();
-        let principal = Principal::from_verified_auth(caller_id, PrincipalKind::TenantOwner)
-            .expect("non-nil caller ID must be accepted");
+        let principal_id = PrincipalId::new();
+        let principal = Principal::from_verified_auth(principal_id, PrincipalKind::TenantOwner)
+            .expect("non-nil Principal ID must be accepted");
 
         let scope = Scope::from_verified_auth(tenant_id, principal)
             .expect("non-nil tenant ID must be accepted");
 
         assert_eq!(scope.tenant_id(), tenant_id);
-        assert_eq!(scope.principal().caller_id(), caller_id);
+        assert_eq!(scope.principal().principal_id(), principal_id);
         assert_eq!(scope.principal().kind(), PrincipalKind::TenantOwner);
     }
 
     #[test]
     fn scope_rejects_nil_tenant_id() {
         let principal =
-            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated)
                 .expect("non-nil caller ID must be accepted");
 
         let error = Scope::from_verified_auth(TenantId::from_uuid(Uuid::nil()), principal)

@@ -10,11 +10,11 @@
 //! External callers cannot construct a `Principal` from fields:
 //!
 //! ```compile_fail
-//! use qembed_domain::ids::CallerId;
+//! use qembed_domain::ids::PrincipalId;
 //! use qembed_domain::principal::{Principal, PrincipalKind};
 //!
 //! let _ = Principal {
-//!     caller_id: CallerId::new(),
+//!     principal_id: PrincipalId::new(),
 //!     kind: PrincipalKind::Authenticated,
 //! };
 //! ```
@@ -22,10 +22,10 @@
 //! External callers cannot invoke the trusted-authentication constructor:
 //!
 //! ```compile_fail
-//! use qembed_domain::ids::CallerId;
+//! use qembed_domain::ids::PrincipalId;
 //! use qembed_domain::principal::{Principal, PrincipalKind};
 //!
-//! let _ = Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated);
+//! let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::TenantOwner);
 //! ```
 //!
 //! A `Principal` cannot be reconstructed from serialized input:
@@ -107,6 +107,7 @@
 //! ```
 
 pub mod auth;
+pub mod caller;
 pub mod chat;
 pub mod ids;
 pub mod invocation;
@@ -125,7 +126,7 @@ pub mod snapshot;
 /// enabled. Production builds must not enable that feature.
 #[cfg(feature = "test-support")]
 pub mod test_support {
-    use crate::ids::{CallerId, TenantId};
+    use crate::ids::{PrincipalId, TenantId};
     use crate::principal::{Principal, PrincipalKind};
     use crate::scope::Scope;
 
@@ -134,8 +135,8 @@ pub mod test_support {
     #[must_use]
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
         let principal =
-            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
-                .expect("a generated caller ID must be valid");
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::TenantOwner)
+                .expect("a generated principal ID must be valid");
 
         Scope::from_verified_auth(tenant_id, principal)
             .expect("a generated tenant ID must be valid")

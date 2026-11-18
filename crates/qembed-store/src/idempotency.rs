@@ -10,10 +10,47 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::caller::ResolvedCaller;
 use qembed_domain::ids::{InvocationId, ObjectId};
 use qembed_domain::scope::Scope;
 
 use crate::{TenantTransaction, fetch_optional};
+
+/// Inputs for one caller-scoped idempotency reservation.
+#[derive(Clone, Copy, Debug)]
+pub struct IdempotencyClaim<'a> {
+    object_id: ObjectId,
+    idempotency_key: &'a str,
+    payload_hash: &'a [u8],
+    proposed_invocation_id: InvocationId,
+    expires_at: SystemTime,
+}
+
+impl<'a> IdempotencyClaim<'a> {
+    /// Returns the object whose idempotency namespace is being reserved.
+    #[must_use]
+    pub const fn object_id(&self) -> ObjectId {
+        self.object_id
+    }
+
+    /// Creates a reservation claim without choosing hash or expiry policy.
+    #[must_use]
+    pub const fn new(
+        object_id: ObjectId,
+        idempotency_key: &'a str,
+        payload_hash: &'a [u8],
+        proposed_invocation_id: InvocationId,
+        expires_at: SystemTime,
+    ) -> Self {
+        Self {
+            object_id,
+            idempotency_key,
+            payload_hash,
+            proposed_invocation_id,
+            expires_at,
+        }
+    }
+}
 
 /// Outcome of reserving an idempotency key inside a begin-invocation transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +67,8 @@ pub enum IdempotencyReservation {
 pub enum IdempotencyReservationError {
     /// The key already exists but belongs to a different request payload.
     PayloadMismatch,
+    /// The resolved Caller does not belong to this tenant/Principal transaction.
+    CallerContextMismatch,
     /// The supplied expiration cannot be represented by PostgreSQL's timestamp.
     ExpiryOutOfRange,
     /// A persisted invocation identifier could not be parsed.
@@ -43,6 +82,9 @@ impl fmt::Display for IdempotencyReservationError {
         match self {
             Self::PayloadMismatch => {
                 formatter.write_str("idempotency key was already used with a different payload")
+            }
+            Self::CallerContextMismatch => {
+                formatter.write_str("resolved Caller belongs to a different transaction context")
             }
             Self::ExpiryOutOfRange => {
                 formatter.write_str("idempotency expiration is outside the supported range")
@@ -61,9 +103,10 @@ impl std::error::Error for IdempotencyReservationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
-            Self::PayloadMismatch | Self::ExpiryOutOfRange | Self::InvalidPersistedInvocationId => {
-                None
-            }
+            Self::PayloadMismatch
+            | Self::CallerContextMismatch
+            | Self::ExpiryOutOfRange
+            | Self::InvalidPersistedInvocationId => None,
         }
     }
 }
@@ -78,7 +121,6 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 }
 
 /// Reserves an invocation key before the invocation row is inserted.
-/// Reserves an invocation key before the invocation row is inserted.
 ///
 /// The caller must pass a transaction opened with `begin_tenant_transaction`
 /// for the same `scope`. The caller also owns transaction commit/rollback:
@@ -90,7 +132,7 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// - `PayloadMismatch`: roll back and return an idempotency conflict.
 ///
 /// The key is scoped by the canonical SQL primary key
-/// (tenant, object, authenticated caller, key). The payload hash is treated as
+/// (tenant, object, effective Caller, key). The payload hash is treated as
 /// opaque bytes here; this function does not choose request canonicalization or
 /// a hash algorithm. Expiration is supplied by the caller because retention
 /// policy is not part of this adapter contract. An expired row remains reserved
@@ -101,14 +143,14 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
     scope: &Scope,
-    object_id: ObjectId,
-    idempotency_key: &str,
-    payload_hash: &[u8],
-    proposed_invocation_id: InvocationId,
-    expires_at: SystemTime,
+    caller: &ResolvedCaller,
+    claim: &IdempotencyClaim<'_>,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
-    let expiry_micros = expiry_unix_micros(expires_at)?;
-    let caller_id = scope.principal().caller_id();
+    if !caller.is_bound_to(transaction, scope) {
+        return Err(IdempotencyReservationError::CallerContextMismatch);
+    }
+    let expiry_micros = expiry_unix_micros(claim.expires_at)?;
+    let caller_id = caller.caller_id();
 
     loop {
         let inserted = fetch_optional(
@@ -117,11 +159,11 @@ pub async fn reserve_invocation_idempotency(
                 "INSERT INTO invocation_idempotency (tenant_id, object_id, caller_id, idempotency_key, payload_hash, invocation_id, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, to_timestamp($7::double precision / 1000000.0)) ON CONFLICT (tenant_id, object_id, caller_id, idempotency_key) DO NOTHING RETURNING invocation_id::text",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(object_id.to_string())
+            .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
-            .bind(idempotency_key)
-            .bind(payload_hash)
-            .bind(proposed_invocation_id.to_string())
+            .bind(claim.idempotency_key)
+            .bind(claim.payload_hash)
+            .bind(claim.proposed_invocation_id.to_string())
             .bind(expiry_micros as f64),
         )
         .await
@@ -129,7 +171,7 @@ pub async fn reserve_invocation_idempotency(
 
         if inserted.is_some() {
             return Ok(IdempotencyReservation::Reserved {
-                invocation_id: proposed_invocation_id,
+                invocation_id: claim.proposed_invocation_id,
             });
         }
 
@@ -139,9 +181,9 @@ pub async fn reserve_invocation_idempotency(
                 "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4 FOR UPDATE",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(object_id.to_string())
+            .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
-            .bind(idempotency_key),
+            .bind(claim.idempotency_key),
         )
         .await
         .map_err(IdempotencyReservationError::Database)?;
@@ -152,7 +194,7 @@ pub async fn reserve_invocation_idempotency(
             continue;
         };
 
-        if existing_hash != payload_hash {
+        if existing_hash != claim.payload_hash {
             return Err(IdempotencyReservationError::PayloadMismatch);
         }
 

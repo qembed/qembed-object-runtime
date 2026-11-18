@@ -21,9 +21,7 @@ No production DDL or migration is introduced by RUST-035.
 
 ## Runtime behavior
 
-`qembed-store::idempotency::reserve_invocation_idempotency` receives an already
-tenant-bound `TenantTransaction` and derives `caller_id` from the trusted
-`Scope`; callers cannot choose another caller's idempotency namespace.
+`qembed-store::idempotency::reserve_invocation_idempotency` receives an already tenant-bound `TenantTransaction`, the trusted `Scope`, and a `ResolvedCaller` minted by SQL-011's locked delegation resolver. It never derives `caller_id` from `Scope` or `PrincipalId`. `ResolvedCaller` is bound to the exact transaction token, tenant, and Principal, so it cannot be reused after commit or in another transaction.
 
 - A new key returns `Reserved { invocation_id }`. The caller must insert that
   invocation in the same transaction before commit.
@@ -57,6 +55,8 @@ begin-invocation transaction.
 
 PostgreSQL integration tests cover same-key replay, concurrent requests,
 payload mismatch, rollback releasing a claim, and isolation across tenant,
-object, and authenticated-caller scopes. The isolated test schema reproduces
+object, and effective-Caller scopes. The isolated test schema reproduces
 the relevant canonical table constraints, including the deferred composite FK;
 it is test fixture DDL only.
+
+RUST-036 resolves the explicit Caller selection before reserving the key. The resolver locks the active delegation and Principal/Caller lifecycle rows until the atomic begin-invocation transaction commits. See [Principal and Caller identities](PRINCIPAL_CALLER_DELEGATION.md) and [Atomic begin-invocation](BEGIN_INVOCATION_TRANSACTION.md).

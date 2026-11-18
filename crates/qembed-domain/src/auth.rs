@@ -28,8 +28,9 @@ where
         return Err(OwnerAuthenticationError::NotOwner);
     }
 
-    let principal = Principal::from_verified_auth(identity.caller_id(), identity.principal_kind())
-        .map_err(OwnerAuthenticationError::InvalidPrincipal)?;
+    let principal =
+        Principal::from_verified_auth(identity.principal_id(), identity.principal_kind())
+            .map_err(OwnerAuthenticationError::InvalidPrincipal)?;
 
     Scope::from_verified_auth(identity.tenant_id(), principal)
         .map_err(OwnerAuthenticationError::InvalidScope)
@@ -42,7 +43,7 @@ pub enum OwnerAuthenticationError<E> {
     Rejected(E),
     /// The verified identity is not a tenant owner.
     NotOwner,
-    /// The adapter returned an invalid caller identity.
+    /// The adapter returned an invalid Principal identity.
     InvalidPrincipal(PrincipalError),
     /// The adapter returned an invalid tenant identity.
     InvalidScope(ScopeError),
@@ -77,7 +78,7 @@ mod tests {
     use std::convert::Infallible;
     use std::future::ready;
 
-    use crate::ids::{CallerId, TenantId};
+    use crate::ids::{PrincipalId, TenantId};
     use crate::ports::{AuthenticatedIdentity, AuthenticationPort};
 
     use super::*;
@@ -95,7 +96,7 @@ mod tests {
         {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
-                CallerId::new(),
+                PrincipalId::new(),
                 PrincipalKind::TenantOwner,
             )))
         }
@@ -114,7 +115,7 @@ mod tests {
         {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
-                CallerId::new(),
+                PrincipalId::new(),
                 PrincipalKind::Authenticated,
             )))
         }

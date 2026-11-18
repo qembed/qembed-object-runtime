@@ -22,6 +22,7 @@ used by runtime, dispatcher, or admin processes.
 | `outbox_messages` | INSERT | SELECT, UPDATE(`delivered_at`) | SELECT |
 | `owner_principals` | SELECT | — | — |
 | `owner_credentials` | SELECT | — | — |
+| `principal_caller_delegations` | SELECT; EXECUTE grant/revoke/resolve functions | — | — |
 | Schema / DDL | — | — | — |
 
 No application role receives DELETE privileges. Snapshots and events are immutable
@@ -62,3 +63,8 @@ or rollback and cannot leak to the next pool borrower.
   is intentionally broader than a tenant-scoped runtime, but only on the outbox.
 - The current outbox schema has no lease/claim/attempt model. This role contract
   does not invent one; it covers only SELECT and `delivered_at` acknowledgement.
+
+
+## Principal context and delegated Caller
+
+`begin_tenant_transaction` sets both `app.tenant_id` and `app.principal_id` from the trusted `Scope`, using bind parameters and transaction-local settings. The latter is required by SQL-011's `resolve_delegated_caller` SECURITY DEFINER function. Runtime can read delegation rows and execute the narrow grant/revoke/resolution functions, but cannot write delegation rows directly. The resolver locks the active grant, Principal, and Caller rows until the transaction commits. See [PRINCIPAL_CALLER_DELEGATION.md](PRINCIPAL_CALLER_DELEGATION.md).
