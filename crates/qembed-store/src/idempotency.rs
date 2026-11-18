@@ -11,6 +11,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qembed_domain::ids::{InvocationId, ObjectId};
+use qembed_domain::scope::Scope;
 use crate::caller::ResolvedCaller;
 
 use crate::{TenantTransaction, fetch_optional};
@@ -100,6 +101,7 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// transaction reads and returns the winning invocation ID after it commits.
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
+    scope: &Scope,
     caller: &ResolvedCaller,
     object_id: ObjectId,
     idempotency_key: &str,
