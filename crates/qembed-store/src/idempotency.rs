@@ -31,6 +31,8 @@ pub enum IdempotencyReservation {
 pub enum IdempotencyReservationError {
     /// The key already exists but belongs to a different request payload.
     PayloadMismatch,
+    /// The resolved Caller does not belong to this tenant/Principal transaction.
+    CallerContextMismatch,
     /// The supplied expiration cannot be represented by PostgreSQL's timestamp.
     ExpiryOutOfRange,
     /// A persisted invocation identifier could not be parsed.
@@ -45,6 +47,7 @@ impl fmt::Display for IdempotencyReservationError {
             Self::PayloadMismatch => {
                 formatter.write_str("idempotency key was already used with a different payload")
             }
+            Self::CallerContextMismatch => formatter.write_str("resolved Caller belongs to a different transaction context"),
             Self::ExpiryOutOfRange => {
                 formatter.write_str("idempotency expiration is outside the supported range")
             }
@@ -62,7 +65,7 @@ impl std::error::Error for IdempotencyReservationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
-            Self::PayloadMismatch | Self::ExpiryOutOfRange | Self::InvalidPersistedInvocationId => {
+            Self::PayloadMismatch | Self::CallerContextMismatch | Self::ExpiryOutOfRange | Self::InvalidPersistedInvocationId => {
                 None
             }
         }
@@ -108,6 +111,9 @@ pub async fn reserve_invocation_idempotency(
     proposed_invocation_id: InvocationId,
     expires_at: SystemTime,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
+    if !caller.is_bound_to(transaction, scope) {
+        return Err(IdempotencyReservationError::CallerContextMismatch);
+    }
     let expiry_micros = expiry_unix_micros(expires_at)?;
     let caller_id = caller.caller_id();
 
