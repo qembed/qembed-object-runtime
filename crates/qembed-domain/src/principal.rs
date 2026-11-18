@@ -11,8 +11,6 @@ pub enum PrincipalKind {
     Authenticated,
     /// A caller authenticated as the tenant owner.
     TenantOwner,
-    /// An unauthenticated caller represented by a server-issued principal ID.
-    Anonymous,
 }
 
 /// Identity and trust level established by authentication.
