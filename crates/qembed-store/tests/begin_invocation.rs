@@ -3,7 +3,7 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use qembed_domain::caller::InvocationPool;
-use qembed_domain::ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
+use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
