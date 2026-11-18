@@ -290,10 +290,15 @@ SQLX_OFFLINE=true cargo check --workspace
   - Документация: INVOCATION_WORKER_LIFECYCLE.md, BEGIN_INVOCATION_TRANSACTION.md, README.
   - DoD: invocation lifecycle сохраняется в PostgreSQL и переживает рестарт процесса.
 
-- [ ] **RUST-038 (M, implementation in progress)** Реализовать invocation lease и fencing-token CAS.
+- [x] **RUST-038 (M)** Реализовать invocation lease и fencing-token CAS.
   - Реализация: initial owner claim без смены token; heartbeat только активного владельца; reclaim истёкшей lease с атомарным увеличением token/version; все worker writes проверяют owner, expiry, token и version.
   - Тесты: две независимые PostgreSQL sessions; конкурентный claim; heartbeat; expiry/reclaim; старый worker не может записать assistant output после выдачи нового token.
   - DoD: stale worker не записывает результат и не завершает invocation после reclaim.
+
+- [x] **RUST-038A (S)** Заложить стабильный provider idempotency key в ChatProvider contract.
+  - Реализация: runtime выводит key из durable InvocationId и передаёт его в provider request context на каждой попытке; capability явно объявляет поддержку только для adapter-ов, которые действительно передают key upstream.
+  - Тесты: одинаковый invocation ID даёт одинаковый key; другой invocation — другой key; default provider path не заявляет idempotency; lease owner/token не участвуют в key.
+  - DoD: повтор после lease reclaim использует тот же provider key; exactly-once не обещается для provider-ов без подтверждённой upstream idempotency.
 
 - [ ] **RUST-039 (S)** Реализовать `GET invocation`.
   - Тесты: API integration — queued/running/succeeded/failed; tenant isolation; скрытие внутренних payloads.

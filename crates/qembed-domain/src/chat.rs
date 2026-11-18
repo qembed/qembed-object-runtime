@@ -8,6 +8,8 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::ids::InvocationId;
+
 /// Maximum number of messages accepted in one chat request.
 pub const MAX_CHAT_MESSAGES: usize = 128;
 /// Maximum UTF-8 byte length of one message body.
@@ -80,6 +82,31 @@ pub enum StructuredOutputMode {
     JsonOnly,
 }
 
+/// Stable context for one logical provider operation.
+///
+/// The key is derived from the durable invocation ID, so every worker attempt
+/// for the same invocation reuses it. It is deliberately not caller supplied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderRequestContext {
+    idempotency_key: String,
+}
+
+impl ProviderRequestContext {
+    /// Creates the stable key for the invocation's primary chat completion.
+    #[must_use]
+    pub fn for_invocation(invocation_id: InvocationId) -> Self {
+        Self {
+            idempotency_key: format!("qembed:invocation:{invocation_id}:chat:v1"),
+        }
+    }
+
+    /// Returns the opaque key an adapter may forward when the provider supports it.
+    #[must_use]
+    pub fn idempotency_key(&self) -> &str {
+        &self.idempotency_key
+    }
+}
+
 /// Explicit capabilities advertised by one configured provider/model route.
 ///
 /// This descriptor contains only provider-neutral features. It is configuration
@@ -88,6 +115,7 @@ pub enum StructuredOutputMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ChatCapabilities {
     structured_output_modes: Vec<StructuredOutputMode>,
+    idempotency_keys: bool,
 }
 
 impl ChatCapabilities {
@@ -103,7 +131,24 @@ impl ChatCapabilities {
         }
         Self {
             structured_output_modes,
+            idempotency_keys: false,
         }
+    }
+
+    /// Returns a profile that advertises provider-side idempotency-key support.
+    ///
+    /// An adapter may set this only when it forwards the supplied request key
+    /// to the provider and the provider guarantees deduplication for that key.
+    #[must_use]
+    pub const fn with_idempotency_keys(mut self) -> Self {
+        self.idempotency_keys = true;
+        self
+    }
+
+    /// Whether this route guarantees provider-side deduplication by request key.
+    #[must_use]
+    pub const fn supports_idempotency_keys(&self) -> bool {
+        self.idempotency_keys
     }
 
     /// Returns the modes explicitly present in this normalized profile.
@@ -431,6 +476,28 @@ mod tests {
 
     fn user_message(content: &str) -> ChatMessage {
         ChatMessage::new(ChatRole::User, content).expect("valid user message")
+    }
+
+    #[test]
+    fn provider_idempotency_key_is_stable_per_invocation_and_distinct_between_invocations() {
+        let invocation_id = InvocationId::new();
+        let first = ProviderRequestContext::for_invocation(invocation_id);
+        let retry = ProviderRequestContext::for_invocation(invocation_id);
+        let other = ProviderRequestContext::for_invocation(InvocationId::new());
+
+        assert_eq!(first, retry);
+        assert_ne!(first, other);
+        assert!(first.idempotency_key().starts_with("qembed:invocation:"));
+        assert!(first.idempotency_key().ends_with(":chat:v1"));
+    }
+
+    #[test]
+    fn provider_idempotency_capability_is_opt_in() {
+        let unsupported = ChatCapabilities::default();
+        assert!(!unsupported.supports_idempotency_keys());
+
+        let supported = ChatCapabilities::default().with_idempotency_keys();
+        assert!(supported.supports_idempotency_keys());
     }
 
     #[test]
