@@ -18,7 +18,7 @@ pub struct PgInvocationQueryStore {
 
 impl PgInvocationQueryStore {
     #[must_use]
-    pub const fn new(pool: PgPool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
