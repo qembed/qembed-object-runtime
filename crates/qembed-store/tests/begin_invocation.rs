@@ -152,6 +152,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
     )
     .bind(caller_id.to_string())
     .bind(tenant_id.to_string())
+    .bind(vec![7_u8; 32])
     .execute(&pool)
     .await
     .expect("Service Caller fixture should be inserted");
