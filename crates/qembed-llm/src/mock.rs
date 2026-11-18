@@ -72,10 +72,16 @@ impl Error for MockChatProviderError {}
 /// Register each request exactly once with the with_response or with_error
 /// methods. An unregistered request returns UnscriptedRequest, making missing
 /// fixtures visible instead of silently returning a plausible response.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MockChatProvider {
     scripts: Vec<Script>,
     capability_profiles: Vec<(String, ChatCapabilities)>,
+}
+
+impl Default for MockChatProvider {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockChatProvider {
