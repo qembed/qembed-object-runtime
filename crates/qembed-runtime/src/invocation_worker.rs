@@ -1,8 +1,7 @@
 //! Minimal durable invocation worker.
 //!
-//! This worker is lease-free in RUST-037. It persists each state boundary and
-//! the provider response so a restarted process resumes from Verifying without
-//! another provider call. Lease acquisition/reclaim belongs to RUST-038.
+//! This worker claims a PostgreSQL lease, heartbeats during provider I/O, and
+//! fences every lifecycle write by owner, expiry, version, and fencing token.
 
 use std::error::Error;
 use std::fmt;
@@ -443,6 +442,7 @@ mod lifecycle_tests {
     use qembed_domain::chat::{ChatCapabilities, ChatFinishReason, ChatResponse};
     use qembed_domain::ids::{CallerId, ObjectId, SnapshotId, TenantId};
     use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint};
+    use qembed_domain::invocation_lease::InvocationLeaseStore;
     use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
     use qembed_domain::test_support::scope_for_tenant;
 
@@ -453,6 +453,7 @@ mod lifecycle_tests {
         input: String,
         output: Option<String>,
         error_code: Option<&'static str>,
+        lease_owner: Option<String>,
     }
 
     #[derive(Clone)]
@@ -581,6 +582,100 @@ mod lifecycle_tests {
         }
     }
 
+    impl InvocationLeaseStore for FakeStore {
+        async fn claim_invocation(
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+            owner: &str,
+            _: u32,
+        ) -> Result<Option<Invocation>, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.id() != invocation_id
+                || state.invocation.status().is_terminal()
+                || state.lease_owner.is_some()
+            {
+                return Ok(None);
+            }
+            state.lease_owner = Some(owner.to_owned());
+            Ok(Some(state.invocation.clone()))
+        }
+
+        async fn heartbeat_invocation(
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+            owner: &str,
+            token: FencingToken,
+            _: u32,
+        ) -> Result<bool, Self::Error> {
+            let state = self.0.lock().expect("fake store lock");
+            Ok(state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.id() == invocation_id
+                && state.invocation.fencing_token() == token
+                && state.lease_owner.as_deref() == Some(owner))
+        }
+
+        async fn compare_and_set_owned(
+            &self,
+            scope: &Scope,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
+            next: Invocation,
+        ) -> Result<bool, Self::Error> {
+            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+                return Ok(false);
+            }
+            self.compare_and_set_invocation(scope, version, token, next).await
+        }
+
+        async fn persist_assistant_output_owned(
+            &self,
+            scope: &Scope,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
+            next: Invocation,
+            content: String,
+        ) -> Result<bool, Self::Error> {
+            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+                return Ok(false);
+            }
+            self.persist_assistant_output(scope, version, token, next, content).await
+        }
+
+        async fn complete_invocation_owned(
+            &self,
+            scope: &Scope,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
+            next: Invocation,
+        ) -> Result<bool, Self::Error> {
+            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+                return Ok(false);
+            }
+            self.complete_invocation(scope, version, token, next).await
+        }
+
+        async fn fail_invocation_owned(
+            &self,
+            scope: &Scope,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
+            next: Invocation,
+            error_code: &'static str,
+        ) -> Result<bool, Self::Error> {
+            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+                return Ok(false);
+            }
+            self.fail_invocation(scope, version, token, next, error_code).await
+        }
+    }
+
     struct FakeProvider {
         response: Result<ChatResponse, ChatProviderError>,
         calls: Arc<AtomicUsize>,
@@ -618,6 +713,7 @@ mod lifecycle_tests {
             input: "hello".to_owned(),
             output: output.map(str::to_owned),
             error_code: None,
+            lease_owner: None,
         })));
         (scope, invocation_id, store)
     }
