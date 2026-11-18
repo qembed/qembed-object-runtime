@@ -21,7 +21,10 @@ impl fmt::Display for StructuredOutputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedMode(mode) => {
-                write!(formatter, "provider does not support structured output mode {mode:?}")
+                write!(
+                    formatter,
+                    "provider does not support structured output mode {mode:?}"
+                )
             }
             Self::MalformedJson => {
                 formatter.write_str("provider returned malformed JSON for JsonOnly output")
