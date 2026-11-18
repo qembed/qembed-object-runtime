@@ -58,8 +58,12 @@ impl fmt::Display for MockChatProviderError {
             Self::Timeout => "mock provider timed out",
             Self::Unavailable => "mock provider is unavailable",
             Self::UnscriptedRequest => "mock provider has no script for this request",
-            Self::UnsupportedCapability => "mock provider does not support the requested capability",
-            Self::UnconfiguredModel => "mock provider has no capability profile for the model routing key",
+            Self::UnsupportedCapability => {
+                "mock provider does not support the requested capability"
+            },
+            Self::UnconfiguredModel => {
+                "mock provider has no capability profile for the model routing key"
+            },
         };
         formatter.write_str(message)
     }
@@ -104,7 +108,11 @@ impl MockChatProvider {
         capabilities: ChatCapabilities,
     ) -> Self {
         let model_key = model_key.into();
-        if let Some((_, existing)) = self.capability_profiles.iter_mut().find(|(key, _)| key == &model_key) {
+        if let Some((_, existing)) = self
+            .capability_profiles
+            .iter_mut()
+            .find(|(key, _)| key == &model_key)
+        {
             *existing = capabilities;
         } else {
             self.capability_profiles.push((model_key, capabilities));
@@ -155,7 +163,10 @@ impl ChatProvider for MockChatProvider {
     type Error = MockChatProviderError;
 
     fn capabilities(&self, model_key: &str) -> Option<ChatCapabilities> {
-        self.capability_profiles.iter().find(|(key, _)| key == model_key).map(|(_, caps)| caps.clone())
+        self.capability_profiles
+            .iter()
+            .find(|(key, _)| key == model_key)
+            .map(|(_, caps)| caps.clone())
     }
 
     async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
@@ -270,6 +281,10 @@ mod tests {
         let json_request =
             request("same prompt").with_structured_output(StructuredOutputMode::JsonOnly);
         let provider = MockChatProvider::new()
+            .with_capabilities(
+                "test-chat",
+                qembed_domain::chat::ChatCapabilities::new([StructuredOutputMode::JsonOnly]),
+            )
             .with_response(plain_request, response("plain text"))
             .expect("unique script");
 
