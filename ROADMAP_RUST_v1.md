@@ -221,9 +221,9 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration с двумя независимыми backend sessions подтверждает stale predicate conflict после commit победителя; отдельный тест проверяет отказ CAS при обновлении нескольких строк и rollback.
   - DoD: успешный CAS требует ровно одной изменённой строки.
 
-- [ ] **RUST-027 (M)** Покрыть RLS и composite FK интеграционными тестами.
-  - Тесты: запуск под реальными non-owner roles; tenant A не читает/пишет tenant B; отсутствующий scope fail-closed; cross-tenant FK rejected.
-  - DoD: проверяется поведение БД, а не только mock repository.
+- [x] **RUST-027 (M)** Покрыть RLS и composite FK интеграционными тестами.
+  - Тесты: non-owner RLS role проверяет tenant-scoped SELECT/INSERT/UPDATE/DELETE, cross-tenant writes отклоняются, отсутствие tenant context возвращает пустой read scope; прямые PostgreSQL inserts подтверждают cross-tenant rejection для object/version, published-version pointer, snapshot provenance и event/outbox FK.
+  - DoD: проверяется поведение PostgreSQL constraints и RLS под отдельной non-owner ролью, а не только mock repository.
 
 - [ ] **RUST-028 (S)** Проверить append-only и restricted data access через store API.
   - Тесты: DB integration — runtime role не может менять immutable rows; repository не предоставляет запрещённые mutation methods.
