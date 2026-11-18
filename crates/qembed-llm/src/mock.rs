@@ -207,10 +207,10 @@ mod tests {
             .with_response(input.clone(), response("world"))
             .expect("first script");
 
-        assert_eq!(
+        assert!(matches!(
             provider.clone().with_error(input.clone(), MockChatProviderError::Timeout),
             Err(MockConfigurationError::DuplicateRequest)
-        );
+        ));
         assert_eq!(
             provider.complete(request("not scripted")).await.unwrap_err(),
             MockChatProviderError::UnscriptedRequest
