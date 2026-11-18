@@ -101,7 +101,9 @@ impl ChatCapabilities {
                 structured_output_modes.push(mode);
             }
         }
-        Self { structured_output_modes }
+        Self {
+            structured_output_modes,
+        }
     }
 
     /// Returns the modes explicitly present in this normalized profile.
@@ -113,7 +115,8 @@ impl ChatCapabilities {
     /// Whether this profile can satisfy the requested output mode.
     #[must_use]
     pub fn supports(&self, mode: StructuredOutputMode) -> bool {
-        mode == StructuredOutputMode::None || self.structured_output_modes.contains(&mode)
+        mode == StructuredOutputMode::None
+            || self.structured_output_modes.contains(&mode)
     }
 }
 
