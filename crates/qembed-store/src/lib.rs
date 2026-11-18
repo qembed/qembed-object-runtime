@@ -91,8 +91,7 @@ impl TenantTransaction {
     }
 
     pub(crate) fn matches_scope(&self, scope: &Scope) -> bool {
-        self.tenant_id == scope.tenant_id()
-            && self.principal_id == scope.principal().principal_id()
+        self.tenant_id == scope.tenant_id() && self.principal_id == scope.principal().principal_id()
     }
 
     /// Returns the PostgreSQL connection carrying this transaction's tenant context.
@@ -133,11 +132,13 @@ pub async fn begin_tenant_transaction(
     scope: &Scope,
 ) -> Result<TenantTransaction, sqlx::Error> {
     let mut transaction = pool.begin().await?;
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true), set_config('app.principal_id', $2, true)")
-        .bind(scope.tenant_id().to_string())
-        .bind(scope.principal().principal_id().to_string())
-        .execute(&mut *transaction)
-        .await?;
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), set_config('app.principal_id', $2, true)",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(scope.principal().principal_id().to_string())
+    .execute(&mut *transaction)
+    .await?;
 
     Ok(TenantTransaction {
         transaction,
