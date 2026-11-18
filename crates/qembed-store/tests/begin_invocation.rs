@@ -622,6 +622,22 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         "a live lease cannot be stolen"
     );
 
+    let mut unowned_transition = first_claim.clone();
+    unowned_transition
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("legacy candidate transition");
+    assert!(
+        !worker_a.compare_and_set_invocation(
+            &fixture.scope,
+            first_claim.version(),
+            first_claim.fencing_token(),
+            unowned_transition,
+        )
+        .await
+        .expect("unowned write should be a CAS miss"),
+        "legacy token-only writes must not bypass an active lease"
+    );
+
     let mut context_loading = first_claim.clone();
     context_loading
         .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
