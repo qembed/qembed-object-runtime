@@ -1,7 +1,7 @@
 //! Atomic creation of an invocation and its durable delivery event.
 
 use std::fmt;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use qembed_domain::caller::{CallerKind, InvocationPool};
 use qembed_domain::ids::{CallerId, EventId, InvocationId, ObjectId, SnapshotId, TraceId};
@@ -30,6 +30,10 @@ pub struct BeginInvocationCommand {
     pub snapshot_id: SnapshotId,
     pub idempotency_key: String,
     pub payload_hash: Vec<u8>,
+    /// Original user input, persisted before the invocation is dispatched.
+    pub input_message: String,
+    /// Retention deadline for the user and assistant interaction messages.
+    pub message_expires_at: SystemTime,
     pub idempotency_expires_at: SystemTime,
     pub trace_id: TraceId,
 }
@@ -61,6 +65,8 @@ pub enum BeginInvocationError {
     SnapshotIsNotCurrentPublishedVersion,
     KnowledgeRevisionNotFound,
     KnowledgeRevisionOutOfRange,
+    InvalidInputMessage,
+    InvalidMessageExpiry,
     Database(sqlx::Error),
 }
 
@@ -85,6 +91,8 @@ impl fmt::Display for BeginInvocationError {
             Self::KnowledgeRevisionOutOfRange => {
                 formatter.write_str("knowledge revision is outside the supported range")
             }
+            Self::InvalidInputMessage => formatter.write_str("input message is empty or too large"),
+            Self::InvalidMessageExpiry => formatter.write_str("message expiry is invalid"),
             Self::Database(error) => write!(formatter, "begin-invocation database error: {error}"),
         }
     }
@@ -164,6 +172,19 @@ pub async fn begin_invocation(
     scope: &Scope,
     command: BeginInvocationCommand,
 ) -> Result<BeginInvocationOutcome, BeginInvocationError> {
+    if command.input_message.trim().is_empty() || command.input_message.len() > 65_536 {
+        return Err(BeginInvocationError::InvalidInputMessage);
+    }
+    let message_expiry_micros = command.message_expires_at
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?
+        .as_micros();
+    let message_expiry_micros = i64::try_from(message_expiry_micros)
+        .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?;
+    if command.message_expires_at <= SystemTime::now() {
+        return Err(BeginInvocationError::InvalidMessageExpiry);
+    }
+
     let mut transaction = begin_tenant_transaction(pool, scope)
         .await
         .map_err(BeginInvocationError::Database)?;
@@ -257,6 +278,22 @@ pub async fn begin_invocation(
         .bind(i64::try_from(knowledge_revision).map_err(|_| BeginInvocationError::KnowledgeRevisionOutOfRange)?)
         .bind(command.invocation_pool.as_sql())
         .bind(command.trace_id.to_string()),
+    )
+    .await
+    .map_err(BeginInvocationError::Database)?;
+
+    execute(
+        &mut transaction,
+        sqlx::query(
+            "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'user', $6, to_timestamp($7::double precision / 1000000.0))",
+        )
+        .bind(qembed_domain::ids::EventId::new().to_string())
+        .bind(scope.tenant_id().to_string())
+        .bind(command.object_id.to_string())
+        .bind(caller.caller_id().to_string())
+        .bind(invocation_id.to_string())
+        .bind(&command.input_message)
+        .bind(message_expiry_micros as f64),
     )
     .await
     .map_err(BeginInvocationError::Database)?;
