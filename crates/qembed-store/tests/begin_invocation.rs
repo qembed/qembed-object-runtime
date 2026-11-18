@@ -185,16 +185,16 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
 }
 
 fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
-    BeginInvocationCommand::new(
-        fixture.object_id,
-        fixture.caller_id,
-        InvocationPool::Authenticated,
-        fixture.snapshot_id,
-        key,
-        b"request-digest".to_vec(),
-        SystemTime::now() + Duration::from_secs(3_600),
-        TraceId::new(),
-    )
+    BeginInvocationCommand {
+        object_id: fixture.object_id,
+        requested_caller_id: fixture.caller_id,
+        invocation_pool: InvocationPool::Authenticated,
+        snapshot_id: fixture.snapshot_id,
+        idempotency_key: key.to_owned(),
+        payload_hash: b"request-digest".to_vec(),
+        idempotency_expires_at: SystemTime::now() + Duration::from_secs(3_600),
+        trace_id: TraceId::new(),
+    }
 }
 
 async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64) {
