@@ -7,7 +7,6 @@
 use std::fmt;
 
 use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse, StructuredOutputMode};
-use qembed_domain::ports::ChatProvider;
 
 /// Failure while applying a structured-output contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +92,7 @@ pub fn validate_response(
 #[cfg(test)]
 mod tests {
     use qembed_domain::chat::ChatFinishReason;
+    use qembed_domain::ports::ChatProvider;
 
     use super::*;
 
