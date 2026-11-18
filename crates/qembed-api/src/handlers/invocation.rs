@@ -50,12 +50,26 @@ pub async fn cancel_invocation<S: InvocationCancellationStore>(
     scope: &Scope,
     invocation_id: InvocationId,
 ) -> Result<Option<CancelInvocationResponse>, S::Error> {
-    let (status, cancellation_applied) = match service.cancel(scope, invocation_id).await? {
-        InvocationCancellationOutcome::Cancelled { newly_cancelled } => (InvocationApiStatus::Cancelled, newly_cancelled),
+    let outcome = service.cancel(scope, invocation_id).await?;
+    Ok(cancellation_response(invocation_id, outcome))
+}
+
+fn cancellation_response(
+    invocation_id: InvocationId,
+    outcome: InvocationCancellationOutcome,
+) -> Option<CancelInvocationResponse> {
+    let (status, cancellation_applied) = match outcome {
+        InvocationCancellationOutcome::Cancelled { newly_cancelled } => {
+            (InvocationApiStatus::Cancelled, newly_cancelled)
+        }
         InvocationCancellationOutcome::AlreadyTerminal(status) => (api_status(status), false),
-        InvocationCancellationOutcome::NotFound => return Ok(None),
+        InvocationCancellationOutcome::NotFound => return None,
     };
-    Ok(Some(CancelInvocationResponse { invocation_id: invocation_id.to_string(), status, cancellation_applied }))
+    Some(CancelInvocationResponse {
+        invocation_id: invocation_id.to_string(),
+        status,
+        cancellation_applied,
+    })
 }
 
 /// GET /invocations/{id} application handler. HTTP routing/status-code wiring
@@ -85,12 +99,16 @@ pub async fn get_invocation<S: InvocationReadStore>(
 fn api_status(status: InvocationStatus) -> InvocationApiStatus {
     api_status_with_degraded(status).0
 }
+
 fn api_status_with_degraded(status: InvocationStatus) -> (InvocationApiStatus, bool) {
     match status {
         InvocationStatus::Received => (InvocationApiStatus::Queued, false),
-        InvocationStatus::ContextLoading | InvocationStatus::Processing | InvocationStatus::ExecutingTool
-        | InvocationStatus::Verifying | InvocationStatus::WaitingForInput | InvocationStatus::WaitingForApproval
-            => (InvocationApiStatus::Running, false),
+        InvocationStatus::ContextLoading
+        | InvocationStatus::Processing
+        | InvocationStatus::ExecutingTool
+        | InvocationStatus::Verifying
+        | InvocationStatus::WaitingForInput
+        | InvocationStatus::WaitingForApproval => (InvocationApiStatus::Running, false),
         InvocationStatus::Completed => (InvocationApiStatus::Succeeded, false),
         InvocationStatus::CompletedDegraded => (InvocationApiStatus::Succeeded, true),
         InvocationStatus::Failed => (InvocationApiStatus::Failed, false),
@@ -100,6 +118,42 @@ fn api_status_with_degraded(status: InvocationStatus) -> (InvocationApiStatus, b
 #[cfg(test)]
 mod tests {
     use super::*;
+    use qembed_domain::ids::InvocationId;
+
+    #[test]
+    fn cancellation_response_distinguishes_applied_repeated_and_terminal_requests() {
+        let id = InvocationId::new();
+
+        let applied = cancellation_response(
+            id,
+            InvocationCancellationOutcome::Cancelled {
+                newly_cancelled: true,
+            },
+        )
+        .expect("new cancellation has a response");
+        assert_eq!(applied.status, InvocationApiStatus::Cancelled);
+        assert!(applied.cancellation_applied);
+
+        let repeated = cancellation_response(
+            id,
+            InvocationCancellationOutcome::Cancelled {
+                newly_cancelled: false,
+            },
+        )
+        .expect("repeated cancellation has a response");
+        assert_eq!(repeated.status, InvocationApiStatus::Cancelled);
+        assert!(!repeated.cancellation_applied);
+
+        let terminal = cancellation_response(
+            id,
+            InvocationCancellationOutcome::AlreadyTerminal(InvocationStatus::Failed),
+        )
+        .expect("terminal invocation has a response");
+        assert_eq!(terminal.status, InvocationApiStatus::Failed);
+        assert!(!terminal.cancellation_applied);
+
+        assert!(cancellation_response(id, InvocationCancellationOutcome::NotFound).is_none());
+    }
 
     #[test]
     fn response_serialization_exposes_only_the_client_contract() {
