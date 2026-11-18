@@ -316,7 +316,7 @@ async fn invocation_insert_failure_rolls_back_idempotency_claim() {
     )
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -330,7 +330,7 @@ async fn event_insert_failure_rolls_back_invocation_and_idempotency() {
     )
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -344,7 +344,7 @@ async fn outbox_insert_failure_rolls_back_invocation_idempotency_and_event() {
     )
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -363,7 +363,7 @@ async fn principal_uuid_is_not_an_implicit_caller_mapping() {
             qembed_store::caller::CallerResolutionError::NotDelegated
         )
     ));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -386,7 +386,7 @@ async fn missing_knowledge_revision_rolls_back_the_idempotency_claim() {
         error,
         BeginInvocationError::KnowledgeRevisionNotFound
     ));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -406,6 +406,6 @@ async fn inactive_object_rolls_back_the_idempotency_claim() {
     .await
     .expect_err("suspended object must not begin an invocation");
     assert!(matches!(error, BeginInvocationError::ObjectNotActive));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
