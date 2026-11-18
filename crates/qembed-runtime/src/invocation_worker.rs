@@ -7,7 +7,9 @@
 use std::error::Error;
 use std::fmt;
 
-use qembed_domain::chat::{ChatContractError, ChatMessage, ChatProviderError, ChatRequest, ChatRole};
+use qembed_domain::chat::{
+    ChatContractError, ChatMessage, ChatProviderError, ChatRequest, ChatRole,
+};
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::{Invocation, InvocationError, InvocationStatus};
 use qembed_domain::ports::{ChatProvider, InvocationWorkStore};
@@ -73,12 +75,25 @@ impl<E: fmt::Display> fmt::Display for InvocationWorkerError<E> {
             Self::Store(error) => write!(formatter, "invocation worker store failed: {error}"),
             Self::NotFound => formatter.write_str("invocation was not found in this tenant"),
             Self::MissingUserInput => formatter.write_str("invocation has no durable user input"),
-            Self::MissingPersistedOutput => formatter.write_str("Verifying invocation has no durable assistant output"),
-            Self::ProviderRouteNotConfigured => formatter.write_str("configured chat provider route is unavailable"),
-            Self::InvalidRequest(error) => write!(formatter, "invalid worker chat request: {error}"),
-            Self::InvalidTransition(error) => write!(formatter, "invalid invocation transition: {error:?}"),
-            Self::Conflict => formatter.write_str("invocation changed concurrently; reload before retrying"),
-            Self::UnsupportedState(status) => write!(formatter, "worker does not process invocation state {status:?}"),
+            Self::MissingPersistedOutput => {
+                formatter.write_str("Verifying invocation has no durable assistant output")
+            }
+            Self::ProviderRouteNotConfigured => {
+                formatter.write_str("configured chat provider route is unavailable")
+            }
+            Self::InvalidRequest(error) => {
+                write!(formatter, "invalid worker chat request: {error}")
+            }
+            Self::InvalidTransition(error) => {
+                write!(formatter, "invalid invocation transition: {error:?}")
+            }
+            Self::Conflict => {
+                formatter.write_str("invocation changed concurrently; reload before retrying")
+            }
+            Self::UnsupportedState(status) => write!(
+                formatter,
+                "worker does not process invocation state {status:?}"
+            ),
         }
     }
 }
@@ -134,10 +149,12 @@ where
 
             match invocation.status() {
                 InvocationStatus::Received => {
-                    self.transition(scope, &invocation, InvocationStatus::ContextLoading).await?;
+                    self.transition(scope, &invocation, InvocationStatus::ContextLoading)
+                        .await?;
                 }
                 InvocationStatus::ContextLoading => {
-                    self.transition(scope, &invocation, InvocationStatus::Processing).await?;
+                    self.transition(scope, &invocation, InvocationStatus::Processing)
+                        .await?;
                 }
                 InvocationStatus::Processing => {
                     let input = self
@@ -327,7 +344,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod lifecycle_tests {
     use std::convert::Infallible;
@@ -483,10 +499,7 @@ mod lifecycle_tests {
             Some(ChatCapabilities::new(std::iter::empty()))
         }
 
-        async fn complete(
-            &self,
-            _: ChatRequest,
-        ) -> Result<ChatResponse, ChatProviderError> {
+        async fn complete(&self, _: ChatRequest) -> Result<ChatResponse, ChatProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.response.clone()
         }
@@ -578,7 +591,10 @@ mod lifecycle_tests {
         let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
         let (worker, calls) = worker(store.clone(), Err(ChatProviderError::Timeout));
 
-        let outcome = worker.process(&scope, id).await.expect("failure is persisted");
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("failure is persisted");
         assert_eq!(
             outcome,
             InvocationWorkerOutcome::Failed {
