@@ -44,7 +44,7 @@ An expired lease cannot be revived by heartbeat. It must be reclaimed, even if t
 
 ### Reclaim
 
-A worker may reclaim only when the existing lease is expired (`lease_until <= now()`) and the invocation is nonterminal. Reclaim atomically assigns the new owner, extends the lease, updates heartbeat, and increments both `fencing_token` and `version` exactly once.
+A worker may reclaim only when the existing lease is expired (`lease_until < now()`) and the invocation is nonterminal. Reclaim atomically assigns the new owner, extends the lease, updates heartbeat, and increments both `fencing_token` and `version` exactly once.
 
 Initial claim and reclaim must be distinguishable in SQL. Reclaim must never be implemented as an owner-only update of an expired lease: the canonical trigger requires a strictly newer token and a version increment.
 
