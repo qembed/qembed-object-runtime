@@ -45,10 +45,10 @@ async fn setup() -> (PgPool, String) {
         BEGIN
           RETURN QUERY
           SELECT c.id, c.caller_kind
-            FROM \"{schema}\".principal_caller_delegations d
-            JOIN \"{schema}\".owner_principals p
+            FROM "{schema}".principal_caller_delegations d
+            JOIN "{schema}".owner_principals p
               ON p.tenant_id=d.tenant_id AND p.caller_id=d.principal_id
-            JOIN \"{schema}\".callers c
+            JOIN "{schema}".callers c
               ON c.tenant_id=d.tenant_id AND c.id=d.caller_id
            WHERE d.tenant_id=v_tenant AND d.principal_id=v_principal
              AND d.caller_id=p_caller_id AND d.revoked_at IS NULL
