@@ -145,12 +145,12 @@ async fn insert_invocation(
     .expect("the deferred invocation reference should be satisfied before commit");
 }
 
-fn idempotency_claim(
+fn idempotency_claim<'a>(
     object_id: ObjectId,
-    key: &str,
-    hash: &[u8],
+    key: &'a str,
+    hash: &'a [u8],
     candidate: InvocationId,
-) -> IdempotencyClaim<'_> {
+) -> IdempotencyClaim<'a> {
     IdempotencyClaim::new(
         object_id,
         key,
