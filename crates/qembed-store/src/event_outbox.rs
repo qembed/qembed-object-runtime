@@ -129,6 +129,7 @@ fn event_object_id(payload: &ObjectEventPayload) -> ObjectId {
 mod tests {
     use super::{ObjectEvent, ObjectEventPayload};
     use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId};
+    use qembed_domain::object::ObjectState;
 
     #[test]
     fn validation_started_payload_contains_only_allowlisted_fields() {
@@ -150,7 +151,7 @@ mod tests {
             ObjectId::new(),
             Some(ObjectVersionId::new()),
             ObjectVersionId::new(),
-            "active",
+            ObjectState::Active,
         );
         let json = serde_json::to_value(payload.payload).expect("payload should serialize");
         let object = json.as_object().expect("payload should be a JSON object");
