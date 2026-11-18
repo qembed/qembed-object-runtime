@@ -7,6 +7,7 @@
 use std::error::Error;
 use std::future::Future;
 
+use crate::chat::{ChatRequest, ChatResponse};
 use crate::ids::{CallerId, InvocationId, TenantId};
 use crate::invocation::{FencingToken, Invocation};
 use crate::principal::PrincipalKind;
@@ -96,20 +97,17 @@ pub trait ExecutionStore: Send + Sync {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-/// Provider-neutral request/response boundary.
+/// Provider-neutral chat completion boundary.
 ///
-/// Concrete chat request and response contracts are introduced with the
-/// ChatProvider work (RUST-030). This generic port keeps domain orchestration
-/// independent from provider SDK types in the meantime.
-pub trait ProviderPort: Send + Sync {
-    type Request: Send;
-    type Response: Send;
+/// Implementations adapt this contract to a concrete provider. SDK request,
+/// response, error, and model types must remain inside the adapter crate.
+pub trait ChatProvider: Send + Sync {
     type Error: Error + Send + Sync + 'static;
 
     fn complete(
         &self,
-        request: Self::Request,
-    ) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
+        request: ChatRequest,
+    ) -> impl Future<Output = Result<ChatResponse, Self::Error>> + Send;
 }
 
 #[cfg(test)]
@@ -163,28 +161,29 @@ mod tests {
 
     struct TestProvider;
 
-    impl ProviderPort for TestProvider {
-        type Request = &'static str;
-        type Response = &'static str;
+    impl ChatProvider for TestProvider {
         type Error = Infallible;
 
         fn complete(
             &self,
-            request: Self::Request,
-        ) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send {
-            ready(Ok(request))
+            _: ChatRequest,
+        ) -> impl Future<Output = Result<ChatResponse, Self::Error>> + Send {
+            ready(Ok(
+                ChatResponse::new("test response", crate::chat::ChatFinishReason::Stop, None)
+                    .expect("test response is valid"),
+            ))
         }
     }
 
     fn assert_authentication_port<T: AuthenticationPort>(_: &T) {}
     fn assert_execution_store<T: ExecutionStore>(_: &T) {}
-    fn assert_provider_port<T: ProviderPort>(_: &T) {}
+    fn assert_chat_provider<T: ChatProvider>(_: &T) {}
 
     // Test doubles type-check without a database, network, executor, or SDK.
     #[test]
     fn test_doubles_implement_all_domain_ports() {
         assert_authentication_port(&TestAuthentication);
         assert_execution_store(&TestExecutionStore);
-        assert_provider_port(&TestProvider);
+        assert_chat_provider(&TestProvider);
     }
 }
