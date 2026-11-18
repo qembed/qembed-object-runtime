@@ -7,9 +7,9 @@ use crate::ids::PrincipalId;
 /// The trust level established by the authentication boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PrincipalKind {
-    /// A caller authenticated without tenant-owner privileges.
+    /// An authenticated Principal without tenant-owner privileges.
     Authenticated,
-    /// A caller authenticated as the tenant owner.
+    /// An authenticated Principal representing the tenant owner.
     TenantOwner,
 }
 
