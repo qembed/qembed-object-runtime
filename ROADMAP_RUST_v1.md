@@ -225,9 +225,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: non-owner RLS role проверяет tenant-scoped SELECT/INSERT/UPDATE/DELETE, cross-tenant writes отклоняются, отсутствие tenant context возвращает пустой read scope; прямые PostgreSQL inserts подтверждают cross-tenant rejection для object/version, published-version pointer, snapshot provenance и event/outbox FK.
   - DoD: проверяется поведение PostgreSQL constraints и RLS под отдельной non-owner ролью, а не только mock repository.
 
-- [ ] **RUST-028 (S)** Проверить append-only и restricted data access через store API.
-  - Тесты: DB integration — runtime role не может менять immutable rows; repository не предоставляет запрещённые mutation methods.
-  - DoD: snapshots/events/decisions доступны только через разрешённые операции.
+- [x] **RUST-028 (S)** Проверить append-only и restricted data access через store API.
+  - Тесты: PostgreSQL integration под отдельной non-owner runtime role подтверждает SELECT и отказ UPDATE/DELETE для snapshots и events; отказ привилегий проверяется по SQLSTATE 42501. Существующие owner-level tests отдельно подтверждают, что immutable triggers отклоняют прямые UPDATE/DELETE по SQLSTATE 55000.
+  - Store API: SnapshotRepository предоставляет только insert/get; compile-fail doctests фиксируют отсутствие update/delete. Event append helper остаётся crate-private, generic event writer не экспортируется; compile-fail doctest фиксирует границу видимости.
+  - Scope note: Decision entity/table/repository отсутствуют в текущих Rust domain contracts и migrations. Не вводим неподтверждённую модель ради теста; decision-specific access rules добавляются вместе с будущим контрактом persistence.
+  - DoD: существующие immutable snapshots/events доступны только через разрешённые операции; для decisions проверка отложена до появления их Rust persistence contract.
 
 - [ ] **RUST-029 (S)** Добавить тесты role separation для store integration.
   - Тесты: runtime/dispatcher/admin роли выполняют только предусмотренные операции; negative permission tests.
