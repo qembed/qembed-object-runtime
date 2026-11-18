@@ -92,7 +92,7 @@ async fn prepare_delegation(pool: &PgPool, schema: &str, scope: &Scope, caller_i
     .expect("test Principal should be present");
 
     sqlx::query(&format!(
-        "INSERT INTO \"{schema}\".callers (id, tenant_id, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')"
+        "INSERT INTO \"{schema}\".callers (id, tenant_id, token_hash, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')"
     ))
     .bind(caller_id.to_string())
     .bind(scope.tenant_id().to_string())
