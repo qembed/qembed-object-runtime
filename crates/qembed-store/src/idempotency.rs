@@ -52,7 +52,7 @@ impl fmt::Display for IdempotencyReservationError {
             }
             Self::Database(error) => {
                 write!(formatter, "idempotency reservation database error: {error}")
-            },
+            }
         }
     }
 }
