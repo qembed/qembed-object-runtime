@@ -133,6 +133,8 @@ impl From<IdempotencyReservationError> for BeginInvocationError {
 
 #[derive(Serialize)]
 struct InvocationReceivedPayload {
+    #[serde(rename = "type")]
+    event_type: &'static str,
     invocation_id: InvocationId,
     object_id: ObjectId,
     caller_id: CallerId,
@@ -152,6 +154,7 @@ impl InvocationReceivedPayload {
         invocation_pool: InvocationPool,
     ) -> Self {
         Self {
+            event_type: "invocation_received",
             invocation_id,
             object_id,
             caller_id: caller.caller_id(),
