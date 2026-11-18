@@ -31,6 +31,23 @@ If a process dies after a provider response arrives but before the response tran
 
 RUST-038 adds PostgreSQL-backed lease ownership, heartbeat, expiry, and reclaim. A worker must claim before processing; every lifecycle write checks owner, unexpired lease, fencing token, and optimistic version. Reclaim increments token and version, so a stale worker cannot persist a response or terminal state. Heartbeats continue while waiting for provider I/O. The provider call itself may still complete after ownership is lost, and the result is then discarded.
 
+## Retry guarantees
+
+The durable invocation and transactional outbox record establish the work
+before provider I/O. Lease expiry/reclaim permits another worker attempt, and
+fencing prevents a stale attempt from persisting over the current owner. The
+worker derives a provider idempotency key from the invocation ID and reuses it
+across attempts; it never derives the key from the worker identity or fencing
+token.
+
+This is at-least-once processing/recovery, not exactly-once provider
+execution. Actual outbox delivery remains the responsibility of the later
+outbox-dispatcher work. Duplicate upstream execution is suppressed only when
+the configured adapter advertises support and the provider honors the key
+within its documented scope and retention window. Otherwise a crash after
+provider success but before the response transaction commits can still incur
+a second provider execution/cost.
+
 ## Persistence boundary
 
 `qembed-domain::InvocationWorkStore` describes durable input/output and terminal transitions. `qembed-store::PgExecutionStore` implements it using tenant-scoped PostgreSQL transactions. `qembed-runtime::InvocationWorker` coordinates the domain ports and `ChatProvider`; it contains no SQLx or provider SDK types.
