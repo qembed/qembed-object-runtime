@@ -50,16 +50,16 @@ async fn setup() -> Fixture {
         .execute(&pool)
         .await
         .expect("runtime role should resolve application tables");
-    sqlx::query("REVOKE ALL PRIVILEGES ON TABLE snapshots, events FROM qembed_runtime_immutable_test")
-        .execute(&pool)
-        .await
-        .expect("previous test grants should be reset");
     sqlx::query(
-        "GRANT SELECT, INSERT ON TABLE snapshots, events TO qembed_runtime_immutable_test",
+        "REVOKE ALL PRIVILEGES ON TABLE snapshots, events FROM qembed_runtime_immutable_test",
     )
     .execute(&pool)
     .await
-    .expect("runtime role should receive only append/read table privileges");
+    .expect("previous test grants should be reset");
+    sqlx::query("GRANT SELECT, INSERT ON TABLE snapshots, events TO qembed_runtime_immutable_test")
+        .execute(&pool)
+        .await
+        .expect("runtime role should receive only append/read table privileges");
 
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
