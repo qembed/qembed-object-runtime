@@ -10,9 +10,9 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::caller::ResolvedCaller;
 use qembed_domain::ids::{InvocationId, ObjectId};
 use qembed_domain::scope::Scope;
-use crate::caller::ResolvedCaller;
 
 use crate::{TenantTransaction, fetch_optional};
 
@@ -47,7 +47,9 @@ impl fmt::Display for IdempotencyReservationError {
             Self::PayloadMismatch => {
                 formatter.write_str("idempotency key was already used with a different payload")
             }
-            Self::CallerContextMismatch => formatter.write_str("resolved Caller belongs to a different transaction context"),
+            Self::CallerContextMismatch => {
+                formatter.write_str("resolved Caller belongs to a different transaction context")
+            }
             Self::ExpiryOutOfRange => {
                 formatter.write_str("idempotency expiration is outside the supported range")
             }
@@ -65,9 +67,10 @@ impl std::error::Error for IdempotencyReservationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
-            Self::PayloadMismatch | Self::CallerContextMismatch | Self::ExpiryOutOfRange | Self::InvalidPersistedInvocationId => {
-                None
-            }
+            Self::PayloadMismatch
+            | Self::CallerContextMismatch
+            | Self::ExpiryOutOfRange
+            | Self::InvalidPersistedInvocationId => None,
         }
     }
 }
