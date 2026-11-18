@@ -35,7 +35,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".owner_principals (tenant_id UUID NOT NULL, caller_id UUID NOT NULL, principal_kind TEXT NOT NULL CHECK (principal_kind='tenant_owner'), disabled_at TIMESTAMPTZ, PRIMARY KEY (tenant_id, caller_id))"
         ),
         format!(
-            "CREATE TABLE \"{schema}\".callers (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, caller_kind TEXT NOT NULL CHECK (caller_kind IN ('Anonymous','Authenticated','Service')), revoked_at TIMESTAMPTZ, UNIQUE (tenant_id, id))"
+            "CREATE TABLE \"{schema}\".callers (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, token_hash BYTEA NOT NULL, caller_kind TEXT NOT NULL CHECK (caller_kind IN ('Anonymous','Authenticated','Service')), revoked_at TIMESTAMPTZ, UNIQUE (tenant_id, id))"
         ),
         format!(
             "CREATE TABLE \"{schema}\".principal_caller_delegations (delegation_id UUID PRIMARY KEY, tenant_id UUID NOT NULL, principal_id UUID NOT NULL, caller_id UUID NOT NULL, revoked_at TIMESTAMPTZ, FOREIGN KEY (tenant_id, principal_id) REFERENCES \"{schema}\".owner_principals(tenant_id, caller_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id))"
@@ -44,16 +44,16 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".objects (tenant_id UUID NOT NULL, object_id UUID NOT NULL, state TEXT NOT NULL, published_version_id UUID, PRIMARY KEY (tenant_id, object_id))"
         ),
         format!(
-            "CREATE TABLE \"{schema}\".object_versions (tenant_id UUID NOT NULL, object_id UUID NOT NULL, object_version_id UUID NOT NULL, status TEXT NOT NULL, PRIMARY KEY (tenant_id, object_id, object_version_id), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
+            "CREATE TABLE \"{schema}\".object_versions (tenant_id UUID NOT NULL, object_id UUID NOT NULL, object_version_id UUID NOT NULL, version_number BIGINT NOT NULL CHECK (version_number > 0), status TEXT NOT NULL, PRIMARY KEY (tenant_id, object_id, object_version_id), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
         ),
         format!(
-            "CREATE TABLE \"{schema}\".snapshots (tenant_id UUID NOT NULL, snapshot_id UUID NOT NULL, object_id UUID NOT NULL, object_version_id UUID NOT NULL, PRIMARY KEY (tenant_id, snapshot_id), UNIQUE (tenant_id, object_id, snapshot_id), FOREIGN KEY (tenant_id, object_id, object_version_id) REFERENCES \"{schema}\".object_versions(tenant_id, object_id, object_version_id))"
+            "CREATE TABLE \"{schema}\".snapshots (tenant_id UUID NOT NULL, snapshot_id UUID NOT NULL, object_id UUID NOT NULL, object_version_id UUID NOT NULL, schema_version INTEGER NOT NULL CHECK (schema_version > 0), canonical_json BYTEA NOT NULL, content_hash BYTEA NOT NULL CHECK (octet_length(content_hash)=32), json_projection JSONB NOT NULL, PRIMARY KEY (tenant_id, snapshot_id), UNIQUE (tenant_id, object_id, snapshot_id), FOREIGN KEY (tenant_id, object_id, object_version_id) REFERENCES \"{schema}\".object_versions(tenant_id, object_id, object_version_id))"
         ),
         format!(
             "CREATE TABLE \"{schema}\".knowledge_revisions (tenant_id UUID NOT NULL, object_id UUID NOT NULL, current_revision BIGINT NOT NULL CHECK (current_revision >= 0), PRIMARY KEY (tenant_id, object_id), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
         ),
         format!(
-            "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL, trace_id UUID NOT NULL, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
+            "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL CHECK (status IN ('Received','ContextLoading','Processing','ExecutingTool','Verifying','WaitingForInput','WaitingForApproval','Completed','CompletedDegraded','Failed','Cancelled')), trace_id UUID NOT NULL, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
         ),
         format!(
             "CREATE TABLE \"{schema}\".invocation_idempotency (tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, idempotency_key TEXT NOT NULL, payload_hash BYTEA NOT NULL, invocation_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (tenant_id, object_id, caller_id, idempotency_key), UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id) DEFERRABLE INITIALLY DEFERRED)"
@@ -148,7 +148,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .bind(scope.principal().principal_id().to_string())
         .execute(&pool).await.expect("Principal fixture should be inserted");
     sqlx::query(
-        "INSERT INTO callers (id, tenant_id, caller_kind) VALUES ($1::uuid, $2::uuid, 'Service')",
+        "INSERT INTO callers (id, tenant_id, token_hash, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Service')",
     )
     .bind(caller_id.to_string())
     .bind(tenant_id.to_string())
@@ -162,10 +162,10 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
     sqlx::query("INSERT INTO objects (tenant_id, object_id, state, published_version_id) VALUES ($1::uuid, $2::uuid, 'active', $3::uuid)")
         .bind(tenant_id.to_string()).bind(object_id.to_string()).bind(version_id.to_string())
         .execute(&pool).await.expect("active object fixture should be inserted");
-    sqlx::query("INSERT INTO object_versions (tenant_id, object_id, object_version_id, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 'published')")
+    sqlx::query("INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'published')")
         .bind(tenant_id.to_string()).bind(object_id.to_string()).bind(version_id.to_string())
         .execute(&pool).await.expect("published version fixture should be inserted");
-    sqlx::query("INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)")
+    sqlx::query("INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, '{}'::bytea, decode(repeat('00',32),'hex'), '{}'::jsonb)")
         .bind(tenant_id.to_string()).bind(snapshot_id.to_string()).bind(object_id.to_string()).bind(version_id.to_string())
         .execute(&pool).await.expect("snapshot fixture should be inserted");
     sqlx::query("INSERT INTO knowledge_revisions (tenant_id, object_id, current_revision) VALUES ($1::uuid, $2::uuid, 7)")
