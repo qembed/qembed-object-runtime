@@ -285,13 +285,12 @@ impl InvocationLeaseStore for PgExecutionStore {
         transaction.commit().await?;
         Ok(true)
     }
-
 }
 
 fn validate_lease_request(owner: &str, lease_seconds: u32) -> Result<(), InvocationStoreError> {
     if owner.trim().is_empty() || owner.len() > 128 || !(3..=3600).contains(&lease_seconds) {
         return Err(InvocationStoreError::InvalidRequestedState(
-            "lease owner must be 1..128 bytes and lease duration 1..3600 seconds",
+            "lease owner must be 1..128 bytes and lease duration 3..3600 seconds",
         ));
     }
     Ok(())
