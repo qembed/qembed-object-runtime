@@ -288,7 +288,7 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
     assert_eq!(event_type, "invocation_received");
 
     let mut replay_command = command(&fixture, "key-1");
-    replay_command.message_expires_at = SystemTime::UNIX_EPOCH;
+    replay_command.message_expires_at = std::time::UNIX_EPOCH;
     let replay = begin_invocation(&fixture.pool, &fixture.scope, replay_command)
         .await
         .expect("same key and payload should replay without validating a new message expiry");
