@@ -4,9 +4,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
-use qembed_domain::invocation::{
-    FencingToken, Invocation, InvocationCheckpoint, InvocationStatus,
-};
+use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::scope::Scope;
 use sqlx::PgPool;
@@ -37,9 +35,15 @@ impl fmt::Display for InvocationStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
-            Self::InvalidPersistedValue(field) => write!(formatter, "persisted invocation has invalid {field}"),
-            Self::InvalidRequestedState(reason) => write!(formatter, "invalid invocation write request: {reason}"),
-            Self::AmbiguousMessage(role) => write!(formatter, "invocation has multiple {role} messages"),
+            Self::InvalidPersistedValue(field) => {
+                write!(formatter, "persisted invocation has invalid {field}")
+            }
+            Self::InvalidRequestedState(reason) => {
+                write!(formatter, "invalid invocation write request: {reason}")
+            }
+            Self::AmbiguousMessage(role) => {
+                write!(formatter, "invocation has multiple {role} messages")
+            }
         }
     }
 }
@@ -234,8 +238,11 @@ impl InvocationWorkStore for PgExecutionStore {
         if next.status() != InvocationStatus::Failed
             || !matches!(
                 error_code,
-                "provider_timeout" | "provider_rate_limited" | "provider_unavailable"
-                    | "provider_malformed_output" | "provider_other"
+                "provider_timeout"
+                    | "provider_rate_limited"
+                    | "provider_unavailable"
+                    | "provider_malformed_output"
+                    | "provider_other"
             )
         {
             return Err(InvocationStoreError::InvalidRequestedState(
@@ -298,9 +305,9 @@ fn validate_next_state(
         ));
     }
     if next.version()
-        != expected_version.checked_add(1).ok_or(
-            InvocationStoreError::InvalidRequestedState("expected version overflow"),
-        )?
+        != expected_version
+            .checked_add(1)
+            .ok_or(InvocationStoreError::InvalidRequestedState("expected version overflow"))?
     {
         return Err(InvocationStoreError::InvalidRequestedState(
             "next invocation version must advance exactly once",
@@ -338,7 +345,9 @@ fn reconstitute_invocation(
 }
 
 fn parse_id<T: FromStr>(value: &str, field: &'static str) -> Result<T, InvocationStoreError> {
-    value.parse().map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
+    value
+        .parse()
+        .map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
 }
 
 fn parse_status(value: &str) -> Result<InvocationStatus, InvocationStoreError> {
