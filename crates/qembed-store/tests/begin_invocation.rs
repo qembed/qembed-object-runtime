@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 use qembed_domain::caller::InvocationPool;
 use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
+use qembed_domain::invocation_lease::InvocationLeaseStore;
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
@@ -564,5 +565,140 @@ async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
         .expect_err("blank user input must be rejected");
     assert!(matches!(error, BeginInvocationError::InvalidInputMessage));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+
+#[tokio::test]
+async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "lease-fencing"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let schema = fixture.schema.clone();
+    let second_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \\"{schema}\\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await
+        .expect("second independent worker session should connect");
+
+    let worker_a = PgExecutionStore::new(fixture.pool.clone());
+    let worker_b = PgExecutionStore::new(second_pool.clone());
+
+    let old_claim = worker_a
+        .claim_invocation(&fixture.scope, invocation_id, "worker-a", 60)
+        .await
+        .expect("worker A claim")
+        .expect("unleased invocation is claimable");
+    assert_eq!(old_claim.fencing_token(), FencingToken::INITIAL);
+    assert_eq!(old_claim.version(), 0);
+
+    assert!(
+        worker_b
+            .claim_invocation(&fixture.scope, invocation_id, "worker-b", 60)
+            .await
+            .expect("worker B competing claim")
+            .is_none(),
+        "a live lease cannot be stolen"
+    );
+
+    sqlx::query(
+        "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("expire worker A lease for deterministic reclaim");
+
+    let new_claim = worker_b
+        .claim_invocation(&fixture.scope, invocation_id, "worker-b", 60)
+        .await
+        .expect("worker B reclaim")
+        .expect("expired lease can be reclaimed");
+    assert_eq!(new_claim.fencing_token().value(), 1);
+    assert_eq!(new_claim.version(), 1);
+
+    let mut stale_transition = old_claim.clone();
+    stale_transition
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("old in-memory state can form a candidate transition");
+    assert!(
+        !worker_a
+            .compare_and_set_owned(
+                &fixture.scope,
+                "worker-a",
+                old_claim.version(),
+                old_claim.fencing_token(),
+                stale_transition,
+            )
+            .await
+            .expect("stale write is a normal CAS miss"),
+        "old owner and old token must not commit after reclaim"
+    );
+
+    assert!(
+        !worker_a
+            .heartbeat_invocation(
+                &fixture.scope,
+                invocation_id,
+                "worker-a",
+                FencingToken::INITIAL,
+                60,
+            )
+            .await
+            .expect("stale heartbeat is a normal miss")
+    );
+
+    let mut valid_transition = new_claim.clone();
+    valid_transition
+        .transition_to(InvocationStatus::ContextLoading, new_claim.fencing_token())
+        .expect("new lease owner can transition");
+    assert!(
+        worker_b
+            .compare_and_set_owned(
+                &fixture.scope,
+                "worker-b",
+                new_claim.version(),
+                new_claim.fencing_token(),
+                valid_transition,
+            )
+            .await
+            .expect("new owner CAS")
+    );
+    assert!(
+        worker_b
+            .heartbeat_invocation(
+                &fixture.scope,
+                invocation_id,
+                "worker-b",
+                new_claim.fencing_token(),
+                60,
+            )
+            .await
+            .expect("new owner heartbeat")
+    );
+
+    second_pool.close().await;
     teardown(fixture).await;
 }
