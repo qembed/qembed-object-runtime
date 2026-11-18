@@ -107,6 +107,6 @@ mod tests {
         )
         .expect_err("nil principal ID must be rejected");
 
-        assert_eq!(error, PrincipalError::NilCallerId);
+        assert_eq!(error, PrincipalError::NilPrincipalId);
     }
 }
