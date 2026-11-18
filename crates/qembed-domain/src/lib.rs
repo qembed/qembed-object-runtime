@@ -135,7 +135,7 @@ pub mod test_support {
     #[must_use]
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
         let principal =
-            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated)
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::TenantOwner)
                 .expect("a generated principal ID must be valid");
 
         Scope::from_verified_auth(tenant_id, principal)
