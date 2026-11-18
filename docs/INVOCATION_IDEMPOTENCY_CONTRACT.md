@@ -21,9 +21,7 @@ No production DDL or migration is introduced by RUST-035.
 
 ## Runtime behavior
 
-`qembed-store::idempotency::reserve_invocation_idempotency` receives an already
-tenant-bound `TenantTransaction` and derives `caller_id` from the trusted
-`Scope`; callers cannot choose another caller's idempotency namespace.
+`qembed-store::idempotency::reserve_invocation_idempotency` receives an already tenant-bound `TenantTransaction`, the trusted `Scope`, and a `ResolvedCaller` minted by SQL-011's locked delegation resolver. It never derives `caller_id` from `Scope` or `PrincipalId`. `ResolvedCaller` is bound to the exact transaction token, tenant, and Principal, so it cannot be reused after commit or in another transaction.
 
 - A new key returns `Reserved { invocation_id }`. The caller must insert that
   invocation in the same transaction before commit.
