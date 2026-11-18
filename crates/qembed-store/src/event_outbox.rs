@@ -1,6 +1,7 @@
 //! Typed, allowlisted event payloads and atomic event/outbox writes.
 
 use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId};
+use qembed_domain::object::ObjectState;
 use qembed_domain::scope::Scope;
 use serde::Serialize;
 
@@ -45,13 +46,13 @@ impl ObjectEvent {
         object_id: ObjectId,
         previous_version_id: Option<ObjectVersionId>,
         version_id: ObjectVersionId,
-        state: &'static str,
+        state: ObjectState,
     ) -> Self {
         Self {
             event_id,
             payload: ObjectEventPayload::VersionPublished {
                 object_id,
-                state,
+                state: object_state_name(state),
                 previous_version_id,
                 version_id,
             },
@@ -105,6 +106,16 @@ pub(crate) async fn append_object_event(
     .await?;
 
     Ok(())
+}
+
+const fn object_state_name(state: ObjectState) -> &'static str {
+    match state {
+        ObjectState::Active => "active",
+        ObjectState::Suspended => "suspended",
+        ObjectState::Draft => "draft",
+        ObjectState::Validating => "validating",
+        ObjectState::Archived => "archived",
+    }
 }
 
 fn event_object_id(payload: &ObjectEventPayload) -> ObjectId {
