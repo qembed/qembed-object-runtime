@@ -131,6 +131,7 @@ impl InvocationLeaseStore for PgExecutionStore {
             .bind(owner)
             .bind(to_i64(expected_version, "expected version")?)
             .bind(to_i64(expected_fencing_token.value(), "fencing token")?)
+            .bind(MessageId::new().to_string())
             .bind(content),
         )
         .await?;
