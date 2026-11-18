@@ -1,0 +1,420 @@
+//! PostgreSQL persistence adapter for the invocation worker lifecycle.
+
+use std::fmt;
+use std::str::FromStr;
+
+use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
+use qembed_domain::invocation::{
+    FencingToken, Invocation, InvocationCheckpoint, InvocationError, InvocationStatus,
+};
+use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
+use qembed_domain::scope::Scope;
+use sqlx::PgPool;
+
+use crate::{TenantTransaction, begin_tenant_transaction, execute, fetch_all, fetch_optional};
+
+/// PostgreSQL-backed implementation of the domain execution ports.
+#[derive(Clone)]
+pub struct PgExecutionStore {
+    pool: PgPool,
+}
+
+impl PgExecutionStore {
+    #[must_use]
+    pub const fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+/// Errors returned by the PostgreSQL invocation lifecycle adapter.
+#[derive(Debug)]
+pub enum InvocationStoreError {
+    Database(sqlx::Error),
+    InvalidPersistedValue(&'static str),
+    InvalidRequestedState(&'static str),
+    AmbiguousMessage(&'static str),
+}
+
+impl fmt::Display for InvocationStoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
+            Self::InvalidPersistedValue(field) => {
+                write!(formatter, "persisted invocation has invalid {field}")
+            }
+            Self::InvalidRequestedState(reason) => {
+                write!(formatter, "invalid invocation write request: {reason}")
+            }
+            Self::AmbiguousMessage(role) => {
+                write!(formatter, "invocation has multiple {role} messages")
+            }
+        }
+    }
+}
+
+impl std::error::Error for InvocationStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<sqlx::Error> for InvocationStoreError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl ExecutionStore for PgExecutionStore {
+    type Error = InvocationStoreError;
+
+    async fn load_invocation(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> Result<Option<Invocation>, Self::Error> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let row = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String, String, String, String, String, String, i64, i64)>(
+                "SELECT id::text, tenant_id::text, object_id::text, caller_id::text, snapshot_id::text, status, version, fencing_token FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(invocation_id.to_string()),
+        )
+        .await?;
+
+        let invocation = row
+            .map(|row| reconstitute_invocation(row))
+            .transpose()?;
+        transaction.commit().await?;
+        Ok(invocation)
+    }
+
+    async fn compare_and_set_invocation(
+        &self,
+        scope: &Scope,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+        next: Invocation,
+    ) -> Result<bool, Self::Error> {
+        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
+        if next.status().is_terminal() {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "terminal transitions require the dedicated atomic result operation",
+            ));
+        }
+
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET status=$1, version=$2 WHERE tenant_id=$3::uuid AND object_id=$4::uuid AND id=$5::uuid AND version=$6 AND fencing_token=$7 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
+            )
+            .bind(status_name(next.status()))
+            .bind(i64::try_from(next.version()).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("version exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(i64::try_from(expected_version).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("expected version exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(i64::try_from(expected_fencing_token.value()).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("fencing token exceeds PostgreSQL BIGINT")
+            })?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+impl InvocationWorkStore for PgExecutionStore {
+    async fn load_user_input(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> Result<Option<String>, Self::Error> {
+        load_single_message(&self.pool, scope, invocation_id, "user").await
+    }
+
+    async fn load_assistant_output(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> Result<Option<String>, Self::Error> {
+        load_single_message(&self.pool, scope, invocation_id, "assistant").await
+    }
+
+    async fn persist_assistant_output(
+        &self,
+        scope: &Scope,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+        next: Invocation,
+        content: String,
+    ) -> Result<bool, Self::Error> {
+        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
+        if next.status() != InvocationStatus::Verifying {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "assistant output must move Processing to Verifying",
+            ));
+        }
+        if content.trim().is_empty() || content.len() > 1_048_576 {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "assistant output is empty or too large",
+            ));
+        }
+
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let inserted = execute(
+            &mut transaction,
+            sqlx::query(
+                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $1::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $7, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$2::uuid AND invocation.object_id=$3::uuid AND invocation.id=$4::uuid AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
+            )
+            .bind(MessageId::new().to_string())
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(i64::try_from(expected_version).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("expected version exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(i64::try_from(expected_fencing_token.value()).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("fencing token exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(content),
+        )
+        .await?;
+        if inserted.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+
+        let transitioned = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Processing'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(i64::try_from(expected_version).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("expected version exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(i64::try_from(expected_fencing_token.value()).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("fencing token exceeds PostgreSQL BIGINT")
+            })?),
+        )
+        .await?;
+        if transitioned.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    async fn complete_invocation(
+        &self,
+        scope: &Scope,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+        next: Invocation,
+    ) -> Result<bool, Self::Error> {
+        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
+        if next.status() != InvocationStatus::Completed {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "completion must transition to Completed",
+            ));
+        }
+
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET status='Completed', finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(i64::try_from(expected_version).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("expected version exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(i64::try_from(expected_fencing_token.value()).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("fencing token exceeds PostgreSQL BIGINT")
+            })?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn fail_invocation(
+        &self,
+        scope: &Scope,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+        next: Invocation,
+        error_code: &'static str,
+    ) -> Result<bool, Self::Error> {
+        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
+        if next.status() != InvocationStatus::Failed
+            || !matches!(
+                error_code,
+                "provider_timeout"
+                    | "provider_rate_limited"
+                    | "provider_unavailable"
+                    | "provider_malformed_output"
+                    | "provider_other"
+            )
+        {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "failure must use a stable allowlisted provider error code",
+            ));
+        }
+
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET status='Failed', error_code=$1, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$2::uuid AND object_id=$3::uuid AND id=$4::uuid AND version=$5 AND fencing_token=$6 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
+            )
+            .bind(error_code)
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(i64::try_from(expected_version).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("expected version exceeds PostgreSQL BIGINT")
+            })?)
+            .bind(i64::try_from(expected_fencing_token.value()).map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("fencing token exceeds PostgreSQL BIGINT")
+            })?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+async fn load_single_message(
+    pool: &PgPool,
+    scope: &Scope,
+    invocation_id: InvocationId,
+    role: &'static str,
+) -> Result<Option<String>, InvocationStoreError> {
+    let mut transaction = begin_tenant_transaction(pool, scope).await?;
+    let messages = fetch_all(
+        &mut transaction,
+        sqlx::query_as::<_, (String,)>(
+            "SELECT content FROM interaction_messages WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND role=$3 ORDER BY created_at, id",
+        )
+        .bind(scope.tenant_id().to_string())
+        .bind(invocation_id.to_string())
+        .bind(role),
+    )
+    .await?;
+    transaction.commit().await?;
+
+    match messages.as_slice() {
+        [] => Ok(None),
+        [(content,)] => Ok(Some(content.clone())),
+        _ => Err(InvocationStoreError::AmbiguousMessage(role)),
+    }
+}
+
+fn validate_next_state(
+    scope: &Scope,
+    expected_version: u64,
+    expected_fencing_token: FencingToken,
+    next: &Invocation,
+) -> Result<(), InvocationStoreError> {
+    if next.tenant_id() != scope.tenant_id() {
+        return Err(InvocationStoreError::InvalidRequestedState(
+            "invocation tenant differs from trusted Scope",
+        ));
+    }
+    if next.version() != expected_version.checked_add(1).ok_or(
+        InvocationStoreError::InvalidRequestedState("expected version overflow"),
+    )? {
+        return Err(InvocationStoreError::InvalidRequestedState(
+            "next invocation version must advance exactly once",
+        ));
+    }
+    if next.fencing_token() != expected_fencing_token {
+        return Err(InvocationStoreError::InvalidRequestedState(
+            "fencing token cannot change during a lifecycle transition",
+        ));
+    }
+    Ok(())
+}
+
+fn reconstitute_invocation(
+    row: (String, String, String, String, String, String, i64, i64),
+) -> Result<Invocation, InvocationStoreError> {
+    let id = parse_id::<InvocationId>(&row.0, "id")?;
+    let tenant_id = parse_id::<TenantId>(&row.1, "tenant_id")?;
+    let object_id = parse_id::<ObjectId>(&row.2, "object_id")?;
+    let caller_id = parse_id::<CallerId>(&row.3, "caller_id")?;
+    let snapshot_id = parse_id::<SnapshotId>(&row.4, "snapshot_id")?;
+    let status = parse_status(&row.5)?;
+    let version = u64::try_from(row.6)
+        .map_err(|_| InvocationStoreError::InvalidPersistedValue("version"))?;
+    let fencing_token = u64::try_from(row.7)
+        .map_err(|_| InvocationStoreError::InvalidPersistedValue("fencing_token"))?;
+
+    Ok(Invocation::from_persisted(
+        id,
+        tenant_id,
+        object_id,
+        caller_id,
+        snapshot_id,
+        InvocationCheckpoint::new(status, version, FencingToken::from_value(fencing_token)),
+    ))
+}
+
+fn parse_id<T>(value: &str, field: &'static str) -> Result<T, InvocationStoreError>
+where
+    T: FromStr,
+{
+    value
+        .parse()
+        .map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
+}
+
+fn parse_status(value: &str) -> Result<InvocationStatus, InvocationStoreError> {
+    match value {
+        "Received" => Ok(InvocationStatus::Received),
+        "ContextLoading" => Ok(InvocationStatus::ContextLoading),
+        "Processing" => Ok(InvocationStatus::Processing),
+        "ExecutingTool" => Ok(InvocationStatus::ExecutingTool),
+        "Verifying" => Ok(InvocationStatus::Verifying),
+        "WaitingForInput" => Ok(InvocationStatus::WaitingForInput),
+        "WaitingForApproval" => Ok(InvocationStatus::WaitingForApproval),
+        "Completed" => Ok(InvocationStatus::Completed),
+        "CompletedDegraded" => Ok(InvocationStatus::CompletedDegraded),
+        "Failed" => Ok(InvocationStatus::Failed),
+        "Cancelled" => Ok(InvocationStatus::Cancelled),
+        _ => Err(InvocationStoreError::InvalidPersistedValue("status")),
+    }
+}
+
+const fn status_name(status: InvocationStatus) -> &'static str {
+    match status {
+        InvocationStatus::Received => "Received",
+        InvocationStatus::ContextLoading => "ContextLoading",
+        InvocationStatus::Processing => "Processing",
+        InvocationStatus::ExecutingTool => "ExecutingTool",
+        InvocationStatus::Verifying => "Verifying",
+        InvocationStatus::WaitingForInput => "WaitingForInput",
+        InvocationStatus::WaitingForApproval => "WaitingForApproval",
+        InvocationStatus::Completed => "Completed",
+        InvocationStatus::CompletedDegraded => "CompletedDegraded",
+        InvocationStatus::Failed => "Failed",
+        InvocationStatus::Cancelled => "Cancelled",
+    }
+}
