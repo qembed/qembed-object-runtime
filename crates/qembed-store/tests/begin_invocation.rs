@@ -11,8 +11,8 @@ use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
-use qembed_store::invocation_worker::PgExecutionStore;
 use qembed_store::invocation_query::PgInvocationQueryStore;
+use qembed_store::invocation_worker::PgExecutionStore;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
@@ -869,12 +869,17 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     context_loading
         .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
         .expect("Received -> ContextLoading");
-    assert!(store.compare_and_set_invocation(
-        &fixture.scope,
-        received.version(),
-        FencingToken::INITIAL,
-        context_loading,
-    ).await.expect("persist context loading"));
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                received.version(),
+                FencingToken::INITIAL,
+                context_loading,
+            )
+            .await
+            .expect("persist context loading")
+    );
 
     let context = store
         .load_invocation(&fixture.scope, invocation_id)
@@ -885,12 +890,17 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     processing
         .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
         .expect("ContextLoading -> Processing");
-    assert!(store.compare_and_set_invocation(
-        &fixture.scope,
-        context.version(),
-        FencingToken::INITIAL,
-        processing,
-    ).await.expect("persist processing"));
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                context.version(),
+                FencingToken::INITIAL,
+                processing,
+            )
+            .await
+            .expect("persist processing")
+    );
 
     let processing = store
         .load_invocation(&fixture.scope, invocation_id)
@@ -901,13 +911,18 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     verifying
         .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
         .expect("Processing -> Verifying");
-    assert!(store.persist_assistant_output(
-        &fixture.scope,
-        processing.version(),
-        FencingToken::INITIAL,
-        verifying,
-        "private until completed".to_owned(),
-    ).await.expect("persist assistant output"));
+    assert!(
+        store
+            .persist_assistant_output(
+                &fixture.scope,
+                processing.version(),
+                FencingToken::INITIAL,
+                verifying,
+                "private until completed".to_owned(),
+            )
+            .await
+            .expect("persist assistant output")
+    );
 
     let running = query_store
         .get_invocation(&fixture.scope, invocation_id)
@@ -915,7 +930,11 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         .expect("read verifying invocation")
         .expect("invocation exists");
     assert_eq!(running.status(), InvocationStatus::Verifying);
-    assert_eq!(running.result(), None, "unfinished assistant output is not exposed");
+    assert_eq!(
+        running.result(),
+        None,
+        "unfinished assistant output is not exposed"
+    );
 
     let verifying = store
         .load_invocation(&fixture.scope, invocation_id)
@@ -926,12 +945,17 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     completed
         .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
         .expect("Verifying -> Completed");
-    assert!(store.complete_invocation(
-        &fixture.scope,
-        verifying.version(),
-        FencingToken::INITIAL,
-        completed,
-    ).await.expect("complete invocation"));
+    assert!(
+        store
+            .complete_invocation(
+                &fixture.scope,
+                verifying.version(),
+                FencingToken::INITIAL,
+                completed,
+            )
+            .await
+            .expect("complete invocation")
+    );
 
     let succeeded = query_store
         .get_invocation(&fixture.scope, invocation_id)
@@ -962,13 +986,18 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     failed
         .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
         .expect("Received -> Failed");
-    assert!(store.fail_invocation(
-        &fixture.scope,
-        failed_current.version(),
-        FencingToken::INITIAL,
-        failed,
-        "provider_timeout",
-    ).await.expect("persist failure"));
+    assert!(
+        store
+            .fail_invocation(
+                &fixture.scope,
+                failed_current.version(),
+                FencingToken::INITIAL,
+                failed,
+                "provider_timeout",
+            )
+            .await
+            .expect("persist failure")
+    );
 
     let failure_view = query_store
         .get_invocation(&fixture.scope, failed_id)
