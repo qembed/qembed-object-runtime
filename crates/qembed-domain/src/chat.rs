@@ -85,8 +85,7 @@ pub enum StructuredOutputMode {
 /// This descriptor contains only provider-neutral features. It is configuration
 /// supplied by the adapter; it is never inferred from a model name or a
 /// successful/failed completion request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ChatCapabilities {
     structured_output_modes: Vec<StructuredOutputMode>,
 }
@@ -114,7 +113,7 @@ impl ChatCapabilities {
     /// Whether this profile can satisfy the requested output mode.
     #[must_use]
     pub fn supports(&self, mode: StructuredOutputMode) -> bool {
-        self.structured_output_modes.contains(&mode)
+        mode == StructuredOutputMode::None || self.structured_output_modes.contains(&mode)
     }
 }
 
