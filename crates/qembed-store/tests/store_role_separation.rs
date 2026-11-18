@@ -202,6 +202,37 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .execute(&mut *tx)
     .await
     .expect("runtime should append outbox messages");
+    sqlx::query(
+        "INSERT INTO snapshots
+            (tenant_id, snapshot_id, object_id, object_version_id, schema_version,
+             canonical_json, content_hash, json_projection)
+         VALUES ($1, $2, $3, $4, 1, convert_to('{}', 'UTF8'), decode(repeat('00', 32), 'hex'), '{}'::jsonb)",
+    )
+    .bind(tenant_a)
+    .bind(Uuid::new_v4())
+    .bind(object_a)
+    .bind(version_a)
+    .execute(&mut *tx)
+    .await
+    .expect("runtime should append immutable snapshots");
+    let error = sqlx::query("UPDATE snapshots SET json_projection = '{}'::jsonb WHERE tenant_id = $1")
+        .bind(tenant_a)
+        .execute(&mut *tx)
+        .await
+        .expect_err("runtime must not update immutable snapshots");
+    assert_sqlstate(error, "42501");
+    let error = sqlx::query("DELETE FROM events WHERE tenant_id = $1")
+        .bind(tenant_a)
+        .execute(&mut *tx)
+        .await
+        .expect_err("runtime must not delete append-only events");
+    assert_sqlstate(error, "42501");
+    let error = sqlx::query("UPDATE events SET event_type = 'forged' WHERE tenant_id = $1")
+        .bind(tenant_a)
+        .execute(&mut *tx)
+        .await
+        .expect_err("runtime must not update append-only events");
+    assert_sqlstate(error, "42501");
     let error = sqlx::query("UPDATE outbox_messages SET delivered_at = now() WHERE tenant_id = $1")
         .bind(tenant_a)
         .execute(&mut *tx)
