@@ -50,7 +50,9 @@ impl fmt::Display for IdempotencyReservationError {
             Self::InvalidPersistedInvocationId => {
                 formatter.write_str("persisted idempotency record has an invalid invocation ID")
             }
-            Self::Database(error) => write!(formatter, "idempotency reservation database error: {error}"),
+            Self::Database(error) => {
+                write!(formatter, "idempotency reservation database error: {error}")
+            },
         }
     }
 }
@@ -59,9 +61,9 @@ impl std::error::Error for IdempotencyReservationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
-            Self::PayloadMismatch
-            | Self::ExpiryOutOfRange
-            | Self::InvalidPersistedInvocationId => None,
+            Self::PayloadMismatch | Self::ExpiryOutOfRange | Self::InvalidPersistedInvocationId => {
+                None
+            }
         }
     }
 }
@@ -169,7 +171,10 @@ mod tests {
     #[test]
     fn expiry_is_converted_to_unix_microseconds() {
         let expiry = UNIX_EPOCH + std::time::Duration::from_micros(1_234_567);
-        assert_eq!(expiry_unix_micros(expiry).expect("expiry should fit"), 1_234_567);
+        assert_eq!(
+            expiry_unix_micros(expiry).expect("expiry should fit"),
+            1_234_567
+        );
     }
 
     #[test]
