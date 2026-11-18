@@ -1,6 +1,8 @@
 //! PostgreSQL persistence infrastructure.
 
 pub mod auth;
+mod cas;
+pub use cas::{CasError, execute_cas};
 mod event_outbox;
 pub mod object_repository;
 pub mod snapshot_repository;
