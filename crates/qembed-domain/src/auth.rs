@@ -28,7 +28,7 @@ where
         return Err(OwnerAuthenticationError::NotOwner);
     }
 
-    let principal = Principal::from_verified_auth(identity.caller_id(), identity.principal_kind())
+    let principal = Principal::from_verified_auth(identity.principal_id(), identity.principal_kind())
         .map_err(OwnerAuthenticationError::InvalidPrincipal)?;
 
     Scope::from_verified_auth(identity.tenant_id(), principal)
@@ -77,7 +77,7 @@ mod tests {
     use std::convert::Infallible;
     use std::future::ready;
 
-    use crate::ids::{CallerId, TenantId};
+    use crate::ids::{PrincipalId, TenantId};
     use crate::ports::{AuthenticatedIdentity, AuthenticationPort};
 
     use super::*;
@@ -95,7 +95,7 @@ mod tests {
         {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
-                CallerId::new(),
+                PrincipalId::new(),
                 PrincipalKind::TenantOwner,
             )))
         }
