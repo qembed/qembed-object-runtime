@@ -65,6 +65,7 @@ impl AuthenticatedIdentity {
 pub trait AuthenticationPort: Send + Sync {
     type Credentials: Send;
     type Error: Error + Send + Sync + 'static;
+    type Error: Error + Send + Sync + 'static;
 
     fn authenticate(
         &self,
@@ -118,6 +119,8 @@ pub trait ChatProvider: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use crate::chat::ChatProviderError;
     use std::future::ready;
 
@@ -127,6 +130,7 @@ mod tests {
 
     impl AuthenticationPort for TestAuthentication {
         type Credentials = ();
+        type Error = Infallible;
         fn authenticate(
             &self,
             (): Self::Credentials,
@@ -142,6 +146,8 @@ mod tests {
     struct TestExecutionStore;
 
     impl ExecutionStore for TestExecutionStore {
+        type Error = Infallible;
+
         fn load_invocation(
             &self,
             _: &Scope,
