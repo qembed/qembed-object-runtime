@@ -8,7 +8,8 @@ use qembed_domain::scope::Scope;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::caller::resolve_delegated_caller;
 use qembed_store::idempotency::{
-    IdempotencyReservation, IdempotencyReservationError, reserve_invocation_idempotency,
+    IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
+    reserve_invocation_idempotency,
 };
 use qembed_store::{TenantTransaction, begin_tenant_transaction, execute};
 use sqlx::PgPool;
@@ -162,17 +163,15 @@ async fn reserve_and_finish(
         .await
         .expect("requested Caller must be actively delegated");
 
-    let reservation = reserve_invocation_idempotency(
-        &mut transaction,
-        scope,
-        &caller,
+    let claim = IdempotencyClaim::new(
         object_id,
         key,
         hash,
         candidate,
         SystemTime::now() + Duration::from_secs(3_600),
-    )
-    .await?;
+    );
+    let reservation =
+        reserve_invocation_idempotency(&mut transaction, scope, &caller, &claim).await?;
 
     if let IdempotencyReservation::Reserved { invocation_id } = reservation {
         insert_invocation(&mut transaction, scope, caller_id, object_id, invocation_id).await;
@@ -345,18 +344,16 @@ async fn same_key_with_different_payload_is_rejected() {
     let caller = resolve_delegated_caller(&mut transaction, caller_id)
         .await
         .expect("Caller remains delegated");
-    let mismatch = reserve_invocation_idempotency(
-        &mut transaction,
-        &scope,
-        &caller,
+    let claim = IdempotencyClaim::new(
         object_id,
         "payload-bound-key",
         b"payload-b",
         InvocationId::new(),
         SystemTime::now() + Duration::from_secs(3_600),
-    )
-    .await
-    .expect_err("same key with a different payload must conflict");
+    );
+    let mismatch = reserve_invocation_idempotency(&mut transaction, &scope, &caller, &claim)
+        .await
+        .expect_err("same key with a different payload must conflict");
     assert!(matches!(
         mismatch,
         IdempotencyReservationError::PayloadMismatch
@@ -390,18 +387,16 @@ async fn rolling_back_a_new_claim_releases_the_key() {
         .await
         .expect("Caller remains delegated");
     let abandoned_id = InvocationId::new();
-    let result = reserve_invocation_idempotency(
-        &mut abandoned,
-        &scope,
-        &caller,
+    let claim = IdempotencyClaim::new(
         object_id,
         "rollback-key",
         PAYLOAD_HASH,
         abandoned_id,
         SystemTime::now() + Duration::from_secs(3_600),
-    )
-    .await
-    .expect("first transaction should acquire the key");
+    );
+    let result = reserve_invocation_idempotency(&mut abandoned, &scope, &caller, &claim)
+        .await
+        .expect("first transaction should acquire the key");
     assert_eq!(
         result,
         IdempotencyReservation::Reserved {
@@ -464,18 +459,16 @@ async fn resolved_caller_cannot_be_reused_in_another_transaction() {
         .await
         .expect("second transaction should begin");
     set_schema(&mut second, &schema).await;
-    let error = reserve_invocation_idempotency(
-        &mut second,
-        &scope,
-        &resolved,
+    let claim = IdempotencyClaim::new(
         ObjectId::new(),
         "stale-caller",
         PAYLOAD_HASH,
         InvocationId::new(),
         SystemTime::now() + Duration::from_secs(3_600),
-    )
-    .await
-    .expect_err("a resolved Caller is bound to the transaction that checked its delegation");
+    );
+    let error = reserve_invocation_idempotency(&mut second, &scope, &resolved, &claim)
+        .await
+        .expect_err("a resolved Caller is bound to the transaction that checked its delegation");
     assert!(matches!(
         error,
         IdempotencyReservationError::CallerContextMismatch
