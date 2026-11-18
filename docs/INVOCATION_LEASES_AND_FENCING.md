@@ -52,7 +52,7 @@ Initial claim and reclaim must be distinguishable in SQL. Reclaim must never be 
 
 Every lifecycle CAS, assistant-output insert, failure write, and completion write includes owner, unexpired lease, token, version, and state predicates. The assistant message insert and Processing → Verifying transition remain one transaction.
 
-Terminal completion/failure clears `lease_owner` and `lease_until` in the same statement that records the terminal state. This satisfies the canonical constraint that terminal invocations have no active lease. Heartbeat metadata may remain as historical data.
+Terminal completion/failure clears `lease_owner` and `lease_until` in the transaction that records the terminal state. The canonical SQL trigger rejects changing the owner of a still-live lease, but explicitly permits release on a terminal transition after expiry. The adapter therefore first moves `lease_until` into the past and then records the terminal state/releases the owner in a second update under the same transaction and row lock; no competing worker can observe the intermediate state. Heartbeat metadata may remain as historical data.
 
 A worker that loses ownership or whose lease expires receives a conflict result. It must stop processing that invocation; it must not silently reload and continue under an obsolete claim.
 
