@@ -89,7 +89,7 @@ mod tests {
         let tenant_id = TenantId::new();
         let principal_id = PrincipalId::new();
         let principal = Principal::from_verified_auth(principal_id, PrincipalKind::TenantOwner)
-            .expect("non-nil caller ID must be accepted");
+            .expect("non-nil Principal ID must be accepted");
 
         let scope = Scope::from_verified_auth(tenant_id, principal)
             .expect("non-nil tenant ID must be accepted");
