@@ -91,8 +91,22 @@ impl AuthenticationPort for OwnerAuthenticator {
     ) -> Result<AuthenticatedIdentity, Self::Error> {
         let token_hash = Sha256::digest(credentials.token.as_bytes()).to_vec();
 
-        // This is the narrow pre-authentication lookup: Scope does not exist
-        // yet. Both tenant ID and token digest must match an active row.
+        // This lookup happens before a trusted Scope exists. The caller-supplied
+        // tenant ID is used only as a transaction-local RLS selector and is also
+        // matched in the query; it is not promoted to an authenticated identity.
+        // Keeping set_config and SELECT in one transaction prevents tenant context
+        // from leaking through a pooled connection after commit or rollback.
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(OwnerAuthenticationError::Database)?;
+        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+            .bind(credentials.tenant_id.to_string())
+            .execute(&mut *transaction)
+            .await
+            .map_err(OwnerAuthenticationError::Database)?;
+
         let row = sqlx::query_as::<_, (String, String)>(
             r#"
             SELECT principal.tenant_id::text, principal.caller_id::text
@@ -109,9 +123,14 @@ impl AuthenticationPort for OwnerAuthenticator {
         )
         .bind(credentials.tenant_id.to_string())
         .bind(token_hash)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(OwnerAuthenticationError::Database)?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(OwnerAuthenticationError::Database)?;
 
         let Some((tenant_id, caller_id)) = row else {
             return Err(OwnerAuthenticationError::InvalidCredentials);

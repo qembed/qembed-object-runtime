@@ -232,7 +232,9 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: существующие immutable snapshots/events доступны только через разрешённые операции; для decisions проверка отложена до появления их Rust persistence contract.
 
 - [ ] **RUST-029 (S)** Добавить тесты role separation для store integration.
-  - Тесты: runtime/dispatcher/admin роли выполняют только предусмотренные операции; negative permission tests.
+  - Реализация: отдельные NOLOGIN group roles runtime/dispatcher/admin; реальные LOGIN test identities; RLS на всех tenant-owned таблицах; транзакционный tenant context для pre-auth owner lookup.
+  - Тесты: подключения под каждой ролью; positive/negative permission matrix; cross-tenant dispatcher только для outbox; отсутствие tenant context fail-closed.
+  - Архитектурный контракт: `docs/STORE_ROLE_MATRIX.md`; migration identity отделена от application roles и требует CREATEROLE.
   - DoD: integration suite подключается под каждой тестируемой ролью, а не только DB owner.
 
 ---

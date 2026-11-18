@@ -26,3 +26,4 @@ icu_provider.workspace = true
 
 [dev-dependencies]
 qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
+uuid.workspace = true
