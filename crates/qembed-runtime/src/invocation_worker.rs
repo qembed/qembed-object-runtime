@@ -666,7 +666,14 @@ mod lifecycle_tests {
             next: Invocation,
             content: String,
         ) -> Result<bool, Self::Error> {
-            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+            if self
+                .0
+                .lock()
+                .expect("fake store lock")
+                .lease_owner
+                .as_deref()
+                != Some(owner)
+            {
                 return Ok(false);
             }
             self.persist_assistant_output(scope, version, token, next, content)
@@ -681,7 +688,14 @@ mod lifecycle_tests {
             token: FencingToken,
             next: Invocation,
         ) -> Result<bool, Self::Error> {
-            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+            if self
+                .0
+                .lock()
+                .expect("fake store lock")
+                .lease_owner
+                .as_deref()
+                != Some(owner)
+            {
                 return Ok(false);
             }
             self.complete_invocation(scope, version, token, next).await
@@ -696,7 +710,14 @@ mod lifecycle_tests {
             next: Invocation,
             error_code: &'static str,
         ) -> Result<bool, Self::Error> {
-            if self.0.lock().expect("fake store lock").lease_owner.as_deref() != Some(owner) {
+            if self
+                .0
+                .lock()
+                .expect("fake store lock")
+                .lease_owner
+                .as_deref()
+                != Some(owner)
+            {
                 return Ok(false);
             }
             self.fail_invocation(scope, version, token, next, error_code)
