@@ -479,6 +479,28 @@ mod tests {
     }
 
     #[test]
+    fn provider_idempotency_key_is_stable_per_invocation_and_distinct_between_invocations() {
+        let invocation_id = InvocationId::new();
+        let first = ProviderRequestContext::for_invocation(invocation_id);
+        let retry = ProviderRequestContext::for_invocation(invocation_id);
+        let other = ProviderRequestContext::for_invocation(InvocationId::new());
+
+        assert_eq!(first, retry);
+        assert_ne!(first, other);
+        assert!(first.idempotency_key().starts_with("qembed:invocation:"));
+        assert!(first.idempotency_key().ends_with(":chat:v1"));
+    }
+
+    #[test]
+    fn provider_idempotency_capability_is_opt_in() {
+        let unsupported = ChatCapabilities::default();
+        assert!(!unsupported.supports_idempotency_keys());
+
+        let supported = ChatCapabilities::default().with_idempotency_keys();
+        assert!(supported.supports_idempotency_keys());
+    }
+
+    #[test]
     fn request_serialization_round_trips_provider_neutral_fields() {
         let request = ChatRequest::new(
             "default-chat",
