@@ -141,3 +141,8 @@ The migration runner is deliberately separate from normal application startup.
 ## Invocation identity and atomic begin
 
 Authenticated Principal identity is represented separately from the effective invocation Caller. Explicit Caller selections are validated through SQL-011 delegation in the same transaction that reserves idempotency, pins snapshot and knowledge revision, inserts the invocation, and appends its event/outbox message. Invocation pool is a separate explicit policy decision. See [Principal/Caller delegation](docs/PRINCIPAL_CALLER_DELEGATION.md) and [atomic begin-invocation](docs/BEGIN_INVOCATION_TRANSACTION.md).
+
+
+## Invocation worker lifecycle
+
+`begin_invocation` stores the original user message in the same transaction as the idempotency reservation and invocation. The minimal worker resumes from the persisted invocation checkpoint, persists the assistant response before terminal completion, and can finish after a process restart without repeating a provider call once the response is in `Verifying`. Lease ownership and reclaim are intentionally deferred to RUST-038. See [invocation worker lifecycle](docs/INVOCATION_WORKER_LIFECYCLE.md).
