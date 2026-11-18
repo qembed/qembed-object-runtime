@@ -23,7 +23,10 @@ impl fmt::Display for CasError {
         match self {
             Self::Conflict => formatter.write_str("compare-and-set conflict"),
             Self::UnexpectedRowsAffected(count) => {
-                write!(formatter, "compare-and-set changed {count} rows; expected exactly one")
+                write!(
+                    formatter,
+                    "compare-and-set changed {count} rows; expected exactly one"
+                )
             }
             Self::Database(error) => write!(formatter, "compare-and-set database error: {error}"),
         }
