@@ -25,7 +25,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, InvocationRow>(
-                "UPDATE object_invocations SET lease_owner=$3, lease_until=now()+make_interval(secs => $4::double precision), heartbeat_at=now(), fencing_token=CASE WHEN lease_owner IS NULL THEN fencing_token ELSE fencing_token+1 END, version=CASE WHEN lease_owner IS NULL THEN version ELSE version+1 END WHERE tenant_id=$1::uuid AND id=$2::uuid AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled') AND ((lease_owner IS NULL AND lease_until IS NULL) OR lease_until <= now()) RETURNING id::text, tenant_id::text, object_id::text, caller_id::text, snapshot_id::text, status, version, fencing_token",
+                "UPDATE object_invocations SET lease_owner=$3, lease_until=now()+make_interval(secs => $4::double precision), heartbeat_at=now(), fencing_token=CASE WHEN lease_owner IS NULL THEN fencing_token ELSE fencing_token+1 END, version=CASE WHEN lease_owner IS NULL THEN version ELSE version+1 END WHERE tenant_id=$1::uuid AND id=$2::uuid AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled') AND ((lease_owner IS NULL AND lease_until IS NULL) OR lease_until < now()) RETURNING id::text, tenant_id::text, object_id::text, caller_id::text, snapshot_id::text, status, version, fencing_token",
             )
             .bind(scope.tenant_id().to_string())
             .bind(invocation_id.to_string())
@@ -230,7 +230,7 @@ impl InvocationLeaseStore for PgExecutionStore {
 }
 
 fn validate_lease_request(owner: &str, lease_seconds: u32) -> Result<(), InvocationStoreError> {
-    if owner.trim().is_empty() || owner.len() > 128 || !(1..=3600).contains(&lease_seconds) {
+    if owner.trim().is_empty() || owner.len() > 128 || !(3..=3600).contains(&lease_seconds) {
         return Err(InvocationStoreError::InvalidRequestedState(
             "lease owner must be 1..128 bytes and lease duration 1..3600 seconds",
         ));
