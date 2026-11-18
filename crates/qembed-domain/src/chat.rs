@@ -395,6 +395,28 @@ mod tests {
     }
 
     #[test]
+    fn deserialization_rejects_missing_required_fields_and_unknown_extensions() {
+        let valid_message = r#""messages":[{"role":"user","content":"hello"}]"#;
+        let missing_model = format!(r#"{{{valid_message},"max_output_tokens":10}}"#);
+        let missing_messages = r#"{"model_key":"default-chat","max_output_tokens":10}"#;
+        let missing_limit = format!(r#"{{"model_key":"default-chat",{valid_message}}}"#);
+        let unknown_extension = format!(
+            r#"{{"model_key":"default-chat",{valid_message},"max_output_tokens":10,"vendor_options":{{}}}}"#
+        );
+
+        assert!(serde_json::from_str::<ChatRequest>(&missing_model).is_err());
+        assert!(serde_json::from_str::<ChatRequest>(missing_messages).is_err());
+        assert!(serde_json::from_str::<ChatRequest>(&missing_limit).is_err());
+        assert!(serde_json::from_str::<ChatRequest>(&unknown_extension).is_err());
+
+        assert!(serde_json::from_str::<ChatMessage>(r#"{"content":"hello"}"#).is_err());
+        assert!(serde_json::from_str::<ChatResponse>(
+            r#"{"finish_reason":"stop","usage":null}"#
+        )
+        .is_err());
+    }
+
+    #[test]
     fn deserialization_cannot_bypass_contract_limits() {
         let json = format!(
             r#"{{"model_key":"default-chat","messages":[{{"role":"user","content":"{}"}}],"max_output_tokens":100}}"#,
