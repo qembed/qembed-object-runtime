@@ -7,7 +7,7 @@
 use std::error::Error;
 use std::future::Future;
 
-use crate::chat::{ChatRequest, ChatResponse};
+use crate::chat::{ChatCapabilities, ChatRequest, ChatResponse};
 use crate::ids::{CallerId, InvocationId, TenantId};
 use crate::invocation::{FencingToken, Invocation};
 use crate::principal::PrincipalKind;
@@ -104,6 +104,14 @@ pub trait ExecutionStore: Send + Sync {
 pub trait ChatProvider: Send + Sync {
     type Error: Error + Send + Sync + 'static;
 
+    /// Returns the explicit capabilities configured for an application-owned
+    /// model routing key. None means the route is not configured.
+    ///
+    /// This lookup must be local and side-effect free: capability negotiation
+    /// happens before complete, so unsupported requests never cause provider
+    /// network I/O. Adapters must not infer capabilities from the key string.
+    fn capabilities(&self, model_key: &str) -> Option<ChatCapabilities>;
+
     fn complete(
         &self,
         request: ChatRequest,
@@ -163,6 +171,10 @@ mod tests {
 
     impl ChatProvider for TestProvider {
         type Error = Infallible;
+
+        fn capabilities(&self, _: &str) -> Option<ChatCapabilities> {
+            Some(ChatCapabilities::default())
+        }
 
         fn complete(
             &self,
