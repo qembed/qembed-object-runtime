@@ -568,7 +568,6 @@ async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
     teardown(fixture).await;
 }
 
-
 #[tokio::test]
 async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
     let fixture = setup(None).await;
@@ -642,24 +641,46 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
     context_loading
         .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
         .expect("worker A starts context loading");
-    assert!(worker_a.compare_and_set_owned(
-        &fixture.scope, "worker-a", first_claim.version(), first_claim.fencing_token(),
-        context_loading,
-    ).await.expect("worker A context transition"));
+    assert!(
+        worker_a
+            .compare_and_set_owned(
+                &fixture.scope,
+                "worker-a",
+                first_claim.version(),
+                first_claim.fencing_token(),
+                context_loading,
+            )
+            .await
+            .expect("worker A context transition")
+    );
 
-    let after_context = worker_a.load_invocation(&fixture.scope, invocation_id)
-        .await.expect("reload after context").expect("invocation exists");
+    let after_context = worker_a
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload after context")
+        .expect("invocation exists");
     let mut processing = after_context.clone();
     processing
         .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
         .expect("worker A starts processing");
-    assert!(worker_a.compare_and_set_owned(
-        &fixture.scope, "worker-a", after_context.version(), after_context.fencing_token(),
-        processing,
-    ).await.expect("worker A processing transition"));
+    assert!(
+        worker_a
+            .compare_and_set_owned(
+                &fixture.scope,
+                "worker-a",
+                after_context.version(),
+                after_context.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("worker A processing transition")
+    );
 
-    let old_claim = worker_a.load_invocation(&fixture.scope, invocation_id)
-        .await.expect("load stale worker snapshot").expect("invocation exists");
+    let old_claim = worker_a
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load stale worker snapshot")
+        .expect("invocation exists");
     assert_eq!(old_claim.status(), InvocationStatus::Processing);
 
     sqlx::query(
@@ -730,8 +751,11 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
             .expect("new owner response CAS")
     );
     assert_eq!(
-        worker_b.load_assistant_output(&fixture.scope, invocation_id)
-            .await.expect("load assistant output").as_deref(),
+        worker_b
+            .load_assistant_output(&fixture.scope, invocation_id)
+            .await
+            .expect("load assistant output")
+            .as_deref(),
         Some("current answer")
     );
     assert!(
