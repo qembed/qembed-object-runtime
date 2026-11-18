@@ -835,7 +835,7 @@ mod lifecycle_tests {
         let (scope, id, store) = fixture(InvocationStatus::Verifying, 3, Some("saved answer"));
         let response = ChatResponse::new("must not be used", ChatFinishReason::Stop, None)
             .expect("valid provider response");
-        let (worker, calls) = worker(store.clone(), Ok(response));
+        let (worker, calls, _contexts) = worker(store.clone(), Ok(response));
 
         let outcome = worker.process(&scope, id).await.expect("worker resumes");
         assert_eq!(
