@@ -257,9 +257,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: mode serialization/default compatibility; valid JSON; malformed/trailing/prose response; plain text in `None`; unsupported `JsonOnly` rejected before request.
   - DoD: structured output contract provider-neutral; результат валиден для запрошенного режима либо возвращается типизированная `UnsupportedMode`/`MalformedJson` ошибка. Capability discovery остаётся RUST-033.
 
-- [ ] **RUST-033 (S)** Реализовать capability negotiation.
-  - Тесты: mock provider с разными capability profiles; unsupported capability rejected before request.
-  - DoD: runtime использует явный capability descriptor, а не угадывает возможности по имени модели.
+- [x] **RUST-033 (S)** Реализовать capability negotiation.
+  - Реализация: domain `ChatCapabilities` описывает явно настроенные structured-output modes; `ChatProvider::capabilities(model_key)` возвращает локальный профиль без сетевого I/O; `negotiate_request` отклоняет отсутствующий route и неподдерживаемый mode до `complete`.
+  - Тесты: mock provider с разными capability profiles; неизвестный route; unsupported `JsonOnly`; `None` всегда поддержан; отсутствие вывода возможностей из model key.
+  - DoD: runtime/adapter использует явный capability descriptor, а не угадывает возможности по имени модели.
 
 - [ ] **RUST-034 (S)** Реализовать provider error и usage mapping.
   - Тесты: mapping tests для timeout, rate limit, unavailable, malformed output, token usage.
