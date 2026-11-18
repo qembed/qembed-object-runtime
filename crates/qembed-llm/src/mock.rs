@@ -75,7 +75,9 @@ impl MockChatProvider {
     /// Creates an empty provider. Every request will fail until scripted.
     #[must_use]
     pub const fn new() -> Self {
-        Self {\n            scripts: Vec::new(),\n        }
+        Self {
+            scripts: Vec::new(),
+        }
     }
 
     /// Registers the response for one exact request.
@@ -208,11 +210,16 @@ mod tests {
             .expect("first script");
 
         assert!(matches!(
-            provider\n                .clone()\n                .with_error(input.clone(), MockChatProviderError::Timeout),
+            provider
+                .clone()
+                .with_error(input.clone(), MockChatProviderError::Timeout),
             Err(MockConfigurationError::DuplicateRequest)
         ));
         assert_eq!(
-            provider\n                .complete(request("not scripted"))\n                .await\n                .unwrap_err(),
+            provider
+                .complete(request("not scripted"))
+                .await
+                .unwrap_err(),
             MockChatProviderError::UnscriptedRequest
         );
     }
