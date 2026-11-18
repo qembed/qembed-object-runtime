@@ -4,7 +4,9 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qembed_domain::caller::{CallerKind, InvocationPool};
-use qembed_domain::ids::{CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TraceId};
+use qembed_domain::ids::{
+    CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TraceId,
+};
 use qembed_domain::scope::Scope;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -200,18 +202,19 @@ pub async fn begin_invocation(
         IdempotencyReservation::Reserved { invocation_id } => invocation_id,
     };
 
-        if command.input_message.trim().is_empty() || command.input_message.len() > 65_536 {
-            return Err(BeginInvocationError::InvalidInputMessage);
-        }
-        let message_expiry_micros = command.message_expires_at
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?
-            .as_micros();
-        let message_expiry_micros = i64::try_from(message_expiry_micros)
-            .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?;
-        if command.message_expires_at <= SystemTime::now() {
-            return Err(BeginInvocationError::InvalidMessageExpiry);
-        }
+    if command.input_message.trim().is_empty() || command.input_message.len() > 65_536 {
+        return Err(BeginInvocationError::InvalidInputMessage);
+    }
+    let message_expiry_micros = command
+        .message_expires_at
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?
+        .as_micros();
+    let message_expiry_micros = i64::try_from(message_expiry_micros)
+        .map_err(|_| BeginInvocationError::InvalidMessageExpiry)?;
+    if command.message_expires_at <= SystemTime::now() {
+        return Err(BeginInvocationError::InvalidMessageExpiry);
+    }
 
     // Lock the object pointer while checking the snapshot. Publication locks
     // the same row first, so this transaction observes one consistent version.
