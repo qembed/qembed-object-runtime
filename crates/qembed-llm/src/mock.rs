@@ -159,7 +159,8 @@ mod tests {
     use std::sync::Arc;
 
     use qembed_domain::chat::{
-        ChatFinishReason, ChatMessage, ChatProviderError, ChatRole, StructuredOutputMode, TokenUsage,
+        ChatFinishReason, ChatMessage, ChatProviderError, ChatRole, StructuredOutputMode,
+        TokenUsage,
     };
 
     use super::*;
@@ -201,10 +202,7 @@ mod tests {
         let provider = MockChatProvider::new()
             .with_error(timeout_request.clone(), ChatProviderError::Timeout)
             .expect("unique timeout script")
-            .with_error(
-                unavailable_request.clone(),
-                ChatProviderError::Unavailable,
-            )
+            .with_error(unavailable_request.clone(), ChatProviderError::Unavailable)
             .expect("unique unavailable script");
 
         assert_eq!(
