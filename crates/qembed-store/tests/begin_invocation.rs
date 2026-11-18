@@ -592,7 +592,7 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .after_connect(move |connection, _| {
             let schema = schema.clone();
             Box::pin(async move {
-                sqlx::query(&format!("SET search_path TO \\"{schema}\\""))
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
                     .execute(connection)
                     .await?;
                 Ok(())
