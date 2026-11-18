@@ -75,6 +75,7 @@ macro_rules! define_id {
 define_id!(TenantId);
 define_id!(ObjectId);
 define_id!(ObjectVersionId);
+define_id!(PrincipalId);
 define_id!(CallerId);
 define_id!(InvocationId);
 define_id!(SnapshotId);
@@ -122,6 +123,7 @@ mod tests {
         assert_round_trip(TenantId::new());
         assert_round_trip(ObjectId::new());
         assert_round_trip(ObjectVersionId::new());
+        assert_round_trip(PrincipalId::new());
         assert_round_trip(CallerId::new());
         assert_round_trip(InvocationId::new());
         assert_round_trip(SnapshotId::new());
@@ -136,6 +138,7 @@ mod tests {
         assert_rejects_invalid::<TenantId>();
         assert_rejects_invalid::<ObjectId>();
         assert_rejects_invalid::<ObjectVersionId>();
+        assert_rejects_invalid::<PrincipalId>();
         assert_rejects_invalid::<CallerId>();
         assert_rejects_invalid::<InvocationId>();
         assert_rejects_invalid::<SnapshotId>();
