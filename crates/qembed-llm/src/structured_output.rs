@@ -5,7 +5,8 @@
 
 use std::fmt;
 
-use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse, StructuredOutputMode};
+use qembed_domain::chat::{ChatRequest, ChatResponse, StructuredOutputMode};
+use qembed_domain::ports::ChatProvider;
 
 /// Failure while applying a structured-output contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,11 +42,13 @@ impl std::error::Error for StructuredOutputError {}
 ///
 /// The caller obtains the capability profile from the adapter's local
 /// configuration, then calls this function before invoking ChatProvider.
-pub fn negotiate_request(
+pub fn negotiate_request<P: ChatProvider>(
+    provider: &P,
     request: &ChatRequest,
-    capabilities: Option<&ChatCapabilities>,
 ) -> Result<(), StructuredOutputError> {
-    let capabilities = capabilities.ok_or(StructuredOutputError::UnconfiguredModel)?;
+    let capabilities = provider
+        .capabilities(request.model_key())
+        .ok_or(StructuredOutputError::UnconfiguredModel)?;
     if capabilities.supports(request.structured_output()) {
         Ok(())
     } else {
@@ -90,7 +93,6 @@ pub fn validate_response(
 #[cfg(test)]
 mod tests {
     use qembed_domain::chat::ChatFinishReason;
-    use qembed_domain::ports::ChatProvider;
 
     use super::*;
 
@@ -183,14 +185,32 @@ mod tests {
             vec![qembed_domain::chat::ChatMessage::new(qembed_domain::chat::ChatRole::User, "hello").unwrap()],
             16,
         ).unwrap().with_structured_output(StructuredOutputMode::JsonOnly);
-        let plain_profile = ChatCapabilities::default();
+        let plain_provider = crate::mock::MockChatProvider::new();
         assert_eq!(
-            negotiate_request(&request, Some(&plain_profile)),
+            negotiate_request(&plain_provider, &request),
             Err(StructuredOutputError::UnsupportedMode(StructuredOutputMode::JsonOnly))
         );
-        assert_eq!(negotiate_request(&request, None), Err(StructuredOutputError::UnconfiguredModel));
-        let json_profile = ChatCapabilities::new([StructuredOutputMode::JsonOnly]);
-        assert_eq!(negotiate_request(&request, Some(&json_profile)), Ok(()));
+        let unknown_route = request.clone();
+        let unconfigured_provider = crate::mock::MockChatProvider::new();
+        let unconfigured_request = qembed_domain::chat::ChatRequest::new(
+            "unknown-route",
+            unknown_route.messages().to_vec(),
+            unknown_route.max_output_tokens(),
+        ).unwrap().with_structured_output(StructuredOutputMode::JsonOnly);
+        assert_eq!(
+            negotiate_request(&unconfigured_provider, &unconfigured_request),
+            Err(StructuredOutputError::UnconfiguredModel)
+        );
+        let json_provider = crate::mock::MockChatProvider::new().with_capabilities(
+            "route-json",
+            qembed_domain::chat::ChatCapabilities::new([StructuredOutputMode::JsonOnly]),
+        );
+        let json_request = qembed_domain::chat::ChatRequest::new(
+            "route-json",
+            request.messages().to_vec(),
+            request.max_output_tokens(),
+        ).unwrap().with_structured_output(StructuredOutputMode::JsonOnly);
+        assert_eq!(negotiate_request(&json_provider, &json_request), Ok(()));
         assert_eq!(
             ensure_mode_supported(
                 StructuredOutputMode::JsonOnly,
