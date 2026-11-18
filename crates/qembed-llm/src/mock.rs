@@ -48,6 +48,8 @@ pub enum MockChatProviderError {
     UnscriptedRequest,
     /// The request asks for a mode not advertised by the configured route.
     UnsupportedCapability,
+    /// No capability profile is configured for the request's routing key.
+    UnconfiguredModel,
 }
 
 impl fmt::Display for MockChatProviderError {
@@ -57,6 +59,7 @@ impl fmt::Display for MockChatProviderError {
             Self::Unavailable => "mock provider is unavailable",
             Self::UnscriptedRequest => "mock provider has no script for this request",
             Self::UnsupportedCapability => "mock provider does not support the requested capability",
+            Self::UnconfiguredModel => "mock provider has no capability profile for the model routing key",
         };
         formatter.write_str(message)
     }
@@ -150,6 +153,13 @@ impl ChatProvider for MockChatProvider {
     }
 
     async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
+        let capabilities = self
+            .capabilities(request.model_key())
+            .ok_or(MockChatProviderError::UnconfiguredModel)?;
+        if !capabilities.supports(request.structured_output()) {
+            return Err(MockChatProviderError::UnsupportedCapability);
+        }
+
         let script = self
             .scripts
             .iter()
