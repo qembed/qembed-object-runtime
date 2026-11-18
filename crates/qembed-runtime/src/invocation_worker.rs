@@ -786,14 +786,16 @@ mod lifecycle_tests {
         (scope, invocation_id, store)
     }
 
-    fn worker(
-        store: FakeStore,
-        response: Result<ChatResponse, ChatProviderError>,
-    ) -> (
+    type WorkerHarness = (
         InvocationWorker<FakeStore, FakeProvider>,
         Arc<AtomicUsize>,
         Arc<Mutex<Vec<String>>>,
-    ) {
+    );
+
+    fn worker(
+        store: FakeStore,
+        response: Result<ChatResponse, ChatProviderError>,
+    ) -> WorkerHarness {
         let calls = Arc::new(AtomicUsize::new(0));
         let contexts = Arc::new(Mutex::new(Vec::new()));
         let provider = FakeProvider {
