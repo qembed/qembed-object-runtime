@@ -42,7 +42,7 @@ pub enum OwnerAuthenticationError<E> {
     Rejected(E),
     /// The verified identity is not a tenant owner.
     NotOwner,
-    /// The adapter returned an invalid caller identity.
+    /// The adapter returned an invalid Principal identity.
     InvalidPrincipal(PrincipalError),
     /// The adapter returned an invalid tenant identity.
     InvalidScope(ScopeError),
