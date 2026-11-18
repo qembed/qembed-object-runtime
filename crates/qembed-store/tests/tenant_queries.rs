@@ -67,7 +67,7 @@ async fn create_rls_fixture(transaction: &mut TenantTransaction, tenant_a: &str,
     .execute(transaction.connection())
     .await
     .expect("the tenant isolation policy should be created");
-    sqlx::query("GRANT SELECT ON tenant_query_probe TO qembed_tenant_rls_test")
+    sqlx::query("GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_query_probe TO qembed_tenant_rls_test")
         .execute(transaction.connection())
         .await
         .expect("the test role should be allowed to read the fixture");
@@ -114,6 +114,29 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
     .await
     .expect("typed query should return tenant A rows");
     assert_eq!(rows_a, vec![(tenant_a_text.clone(), "tenant-a".to_owned())]);
+
+    let hidden_update = sqlx::query(
+        "UPDATE tenant_query_probe SET payload = 'tampered' WHERE tenant_id = $1",
+    )
+    .bind(&tenant_b_text)
+    .execute(transaction_a.connection())
+    .await
+    .expect("RLS should hide tenant B rows from UPDATE");
+    assert_eq!(hidden_update.rows_affected(), 0);
+
+    let hidden_delete = sqlx::query("DELETE FROM tenant_query_probe WHERE tenant_id = $1")
+        .bind(&tenant_b_text)
+        .execute(transaction_a.connection())
+        .await
+        .expect("RLS should hide tenant B rows from DELETE");
+    assert_eq!(hidden_delete.rows_affected(), 0);
+
+    sqlx::query("INSERT INTO tenant_query_probe (tenant_id, payload) VALUES ($1, 'tenant-a-write')")
+        .bind(&tenant_a_text)
+        .execute(transaction_a.connection())
+        .await
+        .expect("tenant A should be able to insert its own row");
+
     transaction_a
         .commit()
         .await
@@ -132,13 +155,28 @@ async fn typed_queries_enforce_tenant_isolation_and_fail_closed_without_scope() 
     .expect("typed query should return tenant B rows");
     assert_eq!(
         rows_b,
-        vec![(tenant_b_text, "tenant-b".to_owned())],
+        vec![(tenant_b_text.clone(), "tenant-b".to_owned())],
         "tenant B must see only its own row"
     );
+
+    let forged_insert = sqlx::query(
+        "INSERT INTO tenant_query_probe (tenant_id, payload) VALUES ($1, 'forged')",
+    )
+    .bind(&tenant_a_text)
+    .execute(transaction_b.connection())
+    .await
+    .expect_err("WITH CHECK must reject writes for another tenant");
+    assert_eq!(
+        forged_insert
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
+        Some("42501")
+    );
     transaction_b
-        .commit()
+        .rollback()
         .await
-        .expect("tenant B should commit");
+        .expect("tenant B negative write transaction should roll back");
 
     let mut unscoped = pool
         .begin()
