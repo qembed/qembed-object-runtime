@@ -119,9 +119,9 @@ pub trait ChatProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-
-    use crate::chat::ChatProviderError;
     use std::future::ready;
+
+    use super::*;
 
     use super::*;
 
