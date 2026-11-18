@@ -461,7 +461,9 @@ mod lifecycle_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use qembed_domain::chat::{ChatCapabilities, ChatFinishReason, ChatResponse};
+    use qembed_domain::chat::{
+        ChatCapabilities, ChatFinishReason, ChatResponse, ProviderRequestContext,
+    };
     use qembed_domain::ids::{CallerId, ObjectId, SnapshotId, TenantId};
     use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint};
     use qembed_domain::invocation_lease::InvocationLeaseStore;
@@ -732,6 +734,7 @@ mod lifecycle_tests {
     struct FakeProvider {
         response: Result<ChatResponse, ChatProviderError>,
         calls: Arc<AtomicUsize>,
+        contexts: Arc<Mutex<Vec<String>>>,
     }
 
     impl ChatProvider for FakeProvider {
@@ -742,6 +745,18 @@ mod lifecycle_tests {
         async fn complete(&self, _: ChatRequest) -> Result<ChatResponse, ChatProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.response.clone()
+        }
+
+        async fn complete_with_context(
+            &self,
+            request: ChatRequest,
+            context: ProviderRequestContext,
+        ) -> Result<ChatResponse, ChatProviderError> {
+            self.contexts
+                .lock()
+                .expect("provider context lock")
+                .push(context.idempotency_key().to_owned());
+            self.complete(request).await
         }
     }
 
@@ -774,14 +789,20 @@ mod lifecycle_tests {
     fn worker(
         store: FakeStore,
         response: Result<ChatResponse, ChatProviderError>,
-    ) -> (InvocationWorker<FakeStore, FakeProvider>, Arc<AtomicUsize>) {
+    ) -> (
+        InvocationWorker<FakeStore, FakeProvider>,
+        Arc<AtomicUsize>,
+        Arc<Mutex<Vec<String>>>,
+    ) {
         let calls = Arc::new(AtomicUsize::new(0));
+        let contexts = Arc::new(Mutex::new(Vec::new()));
         let provider = FakeProvider {
             response,
             calls: Arc::clone(&calls),
+            contexts: Arc::clone(&contexts),
         };
         let config = InvocationWorkerConfig::new("test-chat", 128).expect("valid worker config");
-        (InvocationWorker::new(store, provider, config), calls)
+        (InvocationWorker::new(store, provider, config), calls, contexts)
     }
 
     #[tokio::test]
@@ -789,7 +810,7 @@ mod lifecycle_tests {
         let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
         let response = ChatResponse::new("hello back", ChatFinishReason::Stop, None)
             .expect("valid provider response");
-        let (worker, calls) = worker(store.clone(), Ok(response));
+        let (worker, calls, contexts) = worker(store.clone(), Ok(response));
 
         let outcome = worker.process(&scope, id).await.expect("worker completes");
         assert_eq!(
@@ -800,6 +821,10 @@ mod lifecycle_tests {
             }
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            contexts.lock().expect("provider context lock").as_slice(),
+            &[ProviderRequestContext::for_invocation(id).idempotency_key().to_owned()]
+        );
         let state = store.0.lock().expect("fake store lock");
         assert_eq!(state.invocation.status(), InvocationStatus::Completed);
         assert_eq!(state.output.as_deref(), Some("hello back"));
@@ -830,7 +855,7 @@ mod lifecycle_tests {
     #[tokio::test]
     async fn provider_failure_is_persisted_as_a_terminal_error_code() {
         let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
-        let (worker, calls) = worker(store.clone(), Err(ChatProviderError::Timeout));
+        let (worker, calls, _contexts) = worker(store.clone(), Err(ChatProviderError::Timeout));
 
         let outcome = worker
             .process(&scope, id)
