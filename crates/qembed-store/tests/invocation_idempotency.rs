@@ -274,7 +274,12 @@ async fn concurrent_same_key_requests_converge_on_one_invocation() {
             &first_schema,
             &first_scope,
             caller_id,
-            idempotency_claim(object_id, "concurrent-key", PAYLOAD_HASH, InvocationId::new()),
+            idempotency_claim(
+                object_id,
+                "concurrent-key",
+                PAYLOAD_HASH,
+                InvocationId::new(),
+            ),
         )
         .await
         .expect("first concurrent request should resolve")
