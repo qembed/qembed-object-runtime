@@ -480,7 +480,7 @@ mod lifecycle_tests {
 
     impl ChatProvider for FakeProvider {
         fn capabilities(&self, _: &str) -> Option<ChatCapabilities> {
-            Some(ChatCapabilities::default())
+            Some(ChatCapabilities::new(std::iter::empty()))
         }
 
         async fn complete(
