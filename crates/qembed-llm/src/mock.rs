@@ -133,7 +133,7 @@ impl ChatProvider for MockChatProvider {
             .map(|(_, caps)| caps.clone())
     }
 
-    async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
+    async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, ChatProviderError> {
         let capabilities = self
             .capabilities(request.model_key())
             .ok_or(ChatProviderError::Other)?;
@@ -209,11 +209,11 @@ mod tests {
 
         assert_eq!(
             provider.complete(timeout_request).await.unwrap_err(),
-            MockChatProviderError::Timeout
+            ChatProviderError::Timeout
         );
         assert_eq!(
             provider.complete(unavailable_request).await.unwrap_err(),
-            MockChatProviderError::Unavailable
+            ChatProviderError::Unavailable
         );
     }
 
@@ -227,7 +227,7 @@ mod tests {
         assert!(matches!(
             provider
                 .clone()
-                .with_error(input.clone(), MockChatProviderError::Timeout),
+                .with_error(input.clone(), ChatProviderError::Timeout),
             Err(MockConfigurationError::DuplicateRequest)
         ));
         assert_eq!(
@@ -254,7 +254,7 @@ mod tests {
 
         assert_eq!(
             provider.complete(json_request).await.unwrap_err(),
-            MockChatProviderError::UnscriptedRequest
+            ChatProviderError::Other
         );
     }
 
