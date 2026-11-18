@@ -247,9 +247,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: contract tests для обязательных полей, limits и serialization.
   - DoD: provider SDK-типы не протекают в domain/runtime contracts.
 
-- [ ] **RUST-031 (S)** Реализовать deterministic Mock ChatProvider.
-  - Тесты: заданный input → заданный output; scripted timeout/error; usage fixtures; concurrency test.
-  - DoD: все M1a end-to-end tests могут работать без внешнего LLM API.
+- [x] **RUST-031 (S)** Реализовать deterministic Mock ChatProvider.
+  - Реализация: `qembed-llm::MockChatProvider` выбирает script по полному равенству `ChatRequest`, поддерживает response и типизированные Timeout/Unavailable; незаданный запрос и дублирующий script отклоняются.
+  - Тесты: exact input/output; TokenUsage fixture; scripted timeout/provider error; missing/duplicate script; 32 concurrent identical calls.
+  - DoD: provider immutable и не использует FIFO/shared cursor, mutex, network или clock; результаты конкурентных вызовов не зависят от порядка планирования. Архитектура описана в `docs/DETERMINISTIC_MOCK_CHAT_PROVIDER.md`.
 
 - [ ] **RUST-032 (S)** Реализовать structured output modes `JsonOnly` и `None`.
   - Тесты: contract tests на корректный JSON, malformed response и unsupported mode.
