@@ -21,7 +21,7 @@ serde_json = "=1.0.140"
 serde_jcs = "=0.2.0"
 sha2 = "=0.10.8"
 uuid = { version = "=1.16.0", features = ["serde", "v4"] }
-sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate"] }
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "uuid"] }
 tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread"] }
 # Keep SQLx's transitive URL/IDNA stack compatible with Rust 1.85.
 home = "=0.5.11"
