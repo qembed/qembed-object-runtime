@@ -73,9 +73,7 @@ pub enum BeginInvocationOutcome {
         invocation_pool: InvocationPool,
     },
     /// The same effective Caller repeated the same key and payload.
-    Replay {
-        invocation_id: InvocationId,
-    },
+    Replay { invocation_id: InvocationId },
 }
 
 /// Failure to atomically begin an invocation.
@@ -96,13 +94,23 @@ impl fmt::Display for BeginInvocationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
-            Self::Idempotency(error) => write!(formatter, "idempotency reservation failed: {error}"),
+            Self::Idempotency(error) => {
+                write!(formatter, "idempotency reservation failed: {error}")
+            }
             Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
             Self::ObjectNotActive => formatter.write_str("object is not active for invocation"),
-            Self::SnapshotNotFound => formatter.write_str("snapshot does not belong to this object and tenant"),
-            Self::SnapshotIsNotCurrentPublishedVersion => formatter.write_str("snapshot is not for the current published object version"),
-            Self::KnowledgeRevisionNotFound => formatter.write_str("object has no knowledge revision row"),
-            Self::KnowledgeRevisionOutOfRange => formatter.write_str("knowledge revision is outside the supported range"),
+            Self::SnapshotNotFound => {
+                formatter.write_str("snapshot does not belong to this object and tenant")
+            }
+            Self::SnapshotIsNotCurrentPublishedVersion => {
+                formatter.write_str("snapshot is not for the current published object version")
+            }
+            Self::KnowledgeRevisionNotFound => {
+                formatter.write_str("object has no knowledge revision row")
+            }
+            Self::KnowledgeRevisionOutOfRange => {
+                formatter.write_str("knowledge revision is outside the supported range")
+            }
             Self::Database(error) => write!(formatter, "begin-invocation database error: {error}"),
         }
     }
@@ -203,7 +211,10 @@ pub async fn begin_invocation(
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
-            transaction.commit().await.map_err(BeginInvocationError::Database)?;
+            transaction
+                .commit()
+                .await
+                .map_err(BeginInvocationError::Database)?;
             return Ok(BeginInvocationOutcome::Replay { invocation_id });
         }
         IdempotencyReservation::Reserved { invocation_id } => invocation_id,
@@ -240,7 +251,8 @@ pub async fn begin_invocation(
     .map_err(BeginInvocationError::Database)?
     .ok_or(BeginInvocationError::SnapshotNotFound)?;
 
-    if object.1.as_deref() != Some(snapshot_version.0.as_str()) || snapshot_version.1 != "published" {
+    if object.1.as_deref() != Some(snapshot_version.0.as_str()) || snapshot_version.1 != "published"
+    {
         return Err(BeginInvocationError::SnapshotIsNotCurrentPublishedVersion);
     }
 
@@ -289,7 +301,10 @@ pub async fn begin_invocation(
     .await
     .map_err(BeginInvocationError::Database)?;
 
-    transaction.commit().await.map_err(BeginInvocationError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(BeginInvocationError::Database)?;
 
     Ok(BeginInvocationOutcome::Created {
         invocation_id,
