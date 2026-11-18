@@ -236,11 +236,8 @@ where
                         .map_err(InvocationWorkerError::Store)?
                         .ok_or(InvocationWorkerError::MissingPersistedOutput)?;
                     let mut next = invocation.clone();
-                    next.transition_to(
-                        InvocationStatus::Completed,
-                        invocation.fencing_token(),
-                    )
-                    .map_err(InvocationWorkerError::InvalidTransition)?;
+                    next.transition_to(InvocationStatus::Completed, invocation.fencing_token())
+                        .map_err(InvocationWorkerError::InvalidTransition)?;
                     let completed = self
                         .store
                         .complete_invocation(
@@ -294,12 +291,7 @@ where
             .map_err(InvocationWorkerError::InvalidTransition)?;
         let changed = self
             .store
-            .compare_and_set_invocation(
-                scope,
-                current.version(),
-                current.fencing_token(),
-                next,
-            )
+            .compare_and_set_invocation(scope, current.version(), current.fencing_token(), next)
             .await
             .map_err(InvocationWorkerError::Store)?;
         if changed {
@@ -333,14 +325,28 @@ mod tests {
 
     #[test]
     fn provider_failures_map_to_stable_non_sensitive_codes() {
-        assert_eq!(provider_error_code(ChatProviderError::Timeout), "provider_timeout");
         assert_eq!(
-            provider_error_code(ChatProviderError::RateLimited { retry_after_ms: Some(100) }),
+            provider_error_code(ChatProviderError::Timeout),
+            "provider_timeout"
+        );
+        assert_eq!(
+            provider_error_code(ChatProviderError::RateLimited {
+                retry_after_ms: Some(100)
+            }),
             "provider_rate_limited"
         );
-        assert_eq!(provider_error_code(ChatProviderError::Unavailable), "provider_unavailable");
-        assert_eq!(provider_error_code(ChatProviderError::MalformedOutput), "provider_malformed_output");
-        assert_eq!(provider_error_code(ChatProviderError::Other), "provider_other");
+        assert_eq!(
+            provider_error_code(ChatProviderError::Unavailable),
+            "provider_unavailable"
+        );
+        assert_eq!(
+            provider_error_code(ChatProviderError::MalformedOutput),
+            "provider_malformed_output"
+        );
+        assert_eq!(
+            provider_error_code(ChatProviderError::Other),
+            "provider_other"
+        );
     }
 }
 
