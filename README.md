@@ -136,3 +136,8 @@ docker compose --project-name qembed-rust-test --file compose.test.yaml down --v
 ```
 
 The migration runner is deliberately separate from normal application startup.
+
+
+## Invocation identity and atomic begin
+
+Authenticated Principal identity is represented separately from the effective invocation Caller. Explicit Caller selections are validated through SQL-011 delegation in the same transaction that reserves idempotency, pins snapshot and knowledge revision, inserts the invocation, and appends its event/outbox message. Invocation pool is a separate explicit policy decision. See [Principal/Caller delegation](docs/PRINCIPAL_CALLER_DELEGATION.md) and [atomic begin-invocation](docs/BEGIN_INVOCATION_TRANSACTION.md).
