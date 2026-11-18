@@ -175,9 +175,9 @@ pub async fn reserve_invocation_idempotency(
                 "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4 FOR UPDATE",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(object_id.to_string())
+            .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
-            .bind(idempotency_key),
+            .bind(claim.idempotency_key),
         )
         .await
         .map_err(IdempotencyReservationError::Database)?;
