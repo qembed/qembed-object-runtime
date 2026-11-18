@@ -40,8 +40,8 @@ impl std::error::Error for StructuredOutputError {}
 
 /// Negotiation failure before a provider request is sent.
 ///
-/// The caller obtains the capability profile from the adapter's local
-/// configuration, then calls this function before invoking ChatProvider.
+/// Reads the adapter's local capability profile for the request's routing
+/// key. Call this before invoking ChatProvider::complete.
 pub fn negotiate_request<P: ChatProvider>(
     provider: &P,
     request: &ChatRequest,
@@ -92,7 +92,7 @@ pub fn validate_response(
 
 #[cfg(test)]
 mod tests {
-    use qembed_domain::chat::ChatFinishReason;
+    use qembed_domain::chat::{ChatCapabilities, ChatFinishReason};
 
     use super::*;
 
