@@ -34,7 +34,6 @@ pub struct BeginInvocationCommand {
     pub trace_id: TraceId,
 }
 
-
 /// Durable outcome of begin-invocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BeginInvocationOutcome {
