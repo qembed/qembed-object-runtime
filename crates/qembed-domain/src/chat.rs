@@ -378,7 +378,6 @@ impl<'de> Deserialize<'de> for ChatResponse {
     }
 }
 
-
 /// Provider-neutral failure category returned by a chat provider adapter.
 ///
 /// These categories deliberately omit SDK types, raw provider messages,
