@@ -90,7 +90,7 @@ impl TenantTransaction {
         self.transaction_token
     }
 
-    pub(crate) const fn matches_scope(&self, scope: &Scope) -> bool {
+    pub(crate) fn matches_scope(&self, scope: &Scope) -> bool {
         self.tenant_id == scope.tenant_id()
             && self.principal_id == scope.principal().principal_id()
     }
