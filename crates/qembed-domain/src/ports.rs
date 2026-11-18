@@ -147,7 +147,6 @@ pub trait InvocationWorkStore: ExecutionStore {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-
 /// Read-only persistence boundary for the client-visible invocation projection.
 /// Implementations must use the trusted Scope and return None for both a missing
 /// invocation and an invocation belonging to another tenant.
@@ -158,7 +157,9 @@ pub trait InvocationReadStore: Send + Sync {
         &self,
         scope: &Scope,
         invocation_id: InvocationId,
-    ) -> impl Future<Output = Result<Option<crate::invocation_read::InvocationReadModel>, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<Option<crate::invocation_read::InvocationReadModel>, Self::Error>,
+    > + Send;
 }
 
 /// Provider-neutral chat completion boundary.
