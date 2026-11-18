@@ -5,8 +5,9 @@ use std::time::Duration;
 use qembed_domain::ids::{ObjectId, TenantId};
 use qembed_domain::object::Object;
 use qembed_domain::test_support::scope_for_tenant;
+use qembed_store::object_repository::ObjectRepository;
 use qembed_store::{
-    CasError, ObjectRepository, PgPoolConfig, begin_tenant_transaction, connect_pool,
+    CasError, PgPoolConfig, begin_tenant_transaction, connect_pool,
     execute_cas, run_migrations,
 };
 use sqlx::PgPool;
