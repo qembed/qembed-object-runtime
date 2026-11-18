@@ -103,7 +103,7 @@ impl ExecutionStore for PgExecutionStore {
         let result = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status=$1, version=$2 WHERE tenant_id=$3::uuid AND object_id=$4::uuid AND id=$5::uuid AND version=$6 AND fencing_token=$7 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
+                "UPDATE object_invocations SET status=$1, version=$2 WHERE tenant_id=$3::uuid AND object_id=$4::uuid AND id=$5::uuid AND version=$6 AND fencing_token=$7 AND lease_owner IS NULL AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
             )
             .bind(status_name(next.status()))
             .bind(to_i64(next.version(), "next version")?)
@@ -160,7 +160,7 @@ impl InvocationWorkStore for PgExecutionStore {
         let inserted = execute(
             &mut transaction,
             sqlx::query(
-                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $1::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $7, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$2::uuid AND invocation.object_id=$3::uuid AND invocation.id=$4::uuid AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
+                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $1::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $7, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$2::uuid AND invocation.object_id=$3::uuid AND invocation.id=$4::uuid AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND invocation.lease_owner IS NULL AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
             )
             .bind(MessageId::new().to_string())
             .bind(scope.tenant_id().to_string())
@@ -179,7 +179,7 @@ impl InvocationWorkStore for PgExecutionStore {
         let transitioned = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Processing'",
+                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Processing' AND lease_owner IS NULL",
             )
             .bind(scope.tenant_id().to_string())
             .bind(next.object_id().to_string())
@@ -213,7 +213,7 @@ impl InvocationWorkStore for PgExecutionStore {
         let result = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status='Completed', finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying' AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
+                "UPDATE object_invocations SET status='Completed', finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying' AND lease_owner IS NULL AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
             )
             .bind(scope.tenant_id().to_string())
             .bind(next.object_id().to_string())
@@ -253,7 +253,7 @@ impl InvocationWorkStore for PgExecutionStore {
         let result = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status='Failed', error_code=$1, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$2::uuid AND object_id=$3::uuid AND id=$4::uuid AND version=$5 AND fencing_token=$6 AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
+                "UPDATE object_invocations SET status='Failed', error_code=$1, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$2::uuid AND object_id=$3::uuid AND id=$4::uuid AND version=$5 AND fencing_token=$6 AND lease_owner IS NULL AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
             )
             .bind(error_code)
             .bind(scope.tenant_id().to_string())
