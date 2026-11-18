@@ -59,6 +59,9 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL CHECK (status IN ('Received','ContextLoading','Processing','ExecutingTool','Verifying','WaitingForInput','WaitingForApproval','Completed','CompletedDegraded','Failed','Cancelled')), trace_id UUID NOT NULL, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
         ),
         format!(
+            "CREATE TABLE \"{schema}\".interaction_messages (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, invocation_id UUID NOT NULL, role TEXT NOT NULL CHECK (role IN ('user','assistant','tool')), content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id))"
+        ),
+        format!(
             "CREATE TABLE \"{schema}\".invocation_idempotency (tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, idempotency_key TEXT NOT NULL, payload_hash BYTEA NOT NULL, invocation_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (tenant_id, object_id, caller_id, idempotency_key), UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id) DEFERRABLE INITIALLY DEFERRED)"
         ),
         format!(
@@ -415,7 +418,6 @@ async fn inactive_object_rolls_back_the_idempotency_claim() {
     teardown(fixture).await;
 }
 
-
 #[tokio::test]
 async fn worker_store_persists_response_and_resumes_after_process_restart() {
     let fixture = setup(None).await;
@@ -449,15 +451,17 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     let mut next = current.clone();
     next.transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
         .expect("Received -> ContextLoading");
-    assert!(store
-        .compare_and_set_invocation(
-            &fixture.scope,
-            current.version(),
-            FencingToken::INITIAL,
-            next,
-        )
-        .await
-        .expect("persist context-loading state"));
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                current.version(),
+                FencingToken::INITIAL,
+                next,
+            )
+            .await
+            .expect("persist context-loading state")
+    );
 
     current = store
         .load_invocation(&fixture.scope, invocation_id)
@@ -467,15 +471,17 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     let mut next = current.clone();
     next.transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
         .expect("ContextLoading -> Processing");
-    assert!(store
-        .compare_and_set_invocation(
-            &fixture.scope,
-            current.version(),
-            FencingToken::INITIAL,
-            next,
-        )
-        .await
-        .expect("persist processing state"));
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                current.version(),
+                FencingToken::INITIAL,
+                next,
+            )
+            .await
+            .expect("persist processing state")
+    );
 
     current = store
         .load_invocation(&fixture.scope, invocation_id)
@@ -485,16 +491,18 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     let mut next = current.clone();
     next.transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
         .expect("Processing -> Verifying");
-    assert!(store
-        .persist_assistant_output(
-            &fixture.scope,
-            current.version(),
-            FencingToken::INITIAL,
-            next,
-            "durable answer".to_owned(),
-        )
-        .await
-        .expect("persist response and verifying state"));
+    assert!(
+        store
+            .persist_assistant_output(
+                &fixture.scope,
+                current.version(),
+                FencingToken::INITIAL,
+                next,
+                "durable answer".to_owned(),
+            )
+            .await
+            .expect("persist response and verifying state")
+    );
 
     // A new adapter instance represents a restarted worker process.
     let restarted = PgExecutionStore::new(fixture.pool.clone());
@@ -515,15 +523,17 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     completed
         .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
         .expect("Verifying -> Completed");
-    assert!(restarted
-        .complete_invocation(
-            &fixture.scope,
-            recovered.version(),
-            FencingToken::INITIAL,
-            completed,
-        )
-        .await
-        .expect("persist terminal state"));
+    assert!(
+        restarted
+            .complete_invocation(
+                &fixture.scope,
+                recovered.version(),
+                FencingToken::INITIAL,
+                completed,
+            )
+            .await
+            .expect("persist terminal state")
+    );
 
     let terminal = restarted
         .load_invocation(&fixture.scope, invocation_id)
@@ -542,7 +552,6 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
 
     teardown(fixture).await;
 }
-
 
 #[tokio::test]
 async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
