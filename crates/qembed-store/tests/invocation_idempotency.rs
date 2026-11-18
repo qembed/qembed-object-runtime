@@ -145,15 +145,27 @@ async fn insert_invocation(
     .expect("the deferred invocation reference should be satisfied before commit");
 }
 
+fn idempotency_claim(
+    object_id: ObjectId,
+    key: &str,
+    hash: &[u8],
+    candidate: InvocationId,
+) -> IdempotencyClaim<'_> {
+    IdempotencyClaim::new(
+        object_id,
+        key,
+        hash,
+        candidate,
+        SystemTime::now() + Duration::from_secs(3_600),
+    )
+}
+
 async fn reserve_and_finish(
     pool: &PgPool,
     schema: &str,
     scope: &Scope,
     caller_id: CallerId,
-    object_id: ObjectId,
-    key: &str,
-    hash: &[u8],
-    candidate: InvocationId,
+    claim: IdempotencyClaim<'_>,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
     let mut transaction = begin_tenant_transaction(pool, scope)
         .await
@@ -163,18 +175,18 @@ async fn reserve_and_finish(
         .await
         .expect("requested Caller must be actively delegated");
 
-    let claim = IdempotencyClaim::new(
-        object_id,
-        key,
-        hash,
-        candidate,
-        SystemTime::now() + Duration::from_secs(3_600),
-    );
     let reservation =
         reserve_invocation_idempotency(&mut transaction, scope, &caller, &claim).await?;
 
     if let IdempotencyReservation::Reserved { invocation_id } = reservation {
-        insert_invocation(&mut transaction, scope, caller_id, object_id, invocation_id).await;
+        insert_invocation(
+            &mut transaction,
+            scope,
+            caller_id,
+            claim.object_id(),
+            invocation_id,
+        )
+        .await;
     }
 
     transaction
