@@ -62,7 +62,10 @@ mod tests {
     #[test]
     fn caller_kind_parses_only_canonical_sql_values() {
         assert_eq!(CallerKind::parse("Anonymous"), Some(CallerKind::Anonymous));
-        assert_eq!(CallerKind::parse("Authenticated"), Some(CallerKind::Authenticated));
+        assert_eq!(
+            CallerKind::parse("Authenticated"),
+            Some(CallerKind::Authenticated)
+        );
         assert_eq!(CallerKind::parse("Service"), Some(CallerKind::Service));
         assert_eq!(CallerKind::parse("service"), None);
         assert_eq!(CallerKind::parse("Owner"), None);
