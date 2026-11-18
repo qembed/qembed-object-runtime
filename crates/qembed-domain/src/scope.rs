@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn scope_rejects_nil_tenant_id() {
         let principal =
-            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated)
                 .expect("non-nil caller ID must be accepted");
 
         let error = Scope::from_verified_auth(TenantId::from_uuid(Uuid::nil()), principal)
