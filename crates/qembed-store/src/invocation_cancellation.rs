@@ -56,21 +56,24 @@ impl InvocationCancellationStore for PgExecutionStore {
             .bind(invocation_id.to_string()),
         )
         .await?;
-        transaction.commit().await?;
 
         let Some((status, fencing_token)) = current else {
+            transaction.commit().await?;
             return Ok(InvocationCancellationOutcome::NotFound);
         };
         let status = parse_status(&status)?;
 
         if status == InvocationStatus::Cancelled {
+            transaction.commit().await?;
             return Ok(InvocationCancellationOutcome::Cancelled {
                 newly_cancelled: false,
             });
         }
         if status.is_terminal() {
+            transaction.commit().await?;
             return Ok(InvocationCancellationOutcome::AlreadyTerminal(status));
         }
+        transaction.rollback().await?;
         if fencing_token == i64::MAX {
             return Err(InvocationStoreError::InvalidRequestedState(
                 "fencing token exhausted; cancellation cannot safely revoke the worker",

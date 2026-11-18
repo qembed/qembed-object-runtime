@@ -2,7 +2,9 @@
 
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::InvocationStatus;
-use qembed_domain::ports::{InvocationCancellationOutcome, InvocationCancellationStore, InvocationReadStore};
+use qembed_domain::ports::{
+    InvocationCancellationOutcome, InvocationCancellationStore, InvocationReadStore,
+};
 use qembed_domain::scope::Scope;
 use qembed_runtime::invocation_cancellation::InvocationCancellationService;
 use qembed_runtime::invocation_query::InvocationQueryService;
@@ -35,7 +37,7 @@ pub struct InvocationResponse {
 }
 
 /// Result of an invocation cancellation request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CancelInvocationResponse {
     pub invocation_id: String,
     pub status: InvocationApiStatus,
