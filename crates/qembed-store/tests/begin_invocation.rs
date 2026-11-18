@@ -187,6 +187,10 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
     assert_eq!(persisted.1, fixture.snapshot_id.to_string());
     assert_eq!(persisted.2, 7);
     assert_eq!(persisted.3, "authenticated");
+    assert_ne!(fixture.scope.principal().principal_id().into_uuid(), fixture.caller_id.into_uuid(), "Principal and Caller identities must not rely on UUID equality");
+    let event_type: String = sqlx::query_scalar("SELECT payload->>'type' FROM events")
+        .fetch_one(&fixture.pool).await.expect("event payload should include its allowlisted type");
+    assert_eq!(event_type, "invocation_received");
 
     let replay = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "key-1"))
         .await.expect("same key and payload should replay");
@@ -231,6 +235,47 @@ async fn outbox_insert_failure_rolls_back_invocation_idempotency_and_event() {
     let fixture = setup(Some("outbox_messages")).await;
     let result = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "fail-outbox")).await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn principal_uuid_is_not_an_implicit_caller_mapping() {
+    let fixture = setup(None).await;
+    let mut invalid = command(&fixture, "principal-is-not-caller");
+    invalid.requested_caller_id = CallerId::from_uuid(fixture.scope.principal().principal_id().into_uuid());
+    let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
+        .await.expect_err("Principal UUID equality must not authorize a Caller");
+    assert!(matches!(
+        error,
+        BeginInvocationError::CallerResolution(qembed_store::caller::CallerResolutionError::NotDelegated)
+    ));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn missing_knowledge_revision_rolls_back_the_idempotency_claim() {
+    let fixture = setup(None).await;
+    sqlx::query("DELETE FROM knowledge_revisions WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).execute(&fixture.pool).await
+        .expect("knowledge revision fixture should be removed");
+    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "missing-revision"))
+        .await.expect_err("missing knowledge revision must fail");
+    assert!(matches!(error, BeginInvocationError::KnowledgeRevisionNotFound));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn inactive_object_rolls_back_the_idempotency_claim() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE objects SET state='suspended' WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).execute(&fixture.pool).await
+        .expect("object should be suspended");
+    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "inactive-object"))
+        .await.expect_err("suspended object must not begin an invocation");
+    assert!(matches!(error, BeginInvocationError::ObjectNotActive));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
     teardown(fixture).await;
 }
