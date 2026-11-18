@@ -126,8 +126,12 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
         .execute(&pool)
         .await
         .expect("failure trigger function should be installed");
+    // Scope the injected failure to this fixture's tenant. The integration
+    // test binaries share one PostgreSQL database, so a table-wide trigger
+    // would race with unrelated tests that append outbox rows concurrently.
     let trigger_ddl = format!(
-        "CREATE TRIGGER {trigger_name} BEFORE INSERT ON outbox_messages FOR EACH ROW EXECUTE FUNCTION {function_name}()"
+        "CREATE TRIGGER {trigger_name} BEFORE INSERT ON outbox_messages FOR EACH ROW WHEN (NEW.tenant_id = '{}'::uuid) EXECUTE FUNCTION {function_name}()",
+        scope.tenant_id()
     );
     sqlx::query(&trigger_ddl)
         .execute(&pool)
