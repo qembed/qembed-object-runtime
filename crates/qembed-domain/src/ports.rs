@@ -168,10 +168,12 @@ mod tests {
             &self,
             _: ChatRequest,
         ) -> impl Future<Output = Result<ChatResponse, Self::Error>> + Send {
-            ready(Ok(
-                ChatResponse::new("test response", crate::chat::ChatFinishReason::Stop, None)
-                    .expect("test response is valid"),
-            ))
+            ready(Ok(ChatResponse::new(
+                "test response",
+                crate::chat::ChatFinishReason::Stop,
+                None,
+            )
+            .expect("test response is valid")))
         }
     }
 
