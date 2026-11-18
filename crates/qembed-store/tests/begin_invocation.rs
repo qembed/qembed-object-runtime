@@ -605,13 +605,13 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
     let worker_a = PgExecutionStore::new(fixture.pool.clone());
     let worker_b = PgExecutionStore::new(second_pool.clone());
 
-    let old_claim = worker_a
+    let first_claim = worker_a
         .claim_invocation(&fixture.scope, invocation_id, "worker-a", 60)
         .await
         .expect("worker A claim")
         .expect("unleased invocation is claimable");
-    assert_eq!(old_claim.fencing_token(), FencingToken::INITIAL);
-    assert_eq!(old_claim.version(), 0);
+    assert_eq!(first_claim.fencing_token(), FencingToken::INITIAL);
+    assert_eq!(first_claim.version(), 0);
 
     assert!(
         worker_b
@@ -621,6 +621,30 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
             .is_none(),
         "a live lease cannot be stolen"
     );
+
+    let mut context_loading = first_claim.clone();
+    context_loading
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("worker A starts context loading");
+    assert!(worker_a.compare_and_set_owned(
+        &fixture.scope, "worker-a", first_claim.version(), first_claim.fencing_token(),
+        context_loading,
+    ).await.expect("worker A context transition"));
+
+    let after_context = worker_a.load_invocation(&fixture.scope, invocation_id)
+        .await.expect("reload after context").expect("invocation exists");
+    let mut processing = after_context.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .expect("worker A starts processing");
+    assert!(worker_a.compare_and_set_owned(
+        &fixture.scope, "worker-a", after_context.version(), after_context.fencing_token(),
+        processing,
+    ).await.expect("worker A processing transition"));
+
+    let old_claim = worker_a.load_invocation(&fixture.scope, invocation_id)
+        .await.expect("load stale worker snapshot").expect("invocation exists");
+    assert_eq!(old_claim.status(), InvocationStatus::Processing);
 
     sqlx::query(
         "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
@@ -637,24 +661,26 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("worker B reclaim")
         .expect("expired lease can be reclaimed");
     assert_eq!(new_claim.fencing_token().value(), 1);
-    assert_eq!(new_claim.version(), 1);
+    assert_eq!(new_claim.version(), old_claim.version() + 1);
+    assert_eq!(new_claim.status(), InvocationStatus::Processing);
 
-    let mut stale_transition = old_claim.clone();
-    stale_transition
-        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
-        .expect("old in-memory state can form a candidate transition");
+    let mut stale_output = old_claim.clone();
+    stale_output
+        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .expect("old in-memory state can form a candidate response transition");
     assert!(
         !worker_a
-            .compare_and_set_owned(
+            .persist_assistant_output_owned(
                 &fixture.scope,
                 "worker-a",
                 old_claim.version(),
                 old_claim.fencing_token(),
-                stale_transition,
+                stale_output,
+                "stale answer".to_owned(),
             )
             .await
-            .expect("stale write is a normal CAS miss"),
-        "old owner and old token must not commit after reclaim"
+            .expect("stale response write is a normal CAS miss"),
+        "old owner and old token must not persist a response after reclaim"
     );
 
     assert!(
@@ -670,21 +696,27 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
             .expect("stale heartbeat is a normal miss")
     );
 
-    let mut valid_transition = new_claim.clone();
-    valid_transition
-        .transition_to(InvocationStatus::ContextLoading, new_claim.fencing_token())
-        .expect("new lease owner can transition");
+    let mut valid_response = new_claim.clone();
+    valid_response
+        .transition_to(InvocationStatus::Verifying, new_claim.fencing_token())
+        .expect("new lease owner can persist provider response");
     assert!(
         worker_b
-            .compare_and_set_owned(
+            .persist_assistant_output_owned(
                 &fixture.scope,
                 "worker-b",
                 new_claim.version(),
                 new_claim.fencing_token(),
-                valid_transition,
+                valid_response,
+                "current answer".to_owned(),
             )
             .await
-            .expect("new owner CAS")
+            .expect("new owner response CAS")
+    );
+    assert_eq!(
+        worker_b.load_assistant_output(&fixture.scope, invocation_id)
+            .await.expect("load assistant output").as_deref(),
+        Some("current answer")
     );
     assert!(
         worker_b
