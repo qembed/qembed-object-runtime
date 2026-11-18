@@ -57,6 +57,8 @@ begin-invocation transaction.
 
 PostgreSQL integration tests cover same-key replay, concurrent requests,
 payload mismatch, rollback releasing a claim, and isolation across tenant,
-object, and authenticated-caller scopes. The isolated test schema reproduces
+object, and effective-Caller scopes. The isolated test schema reproduces
 the relevant canonical table constraints, including the deferred composite FK;
 it is test fixture DDL only.
+
+RUST-036 resolves the explicit Caller selection before reserving the key. The resolver locks the active delegation and Principal/Caller lifecycle rows until the atomic begin-invocation transaction commits. See [Principal and Caller identities](PRINCIPAL_CALLER_DELEGATION.md) and [Atomic begin-invocation](BEGIN_INVOCATION_TRANSACTION.md).
