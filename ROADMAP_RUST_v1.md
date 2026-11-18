@@ -216,8 +216,9 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: serialization tests проверяют точный набор полей для validation-started/version-published; negative assertions исключают secrets, credentials, arguments и raw payload.
   - DoD: произвольный JSON и чувствительные payloads не проходят в event API.
 
-- [ ] **RUST-026 (S)** Реализовать repository CAS helper.
-  - Тесты: DB integration с двумя независимыми соединениями; stale version/token даёт `rows_affected = 0`.
+- [x] **RUST-026 (S)** Реализовать repository CAS helper.
+  - Реализация: `execute_cas` выполняет условный SQL update только через `TenantTransaction`; ровно одна изменённая строка означает успех, ноль — stale-state conflict, больше одной — invariant violation. Object validation/publication используют общий helper.
+  - Тесты: PostgreSQL integration с двумя независимыми backend sessions подтверждает stale predicate conflict после commit победителя; отдельный тест проверяет отказ CAS при обновлении нескольких строк и rollback.
   - DoD: успешный CAS требует ровно одной изменённой строки.
 
 - [ ] **RUST-027 (M)** Покрыть RLS и composite FK интеграционными тестами.
