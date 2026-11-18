@@ -40,8 +40,8 @@ impl Error for MockConfigurationError {}
 /// In-memory ChatProvider whose output is determined only by request content.
 ///
 /// Register each request exactly once with the with_response or with_error
-/// methods. An unregistered request returns UnscriptedRequest, making missing
-/// fixtures visible instead of silently returning a plausible response.
+/// methods. An unregistered request returns the neutral `Other` category,
+/// making missing fixtures visible without exposing mock-only error types.
 #[derive(Clone, Debug)]
 pub struct MockChatProvider {
     scripts: Vec<Script>,
