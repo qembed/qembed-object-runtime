@@ -176,14 +176,13 @@ async fn runtime_role_can_read_immutable_rows_but_cannot_update_or_delete_them()
         .expect("denied snapshot update should roll back");
 
     let mut transaction = runtime_transaction(&fixture.pool, &fixture.scope).await;
-    let error = sqlx::query(
-        "DELETE FROM snapshots WHERE tenant_id = $1::uuid AND snapshot_id = $2::uuid",
-    )
-    .bind(fixture.scope.tenant_id().to_string())
-    .bind(fixture.snapshot_id.to_string())
-    .execute(transaction.connection())
-    .await
-    .expect_err("runtime role must not delete snapshots");
+    let error =
+        sqlx::query("DELETE FROM snapshots WHERE tenant_id = $1::uuid AND snapshot_id = $2::uuid")
+            .bind(fixture.scope.tenant_id().to_string())
+            .bind(fixture.snapshot_id.to_string())
+            .execute(transaction.connection())
+            .await
+            .expect_err("runtime role must not delete snapshots");
     assert_insufficient_privilege(error);
     transaction
         .rollback()
@@ -206,14 +205,13 @@ async fn runtime_role_can_read_immutable_rows_but_cannot_update_or_delete_them()
         .expect("denied event update should roll back");
 
     let mut transaction = runtime_transaction(&fixture.pool, &fixture.scope).await;
-    let error = sqlx::query(
-        "DELETE FROM events WHERE tenant_id = $1::uuid AND aggregate_id = $2::uuid",
-    )
-    .bind(fixture.scope.tenant_id().to_string())
-    .bind(fixture.object_id.to_string())
-    .execute(transaction.connection())
-    .await
-    .expect_err("runtime role must not delete events");
+    let error =
+        sqlx::query("DELETE FROM events WHERE tenant_id = $1::uuid AND aggregate_id = $2::uuid")
+            .bind(fixture.scope.tenant_id().to_string())
+            .bind(fixture.object_id.to_string())
+            .execute(transaction.connection())
+            .await
+            .expect_err("runtime role must not delete events");
     assert_insufficient_privilege(error);
     transaction
         .rollback()
