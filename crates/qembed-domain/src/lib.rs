@@ -25,7 +25,7 @@
 //! use qembed_domain::ids::PrincipalId;
 //! use qembed_domain::principal::{Principal, PrincipalKind};
 //!
-//! let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated);
+//! let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::TenantOwner);
 //! ```
 //!
 //! A `Principal` cannot be reconstructed from serialized input:
