@@ -85,12 +85,25 @@ mod tests {
         let json = serde_json::to_value(response).expect("response serializes");
         let object = json.as_object().expect("response is an object");
         assert_eq!(object.len(), 5);
-        assert_eq!(object.get("status").and_then(|value| value.as_str()), Some("succeeded"));
+        assert_eq!(
+            object.get("status").and_then(|value| value.as_str()),
+            Some("succeeded")
+        );
         for forbidden in [
-            "tenant_id", "caller_id", "snapshot_id", "trace_id", "lease_owner",
-            "fencing_token", "version", "input", "provider",
+            "tenant_id",
+            "caller_id",
+            "snapshot_id",
+            "trace_id",
+            "lease_owner",
+            "fencing_token",
+            "version",
+            "input",
+            "provider",
         ] {
-            assert!(!object.contains_key(forbidden), "unexpected field {forbidden}");
+            assert!(
+                !object.contains_key(forbidden),
+                "unexpected field {forbidden}"
+            );
         }
     }
 }
