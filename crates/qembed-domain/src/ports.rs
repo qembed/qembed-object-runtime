@@ -164,8 +164,6 @@ mod tests {
     struct TestProvider;
 
     impl ChatProvider for TestProvider {
-        type Error = Infallible;
-
         fn capabilities(&self, _: &str) -> Option<ChatCapabilities> {
             Some(ChatCapabilities::default())
         }
