@@ -278,14 +278,16 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration — повтор ключа, конкурентные запросы, payload mismatch, rollback claim и независимость tenant/object/caller scopes.
   - DoD: reservation и invocation фиксируются до provider I/O; TTL и алгоритм хеширования не выдумываются этим слоем.
 
-- [ ] **RUST-036 (M, implementation ready for review in PR #36; stable + MSRV CI green)** Реализовать атомарный begin-invocation transaction и SQL-011 Principal/Caller delegation integration.
+- [x] **RUST-036 (M)** Реализовать атомарный begin-invocation transaction и SQL-011 Principal/Caller delegation integration.
   - Реализация: отдельные PrincipalId и CallerId; transaction-local app.tenant_id + app.principal_id; SQL-011 resolve_delegated_caller с блокировками; idempotency scoped по ResolvedCaller; explicit InvocationPool; атомарные snapshot/revision pin, invocation insert, critical event и outbox.
   - Тесты: PostgreSQL integration — commit/replay, caller scoping, invalid snapshot rollback, injected failures at invocation/event/outbox writes. SQL clean-install/smoke validation remains a separate qembed-sql gate.
   - Документация: PRINCIPAL_CALLER_DELEGATION.md, BEGIN_INVOCATION_TRANSACTION.md, idempotency contract and Store role matrix.
   - DoD: либо фиксируется весь begin-invocation, либо ничего; provider I/O начинается только после commit.
 
-- [ ] **RUST-037 (M)** Реализовать минимальный invocation worker lifecycle.
-  - Тесты: integration — claim/process/finish; restart/resume; terminal result не теряется.
+- [ ] **RUST-037 (M, implementation in progress)** Реализовать минимальный invocation worker lifecycle.
+  - Реализация: durable user input is committed with begin-invocation; worker resumes from persisted Invocation status; provider output is persisted before Verifying → Completed; terminal status/result are committed together where possible. No lease/reclaim semantics here (RUST-038).
+  - Тесты: runtime mock-provider tests — claim/process/finish and provider failure; PostgreSQL integration — persisted input, CAS transitions, response durability, restart at Verifying, terminal result retrieval, idempotent replay does not duplicate input.
+  - Документация: INVOCATION_WORKER_LIFECYCLE.md, BEGIN_INVOCATION_TRANSACTION.md, README.
   - DoD: invocation lifecycle сохраняется в PostgreSQL и переживает рестарт процесса.
 
 - [ ] **RUST-038 (M)** Реализовать invocation lease и fencing-token CAS.

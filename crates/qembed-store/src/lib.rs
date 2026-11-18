@@ -12,6 +12,7 @@ pub mod begin_invocation;
 pub mod caller;
 mod cas;
 pub mod idempotency;
+pub mod invocation_worker;
 pub use cas::{CasError, execute_cas};
 mod event_outbox;
 pub mod object_repository;

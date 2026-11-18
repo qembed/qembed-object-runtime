@@ -9,6 +9,10 @@ lints.workspace = true
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
 
+[dev-dependencies]
+qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
+tokio.workspace = true
+
 [[bin]]
 name = "qembed-eval"
 path = "src/bin/qembed-eval.rs"

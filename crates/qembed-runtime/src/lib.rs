@@ -1,1 +1,3 @@
-// Intentionally empty; implement according to ROADMAP_RUST_v1.md.
+//! Provider-neutral orchestration for durable invocation execution.
+
+pub mod invocation_worker;

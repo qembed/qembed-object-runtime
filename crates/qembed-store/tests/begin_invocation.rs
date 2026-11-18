@@ -4,10 +4,13 @@ use std::time::{Duration, SystemTime};
 
 use qembed_domain::caller::InvocationPool;
 use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
+use qembed_domain::invocation::{FencingToken, InvocationStatus};
+use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
+use qembed_store::invocation_worker::PgExecutionStore;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
@@ -53,7 +56,10 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".knowledge_revisions (tenant_id UUID NOT NULL, object_id UUID NOT NULL, current_revision BIGINT NOT NULL CHECK (current_revision >= 0), PRIMARY KEY (tenant_id, object_id), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
         ),
         format!(
-            "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL CHECK (status IN ('Received','ContextLoading','Processing','ExecutingTool','Verifying','WaitingForInput','WaitingForApproval','Completed','CompletedDegraded','Failed','Cancelled')), trace_id UUID NOT NULL, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
+            "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL CHECK (status IN ('Received','ContextLoading','Processing','ExecutingTool','Verifying','WaitingForInput','WaitingForApproval','Completed','CompletedDegraded','Failed','Cancelled')), error_code TEXT, degraded_reason TEXT, trace_id UUID NOT NULL, cancel_requested_at TIMESTAMPTZ, lease_owner TEXT, lease_until TIMESTAMPTZ, heartbeat_at TIMESTAMPTZ, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), CHECK ((status IN ('Completed','CompletedDegraded','Failed','Cancelled')) = (finished_at IS NOT NULL)), CHECK (status <> 'Failed' OR error_code IS NOT NULL), CHECK (status <> 'CompletedDegraded' OR degraded_reason IS NOT NULL), CHECK ((lease_owner IS NULL) = (lease_until IS NULL)), CHECK (finished_at IS NULL OR lease_owner IS NULL), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
+        ),
+        format!(
+            "CREATE TABLE \"{schema}\".interaction_messages (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, invocation_id UUID NOT NULL, role TEXT NOT NULL CHECK (role IN ('user','assistant','tool')), content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id))"
         ),
         format!(
             "CREATE TABLE \"{schema}\".invocation_idempotency (tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, idempotency_key TEXT NOT NULL, payload_hash BYTEA NOT NULL, invocation_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (tenant_id, object_id, caller_id, idempotency_key), UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id) DEFERRABLE INITIALLY DEFERRED)"
@@ -192,12 +198,14 @@ fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
         snapshot_id: fixture.snapshot_id,
         idempotency_key: key.to_owned(),
         payload_hash: b"request-digest".to_vec(),
+        input_message: "hello from durable invocation input".to_owned(),
+        message_expires_at: SystemTime::now() + Duration::from_secs(86_400),
         idempotency_expires_at: SystemTime::now() + Duration::from_secs(3_600),
         trace_id: TraceId::new(),
     }
 }
 
-async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64) {
+async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64, i64) {
     let invocations = sqlx::query_scalar("SELECT count(*) FROM object_invocations")
         .fetch_one(&fixture.pool)
         .await
@@ -214,7 +222,11 @@ async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64) {
         .fetch_one(&fixture.pool)
         .await
         .expect("outbox count");
-    (invocations, idempotency, events, outbox)
+    let messages = sqlx::query_scalar("SELECT count(*) FROM interaction_messages")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("interaction message count");
+    (invocations, idempotency, events, outbox, messages)
 }
 
 async fn teardown(fixture: Fixture) {
@@ -249,7 +261,7 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         }
         other => panic!("expected Created, got {other:?}"),
     };
-    assert_eq!(counts(&fixture).await, (1, 1, 1, 1));
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
 
     let persisted = sqlx::query_as::<_, (String, String, i64, String)>(
         "SELECT caller_id::text, snapshot_id::text, knowledge_revision, pool FROM object_invocations WHERE id=$1::uuid"
@@ -263,17 +275,28 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         fixture.caller_id.into_uuid(),
         "Principal and Caller identities must not rely on UUID equality"
     );
+    let input_message: String = sqlx::query_scalar(
+        "SELECT content FROM interaction_messages WHERE invocation_id=$1::uuid AND role='user'",
+    )
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("original user input should be durable");
+    assert_eq!(input_message, "hello from durable invocation input");
+
     let event_type: String = sqlx::query_scalar("SELECT payload->>'type' FROM events")
         .fetch_one(&fixture.pool)
         .await
         .expect("event payload should include its allowlisted type");
     assert_eq!(event_type, "invocation_received");
 
-    let replay = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "key-1"))
+    let mut replay_command = command(&fixture, "key-1");
+    replay_command.message_expires_at = std::time::UNIX_EPOCH;
+    let replay = begin_invocation(&fixture.pool, &fixture.scope, replay_command)
         .await
-        .expect("same key and payload should replay");
+        .expect("same key and payload should replay without validating a new message expiry");
     assert_eq!(replay, BeginInvocationOutcome::Replay { invocation_id });
-    assert_eq!(counts(&fixture).await, (1, 1, 1, 1));
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
     teardown(fixture).await;
 }
 
@@ -287,7 +310,7 @@ async fn any_failure_after_idempotency_claim_rolls_back_the_entire_begin() {
         .await
         .expect_err("missing snapshot must fail");
     assert!(matches!(error, BeginInvocationError::SnapshotNotFound));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -301,7 +324,7 @@ async fn invocation_insert_failure_rolls_back_idempotency_claim() {
     )
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -315,7 +338,7 @@ async fn event_insert_failure_rolls_back_invocation_and_idempotency() {
     )
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -329,7 +352,7 @@ async fn outbox_insert_failure_rolls_back_invocation_idempotency_and_event() {
     )
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -348,7 +371,7 @@ async fn principal_uuid_is_not_an_implicit_caller_mapping() {
             qembed_store::caller::CallerResolutionError::NotDelegated
         )
     ));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -371,7 +394,7 @@ async fn missing_knowledge_revision_rolls_back_the_idempotency_claim() {
         error,
         BeginInvocationError::KnowledgeRevisionNotFound
     ));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -391,6 +414,155 @@ async fn inactive_object_rolls_back_the_idempotency_claim() {
     .await
     .expect_err("suspended object must not begin an invocation");
     assert!(matches!(error, BeginInvocationError::ObjectNotActive));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn worker_store_persists_response_and_resumes_after_process_restart() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "worker-restart"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let input = store
+        .load_user_input(&fixture.scope, invocation_id)
+        .await
+        .expect("input query")
+        .expect("durable user input");
+    assert_eq!(input, "hello from durable invocation input");
+
+    let mut current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load invocation")
+        .expect("invocation exists");
+    assert_eq!(current.status(), InvocationStatus::Received);
+
+    let mut next = current.clone();
+    next.transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                current.version(),
+                FencingToken::INITIAL,
+                next,
+            )
+            .await
+            .expect("persist context-loading state")
+    );
+
+    current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload invocation")
+        .expect("invocation exists");
+    let mut next = current.clone();
+    next.transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                current.version(),
+                FencingToken::INITIAL,
+                next,
+            )
+            .await
+            .expect("persist processing state")
+    );
+
+    current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload processing invocation")
+        .expect("invocation exists");
+    let mut next = current.clone();
+    next.transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .expect("Processing -> Verifying");
+    assert!(
+        store
+            .persist_assistant_output(
+                &fixture.scope,
+                current.version(),
+                FencingToken::INITIAL,
+                next,
+                "durable answer".to_owned(),
+            )
+            .await
+            .expect("persist response and verifying state")
+    );
+
+    // A new adapter instance represents a restarted worker process.
+    let restarted = PgExecutionStore::new(fixture.pool.clone());
+    let recovered = restarted
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload after restart")
+        .expect("invocation exists");
+    assert_eq!(recovered.status(), InvocationStatus::Verifying);
+    let output = restarted
+        .load_assistant_output(&fixture.scope, invocation_id)
+        .await
+        .expect("load persisted response")
+        .expect("assistant output survived restart");
+    assert_eq!(output, "durable answer");
+
+    let mut completed = recovered.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .expect("Verifying -> Completed");
+    assert!(
+        restarted
+            .complete_invocation(
+                &fixture.scope,
+                recovered.version(),
+                FencingToken::INITIAL,
+                completed,
+            )
+            .await
+            .expect("persist terminal state")
+    );
+
+    let terminal = restarted
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load terminal invocation")
+        .expect("terminal invocation exists");
+    assert_eq!(terminal.status(), InvocationStatus::Completed);
+    assert_eq!(
+        restarted
+            .load_assistant_output(&fixture.scope, invocation_id)
+            .await
+            .expect("load terminal output")
+            .as_deref(),
+        Some("durable answer")
+    );
+
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
+    let fixture = setup(None).await;
+    let mut invalid = command(&fixture, "invalid-input");
+    invalid.input_message = "   ".to_owned();
+
+    let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
+        .await
+        .expect_err("blank user input must be rejected");
+    assert!(matches!(error, BeginInvocationError::InvalidInputMessage));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }

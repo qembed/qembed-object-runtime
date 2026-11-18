@@ -81,6 +81,7 @@ define_id!(InvocationId);
 define_id!(TraceId);
 define_id!(SnapshotId);
 define_id!(EventId);
+define_id!(MessageId);
 define_id!(CommandId);
 define_id!(ToolExecutionId);
 define_id!(TaskId);
@@ -130,6 +131,7 @@ mod tests {
         assert_round_trip(TraceId::new());
         assert_round_trip(SnapshotId::new());
         assert_round_trip(EventId::new());
+        assert_round_trip(MessageId::new());
         assert_round_trip(CommandId::new());
         assert_round_trip(ToolExecutionId::new());
         assert_round_trip(TaskId::new());
@@ -146,6 +148,7 @@ mod tests {
         assert_rejects_invalid::<TraceId>();
         assert_rejects_invalid::<SnapshotId>();
         assert_rejects_invalid::<EventId>();
+        assert_rejects_invalid::<MessageId>();
         assert_rejects_invalid::<CommandId>();
         assert_rejects_invalid::<ToolExecutionId>();
         assert_rejects_invalid::<TaskId>();
