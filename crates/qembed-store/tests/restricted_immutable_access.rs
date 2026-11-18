@@ -11,13 +11,10 @@ use qembed_store::snapshot_repository::SnapshotRepository;
 use qembed_store::{begin_tenant_transaction, run_migrations};
 use sqlx::PgPool;
 
-const RUNTIME_ROLE: &str = "qembed_runtime_immutable_test";
-
 struct Fixture {
     pool: PgPool,
     scope: Scope,
     object_id: ObjectId,
-    version_id: ObjectVersionId,
     snapshot_id: SnapshotId,
 }
 
@@ -108,7 +105,6 @@ async fn setup() -> Fixture {
         pool,
         scope,
         object_id,
-        version_id,
         snapshot_id,
     }
 }
