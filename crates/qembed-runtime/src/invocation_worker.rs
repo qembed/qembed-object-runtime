@@ -419,13 +419,15 @@ mod lifecycle_tests {
             invocation_id: InvocationId,
         ) -> Result<Option<String>, Self::Error> {
             let state = self.0.lock().expect("fake store lock");
-            Ok(if state.invocation.tenant_id() == scope.tenant_id()
-                && state.invocation.id() == invocation_id
-            {
-                state.output.clone()
-            } else {
-                None
-            })
+            Ok(
+                if state.invocation.tenant_id() == scope.tenant_id()
+                    && state.invocation.id() == invocation_id
+                {
+                    state.output.clone()
+                } else {
+                    None
+                },
+            )
         }
 
         async fn persist_assistant_output(
