@@ -396,9 +396,17 @@ async fn idempotency_key_is_scoped_by_tenant_object_and_authenticated_caller() {
 
     let first_id = InvocationId::new();
     assert!(matches!(
-        reserve_and_finish(&pool, &schema, &caller_a, object_a, "same-key", PAYLOAD_HASH, first_id)
-            .await
-            .expect("first scope should acquire key"),
+        reserve_and_finish(
+            &pool,
+            &schema,
+            &caller_a,
+            object_a,
+            "same-key",
+            PAYLOAD_HASH,
+            first_id
+        )
+        .await
+        .expect("first scope should acquire key"),
         IdempotencyReservation::Reserved { .. }
     ));
 
