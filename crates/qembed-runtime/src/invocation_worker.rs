@@ -326,3 +326,269 @@ mod tests {
         assert_eq!(provider_error_code(ChatProviderError::Other), "provider_other");
     }
 }
+
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use std::convert::Infallible;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use qembed_domain::chat::{ChatCapabilities, ChatFinishReason, ChatResponse};
+    use qembed_domain::ids::{CallerId, ObjectId, SnapshotId, TenantId};
+    use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint};
+    use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
+    use qembed_domain::test_support::scope_for_tenant;
+
+    use super::*;
+
+    struct State {
+        invocation: Invocation,
+        input: String,
+        output: Option<String>,
+        error_code: Option<&'static str>,
+    }
+
+    #[derive(Clone)]
+    struct FakeStore(Arc<Mutex<State>>);
+
+    impl ExecutionStore for FakeStore {
+        type Error = Infallible;
+
+        async fn load_invocation(
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+        ) -> Result<Option<Invocation>, Self::Error> {
+            let state = self.0.lock().expect("fake store lock");
+            Ok((state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.id() == invocation_id)
+                .then(|| state.invocation.clone()))
+        }
+
+        async fn compare_and_set_invocation(
+            &self,
+            scope: &Scope,
+            expected_version: u64,
+            expected_fencing_token: FencingToken,
+            next: Invocation,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != expected_version
+                || state.invocation.fencing_token() != expected_fencing_token
+            {
+                return Ok(false);
+            }
+            state.invocation = next;
+            Ok(true)
+        }
+    }
+
+    impl InvocationWorkStore for FakeStore {
+        async fn load_user_input(
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+        ) -> Result<Option<String>, Self::Error> {
+            let state = self.0.lock().expect("fake store lock");
+            Ok((state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.id() == invocation_id)
+                .then(|| state.input.clone()))
+        }
+
+        async fn load_assistant_output(
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+        ) -> Result<Option<String>, Self::Error> {
+            let state = self.0.lock().expect("fake store lock");
+            Ok(if state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.id() == invocation_id
+            {
+                state.output.clone()
+            } else {
+                None
+            })
+        }
+
+        async fn persist_assistant_output(
+            &self,
+            scope: &Scope,
+            expected_version: u64,
+            expected_fencing_token: FencingToken,
+            next: Invocation,
+            content: String,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != expected_version
+                || state.invocation.fencing_token() != expected_fencing_token
+                || state.invocation.status() != InvocationStatus::Processing
+            {
+                return Ok(false);
+            }
+            state.output = Some(content);
+            state.invocation = next;
+            Ok(true)
+        }
+
+        async fn complete_invocation(
+            &self,
+            scope: &Scope,
+            expected_version: u64,
+            expected_fencing_token: FencingToken,
+            next: Invocation,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != expected_version
+                || state.invocation.fencing_token() != expected_fencing_token
+                || state.invocation.status() != InvocationStatus::Verifying
+            {
+                return Ok(false);
+            }
+            state.invocation = next;
+            Ok(true)
+        }
+
+        async fn fail_invocation(
+            &self,
+            scope: &Scope,
+            expected_version: u64,
+            expected_fencing_token: FencingToken,
+            next: Invocation,
+            error_code: &'static str,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != expected_version
+                || state.invocation.fencing_token() != expected_fencing_token
+            {
+                return Ok(false);
+            }
+            state.error_code = Some(error_code);
+            state.invocation = next;
+            Ok(true)
+        }
+    }
+
+    struct FakeProvider {
+        response: Result<ChatResponse, ChatProviderError>,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ChatProvider for FakeProvider {
+        fn capabilities(&self, _: &str) -> Option<ChatCapabilities> {
+            Some(ChatCapabilities::default())
+        }
+
+        async fn complete(
+            &self,
+            _: ChatRequest,
+        ) -> Result<ChatResponse, ChatProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.response.clone()
+        }
+    }
+
+    fn fixture(
+        status: InvocationStatus,
+        version: u64,
+        output: Option<&str>,
+    ) -> (Scope, InvocationId, FakeStore) {
+        let tenant_id = TenantId::new();
+        let scope = scope_for_tenant(tenant_id);
+        let invocation_id = InvocationId::new();
+        let invocation = Invocation::from_persisted(
+            invocation_id,
+            tenant_id,
+            ObjectId::new(),
+            CallerId::new(),
+            SnapshotId::new(),
+            InvocationCheckpoint::new(status, version, FencingToken::INITIAL),
+        );
+        let store = FakeStore(Arc::new(Mutex::new(State {
+            invocation,
+            input: "hello".to_owned(),
+            output: output.map(str::to_owned),
+            error_code: None,
+        })));
+        (scope, invocation_id, store)
+    }
+
+    fn worker(
+        store: FakeStore,
+        response: Result<ChatResponse, ChatProviderError>,
+    ) -> (InvocationWorker<FakeStore, FakeProvider>, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = FakeProvider {
+            response,
+            calls: Arc::clone(&calls),
+        };
+        let config = InvocationWorkerConfig::new("test-chat", 128).expect("valid worker config");
+        (InvocationWorker::new(store, provider, config), calls)
+    }
+
+    #[tokio::test]
+    async fn worker_claims_processes_and_finishes_with_durable_result() {
+        let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
+        let response = ChatResponse::new("hello back", ChatFinishReason::Stop, None)
+            .expect("valid provider response");
+        let (worker, calls) = worker(store.clone(), Ok(response));
+
+        let outcome = worker.process(&scope, id).await.expect("worker completes");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Completed {
+                invocation_id: id,
+                content: "hello back".to_owned(),
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let state = store.0.lock().expect("fake store lock");
+        assert_eq!(state.invocation.status(), InvocationStatus::Completed);
+        assert_eq!(state.output.as_deref(), Some("hello back"));
+    }
+
+    #[tokio::test]
+    async fn restart_at_verifying_finishes_from_persisted_output_without_provider_call() {
+        let (scope, id, store) = fixture(InvocationStatus::Verifying, 3, Some("saved answer"));
+        let response = ChatResponse::new("must not be used", ChatFinishReason::Stop, None)
+            .expect("valid provider response");
+        let (worker, calls) = worker(store.clone(), Ok(response));
+
+        let outcome = worker.process(&scope, id).await.expect("worker resumes");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Completed {
+                invocation_id: id,
+                content: "saved answer".to_owned(),
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            store.0.lock().expect("fake store lock").invocation.status(),
+            InvocationStatus::Completed
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_failure_is_persisted_as_a_terminal_error_code() {
+        let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
+        let (worker, calls) = worker(store.clone(), Err(ChatProviderError::Timeout));
+
+        let outcome = worker.process(&scope, id).await.expect("failure is persisted");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Failed {
+                invocation_id: id,
+                error_code: "provider_timeout",
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let state = store.0.lock().expect("fake store lock");
+        assert_eq!(state.invocation.status(), InvocationStatus::Failed);
+        assert_eq!(state.error_code, Some("provider_timeout"));
+    }
+}
