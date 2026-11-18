@@ -8,7 +8,7 @@ use std::error::Error;
 use std::future::Future;
 
 use crate::chat::{ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse};
-use crate::ids::{CallerId, InvocationId, TenantId};
+use crate::ids::{InvocationId, PrincipalId, TenantId};
 use crate::invocation::{FencingToken, Invocation};
 use crate::principal::PrincipalKind;
 use crate::scope::Scope;
@@ -23,7 +23,7 @@ use crate::scope::Scope;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AuthenticatedIdentity {
     tenant_id: TenantId,
-    caller_id: CallerId,
+    principal_id: PrincipalId,
     principal_kind: PrincipalKind,
 }
 
@@ -32,12 +32,12 @@ impl AuthenticatedIdentity {
     #[must_use]
     pub const fn new(
         tenant_id: TenantId,
-        caller_id: CallerId,
+        principal_id: PrincipalId,
         principal_kind: PrincipalKind,
     ) -> Self {
         Self {
             tenant_id,
-            caller_id,
+            principal_id,
             principal_kind,
         }
     }
@@ -48,8 +48,8 @@ impl AuthenticatedIdentity {
     }
 
     #[must_use]
-    pub const fn caller_id(self) -> CallerId {
-        self.caller_id
+    pub const fn principal_id(self) -> PrincipalId {
+        self.principal_id
     }
 
     #[must_use]
@@ -134,7 +134,7 @@ mod tests {
         ) -> impl Future<Output = Result<AuthenticatedIdentity, Self::Error>> + Send {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
-                CallerId::new(),
+                PrincipalId::new(),
                 PrincipalKind::Authenticated,
             )))
         }
