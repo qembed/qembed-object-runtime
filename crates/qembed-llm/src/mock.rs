@@ -8,7 +8,7 @@
 use std::error::Error;
 use std::fmt;
 
-use qembed_domain::chat::{ChatRequest, ChatResponse};
+use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse};
 use qembed_domain::ports::ChatProvider;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +46,8 @@ pub enum MockChatProviderError {
     Unavailable,
     /// No script was registered for the exact request.
     UnscriptedRequest,
+    /// The request asks for a mode not advertised by the configured route.
+    UnsupportedCapability,
 }
 
 impl fmt::Display for MockChatProviderError {
@@ -54,6 +56,7 @@ impl fmt::Display for MockChatProviderError {
             Self::Timeout => "mock provider timed out",
             Self::Unavailable => "mock provider is unavailable",
             Self::UnscriptedRequest => "mock provider has no script for this request",
+            Self::UnsupportedCapability => "mock provider does not support the requested capability",
         };
         formatter.write_str(message)
     }
@@ -69,6 +72,7 @@ impl Error for MockChatProviderError {}
 #[derive(Clone, Debug, Default)]
 pub struct MockChatProvider {
     scripts: Vec<Script>,
+    capability_profiles: Vec<(String, ChatCapabilities)>,
 }
 
 impl MockChatProvider {
@@ -77,7 +81,26 @@ impl MockChatProvider {
     pub const fn new() -> Self {
         Self {
             scripts: Vec::new(),
+            capability_profiles: vec![("test-chat".to_owned(), ChatCapabilities::default())],
         }
+    }
+
+    /// Replaces or registers the capability profile for a routing key.
+    ///
+    /// Profiles are explicit fixtures; no capability is inferred from a key.
+    #[must_use]
+    pub fn with_capabilities(
+        mut self,
+        model_key: impl Into<String>,
+        capabilities: ChatCapabilities,
+    ) -> Self {
+        let model_key = model_key.into();
+        if let Some((_, existing)) = self.capability_profiles.iter_mut().find(|(key, _)| key == &model_key) {
+            *existing = capabilities;
+        } else {
+            self.capability_profiles.push((model_key, capabilities));
+        }
+        self
     }
 
     /// Registers the response for one exact request.
@@ -121,6 +144,10 @@ impl MockChatProvider {
 
 impl ChatProvider for MockChatProvider {
     type Error = MockChatProviderError;
+
+    fn capabilities(&self, model_key: &str) -> Option<ChatCapabilities> {
+        self.capability_profiles.iter().find(|(key, _)| key == model_key).map(|(_, caps)| caps.clone())
+    }
 
     async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
         let script = self
