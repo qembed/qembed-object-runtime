@@ -366,8 +366,10 @@ mod tests {
             .expect("valid request");
         assert_eq!(default.structured_output(), StructuredOutputMode::None);
 
-        let json_only = default.with_structured_output(StructuredOutputMode::JsonOnly);
+        let json_only = default.clone().with_structured_output(StructuredOutputMode::JsonOnly);
+        assert_ne!(default, json_only);
         let serialized = serde_json::to_string(&json_only).expect("request serializes");
+        assert!(serialized.contains("\\\"structured_output\\\":\\\"json_only\\\""));
         let decoded: ChatRequest = serde_json::from_str(&serialized).expect("request deserializes");
         assert_eq!(decoded, json_only);
         assert_eq!(decoded.structured_output(), StructuredOutputMode::JsonOnly);
