@@ -9,7 +9,7 @@ use qembed_domain::scope::Scope;
 use sqlx::PgPool;
 
 use crate::event_outbox::{ObjectEvent, append_object_event};
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{CasError, begin_tenant_transaction, execute, execute_cas, fetch_optional};
 
 /// Persists tenant-owned objects and their draft versions.
 #[derive(Clone, Debug)]
@@ -112,7 +112,7 @@ impl ObjectRepository {
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
-        let result = execute(
+        execute_cas(
             &mut transaction,
             sqlx::query(
                 "UPDATE objects SET state = 'validating' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND state = 'draft' AND published_version_id IS NULL",
@@ -121,11 +121,7 @@ impl ObjectRepository {
             .bind(object_id.to_string()),
         )
         .await
-        .map_err(ObjectRepositoryError::Database)?;
-
-        if result.rows_affected() != 1 {
-            return Err(ObjectRepositoryError::InvalidObjectState);
-        }
+        .map_err(|error| map_cas_error(error, ObjectRepositoryError::InvalidObjectState))?;
 
         append_object_event(
             &mut transaction,
@@ -241,7 +237,7 @@ impl ObjectRepository {
             previous_version.supersede()?;
             object.replace_published_version(previous_id, &next_version)?;
 
-            let result = execute(
+            execute_cas(
                 &mut transaction,
                 sqlx::query(
                     "UPDATE object_versions SET status = 'superseded' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid AND status = 'published'",
@@ -251,16 +247,14 @@ impl ObjectRepository {
                 .bind(previous_id.to_string()),
             )
             .await
-            .map_err(ObjectRepositoryError::Database)?;
-
-            if result.rows_affected() != 1 {
-                return Err(ObjectRepositoryError::CurrentVersionNotPublished);
-            }
+            .map_err(|error| {
+                map_cas_error(error, ObjectRepositoryError::CurrentVersionNotPublished)
+            })?;
         } else {
             object.activate(&next_version)?;
         }
 
-        let result = execute(
+        execute_cas(
             &mut transaction,
             sqlx::query(
                 "UPDATE object_versions SET status = 'published' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid AND status = 'draft'",
@@ -270,14 +264,10 @@ impl ObjectRepository {
             .bind(version_id.to_string()),
         )
         .await
-        .map_err(ObjectRepositoryError::Database)?;
-
-        if result.rows_affected() != 1 {
-            return Err(ObjectRepositoryError::VersionMustBeDraft);
-        }
+        .map_err(|error| map_cas_error(error, ObjectRepositoryError::VersionMustBeDraft))?;
 
         let next_state = object_state_as_str(object.state());
-        let result = execute(
+        execute_cas(
             &mut transaction,
             sqlx::query(
                 "UPDATE objects SET state = $4, published_version_id = $3::uuid WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND published_version_id IS NOT DISTINCT FROM $5::uuid",
@@ -289,11 +279,9 @@ impl ObjectRepository {
             .bind(expected_id),
         )
         .await
-        .map_err(ObjectRepositoryError::Database)?;
-
-        if result.rows_affected() != 1 {
-            return Err(ObjectRepositoryError::PublishedVersionMismatch);
-        }
+        .map_err(|error| {
+            map_cas_error(error, ObjectRepositoryError::PublishedVersionMismatch)
+        })?;
 
         append_object_event(
             &mut transaction,
@@ -341,6 +329,8 @@ pub enum ObjectRepositoryError {
     PublishedVersionMismatch,
     /// The version expected to be current is not currently Published.
     CurrentVersionNotPublished,
+    /// A repository compare-and-set violated its single-row contract.
+    Cas(CasError),
     /// PostgreSQL rejected the operation or could not complete it.
     Database(sqlx::Error),
 }
@@ -371,6 +361,7 @@ impl fmt::Display for ObjectRepositoryError {
             Self::CurrentVersionNotPublished => {
                 formatter.write_str("current object version is not Published")
             }
+            Self::Cas(error) => write!(formatter, "object repository CAS error: {error}"),
             Self::Database(error) => write!(formatter, "object repository database error: {error}"),
         }
     }
@@ -379,6 +370,7 @@ impl fmt::Display for ObjectRepositoryError {
 impl std::error::Error for ObjectRepositoryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Cas(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
@@ -430,5 +422,13 @@ const fn object_state_as_str(state: ObjectState) -> &'static str {
         ObjectState::Active => "active",
         ObjectState::Suspended => "suspended",
         ObjectState::Archived => "archived",
+    }
+}
+
+fn map_cas_error(error: CasError, conflict: ObjectRepositoryError) -> ObjectRepositoryError {
+    match error {
+        CasError::Conflict => conflict,
+        CasError::Database(error) => ObjectRepositoryError::Database(error),
+        other => ObjectRepositoryError::Cas(other),
     }
 }
