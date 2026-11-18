@@ -8,6 +8,7 @@
 //! ```
 
 pub mod auth;
+pub mod idempotency;
 mod cas;
 pub use cas::{CasError, execute_cas};
 mod event_outbox;
