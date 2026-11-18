@@ -4,7 +4,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qembed_domain::caller::{CallerKind, InvocationPool};
-use qembed_domain::ids::{CallerId, EventId, InvocationId, ObjectId, SnapshotId, TraceId};
+use qembed_domain::ids::{CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TraceId};
 use qembed_domain::scope::Scope;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -287,7 +287,7 @@ pub async fn begin_invocation(
         sqlx::query(
             "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'user', $6, to_timestamp($7::double precision / 1000000.0))",
         )
-        .bind(qembed_domain::ids::EventId::new().to_string())
+        .bind(MessageId::new().to_string())
         .bind(scope.tenant_id().to_string())
         .bind(command.object_id.to_string())
         .bind(caller.caller_id().to_string())
