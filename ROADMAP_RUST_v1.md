@@ -21,7 +21,7 @@
 4. Каждая задача заканчивается тестами. Нельзя закрыть задачу только потому, что код компилируется.
 5. Сначала unit tests, затем integration tests на границе соответствующего слоя. Для persistence, RLS, транзакций, CAS и fencing нужны тесты с реальной PostgreSQL, а не SQLite/mock repository.
 6. Внешние сетевые вызовы не выполняются внутри SQL-транзакций.
-7. Все tenant-scoped repository operations принимают `&Scope`; tenant context задаётся в транзакции через `SET LOCAL app.tenant_id`.
+7. Все tenant-scoped repository operations принимают `&Scope`; tenant и authenticated Principal context задаются в транзакции через transaction-local `app.tenant_id` и `app.principal_id`.
 8. Invocation и ToolExecution имеют независимые leases/fencing tokens. Переходы состояния используют CAS по tenant, ID, token и version.
 9. `Unknown` не является основанием для автоматического retry: требуется reconciliation либо доказанная upstream idempotency со стабильным ключом.
 10. Новые архитектурные решения не вводятся молча: при необходимости отдельный ADR.
@@ -131,7 +131,7 @@ SQLX_OFFLINE=true cargo check --workspace
 **Результат:** типизированные контракты, на которых строятся остальные crates.
 
 - [ ] **RUST-010 (S)** Реализовать strongly typed IDs.
-  - Объекты: Tenant, Object, ObjectVersion, Caller, Invocation, Snapshot, Event и остальные используемые ID.
+  - Объекты: Tenant, Principal, Object, ObjectVersion, Caller, Invocation, Snapshot, Event и остальные используемые ID.
   - Тесты: parse/format/serde round-trip; некорректные значения; compile-time проверки несовместимости разных ID.
   - DoD: нельзя случайно передать ID одного типа вместо другого.
 
