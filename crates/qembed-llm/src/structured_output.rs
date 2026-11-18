@@ -138,6 +138,23 @@ mod tests {
     }
 
     #[test]
+    fn mock_provider_exposes_distinct_configured_capability_profiles() {
+        use crate::mock::MockChatProvider;
+
+        let provider = MockChatProvider::new().with_capabilities(
+            "route-json",
+            ChatCapabilities::new([StructuredOutputMode::JsonOnly]),
+        );
+        let json_profile = provider.capabilities("route-json").expect("configured route");
+        let text_profile = provider.capabilities("test-chat").expect("default test route");
+
+        assert!(json_profile.supports(StructuredOutputMode::JsonOnly));
+        assert!(!text_profile.supports(StructuredOutputMode::JsonOnly));
+        assert!(text_profile.supports(StructuredOutputMode::None));
+        assert!(provider.capabilities("unknown-route").is_none());
+    }
+
+    #[test]
     fn unsupported_mode_is_rejected_before_provider_request() {
         let request = qembed_domain::chat::ChatRequest::new(
             "route-json",
