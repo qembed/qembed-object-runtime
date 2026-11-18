@@ -60,10 +60,10 @@ impl fmt::Display for MockChatProviderError {
             Self::UnscriptedRequest => "mock provider has no script for this request",
             Self::UnsupportedCapability => {
                 "mock provider does not support the requested capability"
-            },
+            }
             Self::UnconfiguredModel => {
                 "mock provider has no capability profile for the model routing key"
-            },
+            }
         };
         formatter.write_str(message)
     }
