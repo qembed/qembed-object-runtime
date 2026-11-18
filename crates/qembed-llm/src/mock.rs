@@ -140,7 +140,9 @@ impl ChatProvider for MockChatProvider {
 mod tests {
     use std::sync::Arc;
 
-    use qembed_domain::chat::{ChatFinishReason, ChatMessage, ChatRole, TokenUsage};
+    use qembed_domain::chat::{
+        ChatFinishReason, ChatMessage, ChatRole, StructuredOutputMode, TokenUsage,
+    };
 
     use super::*;
 
@@ -215,6 +217,21 @@ mod tests {
                 .complete(request("not scripted"))
                 .await
                 .unwrap_err(),
+            MockChatProviderError::UnscriptedRequest
+        );
+    }
+
+    #[tokio::test]
+    async fn structured_output_mode_is_part_of_the_exact_request_key() {
+        let plain_request = request("same prompt");
+        let json_request =
+            request("same prompt").with_structured_output(StructuredOutputMode::JsonOnly);
+        let provider = MockChatProvider::new()
+            .with_response(plain_request, response("plain text"))
+            .expect("unique script");
+
+        assert_eq!(
+            provider.complete(json_request).await.unwrap_err(),
             MockChatProviderError::UnscriptedRequest
         );
     }
