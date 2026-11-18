@@ -41,7 +41,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
         .await
         .expect("migrations should be applied");
 
-    // Valid credentials resolve the persisted caller and tenant into a trusted Scope.
+    // Valid credentials resolve the persisted Principal and tenant into a trusted Scope.
     let tenant_a = TenantId::new();
     let principal_a = PrincipalId::new();
     let token_a = format!("owner-token-{}", PrincipalId::new());
