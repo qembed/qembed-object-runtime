@@ -108,16 +108,12 @@ pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
     scope: &Scope,
     caller: &ResolvedCaller,
-    object_id: ObjectId,
-    idempotency_key: &str,
-    payload_hash: &[u8],
-    proposed_invocation_id: InvocationId,
-    expires_at: SystemTime,
+    claim: &IdempotencyClaim<'_>,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
     if !caller.is_bound_to(transaction, scope) {
         return Err(IdempotencyReservationError::CallerContextMismatch);
     }
-    let expiry_micros = expiry_unix_micros(expires_at)?;
+    let expiry_micros = expiry_unix_micros(claim.expires_at)?;
     let caller_id = caller.caller_id();
 
     loop {
