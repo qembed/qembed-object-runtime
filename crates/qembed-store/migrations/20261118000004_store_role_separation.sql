@@ -34,6 +34,13 @@ ALTER ROLE qembed_admin NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NORE
 
 GRANT USAGE ON SCHEMA public TO qembed_runtime, qembed_dispatcher, qembed_admin;
 
+-- Start from an explicit deny baseline, including any grants that might have
+-- pre-existed on these role names or PUBLIC in a previously managed database.
+REVOKE ALL PRIVILEGES ON TABLE
+    objects, object_versions, snapshots, events, outbox_messages,
+    owner_principals, owner_credentials
+FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin;
+
 -- Runtime: mutable object state, but immutable snapshots/events are append-only.
 GRANT SELECT, INSERT, UPDATE ON objects, object_versions TO qembed_runtime;
 GRANT SELECT, INSERT ON snapshots, events TO qembed_runtime;
