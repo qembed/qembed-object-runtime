@@ -300,6 +300,43 @@ async fn rolling_back_a_new_claim_releases_the_key() {
     pool.close().await;
 }
 
+
+#[tokio::test]
+async fn resolved_caller_cannot_be_reused_in_another_transaction() {
+    let (pool, schema) = setup().await;
+    let scope = scope_for_tenant(TenantId::new());
+    let caller_id = CallerId::new();
+    prepare_delegation(&pool, &schema, &scope, caller_id).await;
+
+    let mut first = begin_tenant_transaction(&pool, &scope).await.expect("first transaction should begin");
+    set_schema(&mut first, &schema).await;
+    let resolved = resolve_delegated_caller(&mut first, caller_id).await.expect("Caller should resolve");
+    first.commit().await.expect("first transaction should commit");
+
+    let mut second = begin_tenant_transaction(&pool, &scope).await.expect("second transaction should begin");
+    set_schema(&mut second, &schema).await;
+    let error = reserve_invocation_idempotency(
+        &mut second,
+        &scope,
+        &resolved,
+        ObjectId::new(),
+        "stale-caller",
+        PAYLOAD_HASH,
+        InvocationId::new(),
+        SystemTime::now() + Duration::from_secs(3_600),
+    )
+    .await
+    .expect_err("a resolved Caller is bound to the transaction that checked its delegation");
+    assert!(matches!(error, IdempotencyReservationError::CallerContextMismatch));
+    second.rollback().await.expect("second transaction should roll back");
+
+    sqlx::query(&format!("DROP SCHEMA \"{schema}\" CASCADE"))
+        .execute(&pool)
+        .await
+        .expect("test schema should be removed");
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn idempotency_key_is_scoped_by_tenant_object_and_effective_caller() {
     let (pool, schema) = setup().await;
