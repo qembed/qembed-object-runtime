@@ -3,10 +3,15 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use qembed_domain::caller::InvocationPool;
-use qembed_domain::ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
+use qembed_domain::ids::{
+    CallerId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId,
+};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
-use qembed_domain::ports::{ExecutionStore, InvocationCancellationOutcome, InvocationCancellationStore, InvocationReadStore, InvocationWorkStore};
+use qembed_domain::ports::{
+    ExecutionStore, InvocationCancellationOutcome, InvocationCancellationStore,
+    InvocationReadStore, InvocationWorkStore,
+};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
@@ -1010,7 +1015,6 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
 
     teardown(fixture).await;
 }
-
 
 #[tokio::test]
 async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
