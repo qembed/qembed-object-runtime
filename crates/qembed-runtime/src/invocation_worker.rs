@@ -60,6 +60,7 @@ pub enum InvocationWorkerError<E> {
     NotFound,
     MissingUserInput,
     MissingPersistedOutput,
+    ProviderRouteNotConfigured,
     InvalidRequest(ChatContractError),
     InvalidTransition(InvocationError),
     Conflict,
@@ -73,6 +74,7 @@ impl<E: fmt::Display> fmt::Display for InvocationWorkerError<E> {
             Self::NotFound => formatter.write_str("invocation was not found in this tenant"),
             Self::MissingUserInput => formatter.write_str("invocation has no durable user input"),
             Self::MissingPersistedOutput => formatter.write_str("Verifying invocation has no durable assistant output"),
+            Self::ProviderRouteNotConfigured => formatter.write_str("configured chat provider route is unavailable"),
             Self::InvalidRequest(error) => write!(formatter, "invalid worker chat request: {error}"),
             Self::InvalidTransition(error) => write!(formatter, "invalid invocation transition: {error:?}"),
             Self::Conflict => formatter.write_str("invocation changed concurrently; reload before retrying"),
@@ -152,6 +154,10 @@ where
                         self.config.max_output_tokens,
                     )
                     .map_err(InvocationWorkerError::InvalidRequest)?;
+
+                    if self.provider.capabilities(&self.config.model_key).is_none() {
+                        return Err(InvocationWorkerError::ProviderRouteNotConfigured);
+                    }
 
                     match self.provider.complete(request).await {
                         Ok(response) => {
