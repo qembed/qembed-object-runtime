@@ -30,7 +30,12 @@ appear in domain/runtime public APIs.
 - Response content is normalized text, non-empty and at most 1 MiB.
 - Finish reason is provider-neutral: `stop`, `length`, or `content_filtered`.
 - Token usage is optional because providers differ in whether they return it.
-  Missing-usage policy and provider-specific usage mapping are RUST-034.
+  Adapters report it only when both input and output counts are known and fit
+  the domain counter range; absent or partial counters normalize to `None`.
+- Provider failures are normalized to `ChatProviderError`: `Timeout`,
+  `RateLimited` (with an optional millisecond delay hint), `Unavailable`,
+  `MalformedOutput`, or `Other`. Raw SDK errors and provider messages stay
+  inside the adapter. A rate-limit hint is metadata, not a retry instruction.
 - For `json_only`, `qembed-llm::structured_output::validate_response`
   rejects malformed JSON, multiple/trailing values, prose, and markdown
   fences with the typed `MalformedJson` error.
@@ -62,6 +67,7 @@ objects to avoid silently accepting provider-specific extensions.
 
 ## Deliberate exclusions
 
-Capability discovery/negotiation, retries, provider error taxonomy, tool
-calls, streaming, and provider-specific tuning parameters are not part of
-this contract. They must not be smuggled into a generic options map.
+Capability discovery/negotiation, retry policy, tool calls, streaming, and
+provider-specific tuning parameters are not part of this contract. They must
+not be smuggled into a generic options map. Error normalization does not imply
+that any category is automatically retryable.

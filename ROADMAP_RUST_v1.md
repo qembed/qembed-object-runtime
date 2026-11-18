@@ -262,9 +262,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: mock provider с разными capability profiles; неизвестный route; unsupported `JsonOnly`; `None` всегда поддержан; отсутствие вывода возможностей из model key.
   - DoD: runtime/adapter использует явный capability descriptor, а не угадывает возможности по имени модели.
 
-- [ ] **RUST-034 (S)** Реализовать provider error и usage mapping.
-  - Тесты: mapping tests для timeout, rate limit, unavailable, malformed output, token usage.
-  - DoD: ошибки и usage представлены provider-neutral типами.
+- [x] **RUST-034 (S)** Реализовать provider error и usage mapping.
+  - Реализация: domain `ChatProviderError` задаёт нейтральные категории `Timeout`, `RateLimited` (с необязательной подсказкой задержки), `Unavailable`, `MalformedOutput` и `Other`; `qembed-llm` предоставляет классификацию ошибок адаптера и нормализацию usage.
+  - Тесты: mapping для всех категорий, сохранение rate-limit hint, отсутствие автоматической retry-семантики; usage отсутствует/частичный/полный/выходящий за диапазон.
+  - DoD: raw SDK errors не покидают adapter; неизвестные и неполные usage не превращаются в фиктивные нули.
 
 ---
 

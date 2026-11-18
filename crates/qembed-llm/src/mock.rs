@@ -8,13 +8,13 @@
 use std::error::Error;
 use std::fmt;
 
-use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse};
+use qembed_domain::chat::{ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse};
 use qembed_domain::ports::ChatProvider;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ScriptedOutcome {
     Response(ChatResponse),
-    Error(MockChatProviderError),
+    Error(ChatProviderError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,45 +37,11 @@ impl fmt::Display for MockConfigurationError {
 
 impl Error for MockConfigurationError {}
 
-/// Deterministic failures that tests can script without waiting or networking.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MockChatProviderError {
-    /// Simulates a provider request timeout immediately and deterministically.
-    Timeout,
-    /// Simulates a provider-side availability failure.
-    Unavailable,
-    /// No script was registered for the exact request.
-    UnscriptedRequest,
-    /// The request asks for a mode not advertised by the configured route.
-    UnsupportedCapability,
-    /// No capability profile is configured for the request's routing key.
-    UnconfiguredModel,
-}
-
-impl fmt::Display for MockChatProviderError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match self {
-            Self::Timeout => "mock provider timed out",
-            Self::Unavailable => "mock provider is unavailable",
-            Self::UnscriptedRequest => "mock provider has no script for this request",
-            Self::UnsupportedCapability => {
-                "mock provider does not support the requested capability"
-            }
-            Self::UnconfiguredModel => {
-                "mock provider has no capability profile for the model routing key"
-            }
-        };
-        formatter.write_str(message)
-    }
-}
-
-impl Error for MockChatProviderError {}
-
 /// In-memory ChatProvider whose output is determined only by request content.
 ///
 /// Register each request exactly once with the with_response or with_error
-/// methods. An unregistered request returns UnscriptedRequest, making missing
-/// fixtures visible instead of silently returning a plausible response.
+/// methods. An unregistered request returns the neutral `Other` category,
+/// making missing fixtures visible without exposing mock-only error types.
 #[derive(Clone, Debug)]
 pub struct MockChatProvider {
     scripts: Vec<Script>,
@@ -140,7 +106,7 @@ impl MockChatProvider {
     pub fn with_error(
         mut self,
         request: ChatRequest,
-        error: MockChatProviderError,
+        error: ChatProviderError,
     ) -> Result<Self, MockConfigurationError> {
         self.insert(request, ScriptedOutcome::Error(error))?;
         Ok(self)
@@ -160,8 +126,6 @@ impl MockChatProvider {
 }
 
 impl ChatProvider for MockChatProvider {
-    type Error = MockChatProviderError;
-
     fn capabilities(&self, model_key: &str) -> Option<ChatCapabilities> {
         self.capability_profiles
             .iter()
@@ -169,19 +133,19 @@ impl ChatProvider for MockChatProvider {
             .map(|(_, caps)| caps.clone())
     }
 
-    async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
+    async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, ChatProviderError> {
         let capabilities = self
             .capabilities(request.model_key())
-            .ok_or(MockChatProviderError::UnconfiguredModel)?;
+            .ok_or(ChatProviderError::Other)?;
         if !capabilities.supports(request.structured_output()) {
-            return Err(MockChatProviderError::UnsupportedCapability);
+            return Err(ChatProviderError::Other);
         }
 
         let script = self
             .scripts
             .iter()
             .find(|script| script.request == request)
-            .ok_or(MockChatProviderError::UnscriptedRequest)?;
+            .ok_or(ChatProviderError::Other)?;
 
         match &script.outcome {
             ScriptedOutcome::Response(response) => Ok(response.clone()),
@@ -195,7 +159,8 @@ mod tests {
     use std::sync::Arc;
 
     use qembed_domain::chat::{
-        ChatFinishReason, ChatMessage, ChatRole, StructuredOutputMode, TokenUsage,
+        ChatFinishReason, ChatMessage, ChatProviderError, ChatRole, StructuredOutputMode,
+        TokenUsage,
     };
 
     use super::*;
@@ -235,21 +200,18 @@ mod tests {
         let timeout_request = request("timeout");
         let unavailable_request = request("unavailable");
         let provider = MockChatProvider::new()
-            .with_error(timeout_request.clone(), MockChatProviderError::Timeout)
+            .with_error(timeout_request.clone(), ChatProviderError::Timeout)
             .expect("unique timeout script")
-            .with_error(
-                unavailable_request.clone(),
-                MockChatProviderError::Unavailable,
-            )
+            .with_error(unavailable_request.clone(), ChatProviderError::Unavailable)
             .expect("unique unavailable script");
 
         assert_eq!(
             provider.complete(timeout_request).await.unwrap_err(),
-            MockChatProviderError::Timeout
+            ChatProviderError::Timeout
         );
         assert_eq!(
             provider.complete(unavailable_request).await.unwrap_err(),
-            MockChatProviderError::Unavailable
+            ChatProviderError::Unavailable
         );
     }
 
@@ -263,7 +225,7 @@ mod tests {
         assert!(matches!(
             provider
                 .clone()
-                .with_error(input.clone(), MockChatProviderError::Timeout),
+                .with_error(input.clone(), ChatProviderError::Timeout),
             Err(MockConfigurationError::DuplicateRequest)
         ));
         assert_eq!(
@@ -271,7 +233,7 @@ mod tests {
                 .complete(request("not scripted"))
                 .await
                 .unwrap_err(),
-            MockChatProviderError::UnscriptedRequest
+            ChatProviderError::Other
         );
     }
 
@@ -290,7 +252,7 @@ mod tests {
 
         assert_eq!(
             provider.complete(json_request).await.unwrap_err(),
-            MockChatProviderError::UnscriptedRequest
+            ChatProviderError::Other
         );
     }
 

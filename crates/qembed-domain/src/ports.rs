@@ -7,7 +7,7 @@
 use std::error::Error;
 use std::future::Future;
 
-use crate::chat::{ChatCapabilities, ChatRequest, ChatResponse};
+use crate::chat::{ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse};
 use crate::ids::{CallerId, InvocationId, TenantId};
 use crate::invocation::{FencingToken, Invocation};
 use crate::principal::PrincipalKind;
@@ -102,8 +102,6 @@ pub trait ExecutionStore: Send + Sync {
 /// Implementations adapt this contract to a concrete provider. SDK request,
 /// response, error, and model types must remain inside the adapter crate.
 pub trait ChatProvider: Send + Sync {
-    type Error: Error + Send + Sync + 'static;
-
     /// Returns the explicit capabilities configured for an application-owned
     /// model routing key. None means the route is not configured.
     ///
@@ -115,7 +113,7 @@ pub trait ChatProvider: Send + Sync {
     fn complete(
         &self,
         request: ChatRequest,
-    ) -> impl Future<Output = Result<ChatResponse, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<ChatResponse, ChatProviderError>> + Send;
 }
 
 #[cfg(test)]
@@ -130,7 +128,6 @@ mod tests {
     impl AuthenticationPort for TestAuthentication {
         type Credentials = ();
         type Error = Infallible;
-
         fn authenticate(
             &self,
             (): Self::Credentials,
@@ -170,8 +167,6 @@ mod tests {
     struct TestProvider;
 
     impl ChatProvider for TestProvider {
-        type Error = Infallible;
-
         fn capabilities(&self, _: &str) -> Option<ChatCapabilities> {
             Some(ChatCapabilities::default())
         }
@@ -179,7 +174,7 @@ mod tests {
         fn complete(
             &self,
             _: ChatRequest,
-        ) -> impl Future<Output = Result<ChatResponse, Self::Error>> + Send {
+        ) -> impl Future<Output = Result<ChatResponse, ChatProviderError>> + Send {
             ready(Ok(ChatResponse::new(
                 "test response",
                 crate::chat::ChatFinishReason::Stop,
