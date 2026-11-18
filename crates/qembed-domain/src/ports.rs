@@ -123,8 +123,6 @@ mod tests {
 
     use super::*;
 
-    use super::*;
-
     struct TestAuthentication;
 
     impl AuthenticationPort for TestAuthentication {
