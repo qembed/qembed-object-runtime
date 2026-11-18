@@ -27,6 +27,12 @@ pub struct IdempotencyClaim<'a> {
 }
 
 impl<'a> IdempotencyClaim<'a> {
+    /// Returns the object whose idempotency namespace is being reserved.
+    #[must_use]
+    pub const fn object_id(&self) -> ObjectId {
+        self.object_id
+    }
+
     /// Creates a reservation claim without choosing hash or expiry policy.
     #[must_use]
     pub const fn new(
