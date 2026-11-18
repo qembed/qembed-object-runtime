@@ -378,6 +378,54 @@ impl<'de> Deserialize<'de> for ChatResponse {
     }
 }
 
+
+/// Provider-neutral failure category returned by a chat provider adapter.
+///
+/// These categories deliberately omit SDK types, raw provider messages,
+/// request IDs, and vendor-specific status codes. They describe what the
+/// runtime may reason about, not whether or when it should retry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatProviderError {
+    /// The provider did not complete the request before its deadline.
+    Timeout,
+    /// The provider rejected the request because of rate limiting.
+    RateLimited { retry_after_ms: Option<u64> },
+    /// The provider or its upstream service was unavailable.
+    Unavailable,
+    /// The provider returned output that could not satisfy the response contract.
+    MalformedOutput,
+    /// A failure that does not fit a more specific provider-neutral category.
+    Other,
+}
+
+impl ChatProviderError {
+    /// Returns the provider's optional rate-limit delay hint in milliseconds.
+    ///
+    /// This is advisory metadata only; it does not prescribe retry behavior.
+    #[must_use]
+    pub const fn retry_after_ms(self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_ms } => retry_after_ms,
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for ChatProviderError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::Timeout => "chat provider request timed out",
+            Self::RateLimited { .. } => "chat provider rate limit exceeded",
+            Self::Unavailable => "chat provider is unavailable",
+            Self::MalformedOutput => "chat provider returned malformed output",
+            Self::Other => "chat provider request failed",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for ChatProviderError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
