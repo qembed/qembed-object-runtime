@@ -2,9 +2,13 @@ mod common;
 
 use std::str::FromStr;
 
+use qembed_domain::auth::authenticate_owner;
+use qembed_domain::ids::TenantId;
+use qembed_store::auth::{OwnerAuthenticator, OwnerCredentials};
 use qembed_store::run_migrations;
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const RUNTIME_PASSWORD: &str = "runtime-test-only";
@@ -412,6 +416,44 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     tx.rollback()
         .await
         .expect("unscoped transaction should roll back");
+
+    // Pre-authentication must also work under the real runtime login. The
+    // requested tenant is only a lookup selector; the token digest must match
+    // an active principal in that same tenant before a trusted Scope is minted.
+    let auth_tenant = Uuid::new_v4();
+    let auth_caller = Uuid::new_v4();
+    let owner_token = format!("role-test-owner-{}", Uuid::new_v4());
+    let token_hash = Sha256::digest(owner_token.as_bytes()).to_vec();
+    sqlx::query(
+        "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind)
+         VALUES ($1, $2, 'tenant_owner')",
+    )
+    .bind(auth_tenant)
+    .bind(auth_caller)
+    .execute(&owner)
+    .await
+    .expect("owner principal fixture should be inserted");
+    sqlx::query(
+        "INSERT INTO owner_credentials (tenant_id, caller_id, token_hash)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(auth_tenant)
+    .bind(auth_caller)
+    .bind(token_hash)
+    .execute(&owner)
+    .await
+    .expect("owner credential fixture should be inserted");
+    let auth_tenant_id = auth_tenant
+        .to_string()
+        .parse::<TenantId>()
+        .expect("fixture tenant UUID should parse");
+    let authenticated = authenticate_owner(
+        &OwnerAuthenticator::new(runtime.clone()),
+        OwnerCredentials::new(auth_tenant_id, owner_token),
+    )
+    .await
+    .expect("runtime login should authenticate using tenant-scoped RLS lookup");
+    assert_eq!(authenticated.tenant_id().to_string(), auth_tenant.to_string());
 
     runtime.close().await;
     dispatcher.close().await;
