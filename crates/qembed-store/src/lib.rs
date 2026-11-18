@@ -8,6 +8,7 @@
 //! ```
 
 pub mod auth;
+pub mod begin_invocation;
 pub mod caller;
 mod cas;
 pub mod idempotency;
