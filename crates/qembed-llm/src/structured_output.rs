@@ -191,11 +191,10 @@ mod tests {
     fn unsupported_mode_is_rejected_before_provider_request() {
         let request = qembed_domain::chat::ChatRequest::new(
             "test-chat",
-            vec![qembed_domain::chat::ChatMessage::new(
-                qembed_domain::chat::ChatRole::User,
-                "hello",
-            )
-            .unwrap()],
+            vec![
+                qembed_domain::chat::ChatMessage::new(qembed_domain::chat::ChatRole::User, "hello")
+                    .unwrap(),
+            ],
             16,
         )
         .unwrap()
