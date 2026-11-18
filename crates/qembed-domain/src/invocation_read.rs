@@ -15,7 +15,7 @@ pub struct InvocationReadModel {
 
 impl InvocationReadModel {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         id: InvocationId,
         status: InvocationStatus,
         result: Option<String>,
