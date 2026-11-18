@@ -1,4 +1,4 @@
-# ChatProvider contract (RUST-030, RUST-032)
+# ChatProvider contract (RUST-030, RUST-032, RUST-033)
 
 ## Boundary
 
@@ -38,15 +38,20 @@ appear in domain/runtime public APIs.
 
 ## Provider support
 
-Before sending a request, an adapter must call
-`ensure_mode_supported` with the modes supported by its selected
-configuration. An unsupported requested mode returns the typed
-`UnsupportedMode` error before network I/O. `none` is always accepted
-because it imposes no constraint.
+Before sending a request, the adapter exposes a local, side-effect-free
+`ChatCapabilities` profile for each configured `model_key`. The descriptor
+lists supported structured-output modes. `None` is universally supported
+because it imposes no constraint; additional modes must be listed explicitly.
 
-This support check is deliberately separate from capability discovery.
-RUST-033 will define the provider-neutral capability descriptor and
-negotiation path; this task does not infer support from a model name.
+`qembed-llm::structured_output::negotiate_request` receives the request and
+that descriptor. It returns `UnconfiguredModel` when no route exists and
+`UnsupportedMode` when the selected profile cannot satisfy the request. The
+caller must complete this check before invoking `ChatProvider::complete`, so
+unsupported requests cannot trigger provider I/O. The model key is an opaque
+lookup key: adapters must not parse it or infer capabilities from its name.
+
+The deterministic mock supports multiple independently configured profiles
+and exposes them through the same domain port as a real adapter.
 
 ## Validation and serialization
 
