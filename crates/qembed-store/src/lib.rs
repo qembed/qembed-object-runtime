@@ -8,6 +8,7 @@
 //! ```
 
 pub mod auth;
+pub mod caller;
 mod cas;
 pub mod idempotency;
 pub use cas::{CasError, execute_cas};
@@ -62,7 +63,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     migrator.run(pool).await
 }
 
-/// A PostgreSQL transaction with its tenant context established transaction-locally.
+/// A PostgreSQL transaction with trusted tenant and authenticated Principal context established transaction-locally.
 ///
 /// The wrapped connection is available only while this value is borrowed. Commit
 /// and rollback consume the wrapper so a tenant-scoped transaction cannot be
@@ -91,10 +92,10 @@ impl TenantTransaction {
     }
 }
 
-/// Begins a transaction and binds it to the tenant from a trusted Scope.
+/// Begins a transaction and binds tenant and authenticated Principal from a trusted Scope.
 ///
 /// PostgreSQL's transaction-local setting is applied with `set_config(..., true)`.
-/// The value is passed as a bind parameter; it is never interpolated into SQL.
+/// Both values are passed as bind parameters; neither is interpolated into SQL.
 ///
 /// A scope is mandatory. Callers cannot begin a tenant transaction without one:
 ///
@@ -110,8 +111,9 @@ pub async fn begin_tenant_transaction(
     scope: &Scope,
 ) -> Result<TenantTransaction, sqlx::Error> {
     let mut transaction = pool.begin().await?;
-    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true), set_config('app.principal_id', $2, true)")
         .bind(scope.tenant_id().to_string())
+        .bind(scope.principal().principal_id().to_string())
         .execute(&mut *transaction)
         .await?;
 
