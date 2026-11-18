@@ -214,6 +214,10 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .execute(&mut *tx)
     .await
     .expect("runtime should append immutable snapshots");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("snapshot permission probe savepoint should be created");
     let error =
         sqlx::query("UPDATE snapshots SET json_projection = '{}'::jsonb WHERE tenant_id = $1")
             .bind(tenant_a)
@@ -221,24 +225,68 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
             .await
             .expect_err("runtime must not update immutable snapshots");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("snapshot permission probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("snapshot permission probe should be released");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("event delete permission probe savepoint should be created");
     let error = sqlx::query("DELETE FROM events WHERE tenant_id = $1")
         .bind(tenant_a)
         .execute(&mut *tx)
         .await
         .expect_err("runtime must not delete append-only events");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("event delete permission probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("event delete permission probe should be released");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("event update permission probe savepoint should be created");
     let error = sqlx::query("UPDATE events SET event_type = 'forged' WHERE tenant_id = $1")
         .bind(tenant_a)
         .execute(&mut *tx)
         .await
         .expect_err("runtime must not update append-only events");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("event update permission probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("event update permission probe should be released");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("outbox permission probe savepoint should be created");
     let error = sqlx::query("UPDATE outbox_messages SET delivered_at = now() WHERE tenant_id = $1")
         .bind(tenant_a)
         .execute(&mut *tx)
         .await
         .expect_err("runtime must not acknowledge outbox delivery");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("outbox permission probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("outbox permission probe should be released");
     tx.rollback()
         .await
         .expect("runtime append test should roll back");
@@ -264,6 +312,10 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .execute(&mut *tx)
     .await
     .expect("dispatcher should acknowledge delivery for any tenant");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("dispatcher permission probe savepoint should be created");
     let error = sqlx::query(
         "UPDATE outbox_messages SET payload = '{\"forged\":true}'::jsonb WHERE tenant_id = $1",
     )
@@ -272,11 +324,31 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .await
     .expect_err("dispatcher must not rewrite message payload");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("dispatcher payload probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("dispatcher payload probe should be released");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("dispatcher domain access probe savepoint should be created");
     let error = sqlx::query("SELECT count(*) FROM objects")
         .fetch_one(&mut *tx)
         .await
         .expect_err("dispatcher must not read domain objects");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("dispatcher domain access probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("dispatcher domain access probe should be released");
     tx.rollback()
         .await
         .expect("dispatcher transaction should roll back");
@@ -288,17 +360,41 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .await
         .expect("admin should read business data in its tenant");
     assert_eq!(visible, 1);
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("admin write probe savepoint should be created");
     let error = sqlx::query("UPDATE objects SET state = 'suspended' WHERE object_id = $1")
         .bind(object_a)
         .execute(&mut *tx)
         .await
         .expect_err("admin must not mutate business data");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("admin write probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("admin write probe should be released");
+    sqlx::query("SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("admin credential probe savepoint should be created");
     let error = sqlx::query("SELECT count(*) FROM owner_credentials")
         .fetch_one(&mut *tx)
         .await
         .expect_err("admin must not read credential hashes");
     assert_sqlstate(error, "42501");
+    sqlx::query("ROLLBACK TO SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("admin credential probe should recover the transaction");
+    sqlx::query("RELEASE SAVEPOINT permission_probe")
+        .execute(&mut *tx)
+        .await
+        .expect("admin credential probe should be released");
     tx.rollback()
         .await
         .expect("admin transaction should roll back");
