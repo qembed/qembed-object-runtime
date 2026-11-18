@@ -16,7 +16,6 @@ struct Fixture {
     pool: PgPool,
     admin_pool: PgPool,
     schema: String,
-    tenant_id: TenantId,
     object_id: ObjectId,
     caller_id: CallerId,
     snapshot_id: SnapshotId,
@@ -32,7 +31,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .expect("isolated begin-invocation schema should be created");
 
     let ddl = [
-        format!("CREATE TABLE \"{schema}\".owner_principals (tenant_id UUID NOT NULL, caller_id UUID NOT NULL, disabled_at TIMESTAMPTZ, PRIMARY KEY (tenant_id, caller_id))"),
+        format!("CREATE TABLE \"{schema}\".owner_principals (tenant_id UUID NOT NULL, caller_id UUID NOT NULL, principal_kind TEXT NOT NULL CHECK (principal_kind='tenant_owner'), disabled_at TIMESTAMPTZ, PRIMARY KEY (tenant_id, caller_id))"),
         format!("CREATE TABLE \"{schema}\".callers (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, caller_kind TEXT NOT NULL CHECK (caller_kind IN ('Anonymous','Authenticated','Service')), revoked_at TIMESTAMPTZ, UNIQUE (tenant_id, id))"),
         format!("CREATE TABLE \"{schema}\".principal_caller_delegations (delegation_id UUID PRIMARY KEY, tenant_id UUID NOT NULL, principal_id UUID NOT NULL, caller_id UUID NOT NULL, revoked_at TIMESTAMPTZ, FOREIGN KEY (tenant_id, principal_id) REFERENCES \"{schema}\".owner_principals(tenant_id, caller_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id))"),
         format!("CREATE TABLE \"{schema}\".objects (tenant_id UUID NOT NULL, object_id UUID NOT NULL, state TEXT NOT NULL, published_version_id UUID, PRIMARY KEY (tenant_id, object_id))"),
@@ -109,7 +108,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
     let version_id = ObjectVersionId::new();
     let snapshot_id = SnapshotId::new();
 
-    sqlx::query("INSERT INTO owner_principals (tenant_id, caller_id) VALUES ($1::uuid, $2::uuid)")
+    sqlx::query("INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')")
         .bind(tenant_id.to_string())
         .bind(scope.principal().principal_id().to_string())
         .execute(&pool).await.expect("Principal fixture should be inserted");
@@ -133,7 +132,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .bind(tenant_id.to_string()).bind(object_id.to_string())
         .execute(&pool).await.expect("knowledge revision fixture should be inserted");
 
-    Fixture { pool, admin_pool, schema, tenant_id, object_id, caller_id, snapshot_id, scope }
+    Fixture { pool, admin_pool, schema, object_id, caller_id, snapshot_id, scope }
 }
 
 fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
