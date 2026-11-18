@@ -3,11 +3,14 @@ mod common;
 use std::time::{Duration, SystemTime};
 
 use qembed_domain::caller::InvocationPool;
-use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
+use qembed_domain::ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
+use qembed_domain::invocation::{FencingToken, InvocationStatus};
+use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
+use qembed_store::invocation_worker::PgExecutionStore;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
@@ -407,5 +410,133 @@ async fn inactive_object_rolls_back_the_idempotency_claim() {
     .expect_err("suspended object must not begin an invocation");
     assert!(matches!(error, BeginInvocationError::ObjectNotActive));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+
+#[tokio::test]
+async fn worker_store_persists_response_and_resumes_after_process_restart() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "worker-restart"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let input = store
+        .load_user_input(&fixture.scope, invocation_id)
+        .await
+        .expect("input query")
+        .expect("durable user input");
+    assert_eq!(input, "hello from durable invocation input");
+
+    let mut current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load invocation")
+        .expect("invocation exists");
+    assert_eq!(current.status(), InvocationStatus::Received);
+
+    let mut next = current.clone();
+    next.transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("Received -> ContextLoading");
+    assert!(store
+        .compare_and_set_invocation(
+            &fixture.scope,
+            current.version(),
+            FencingToken::INITIAL,
+            next,
+        )
+        .await
+        .expect("persist context-loading state"));
+
+    current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload invocation")
+        .expect("invocation exists");
+    let mut next = current.clone();
+    next.transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .expect("ContextLoading -> Processing");
+    assert!(store
+        .compare_and_set_invocation(
+            &fixture.scope,
+            current.version(),
+            FencingToken::INITIAL,
+            next,
+        )
+        .await
+        .expect("persist processing state"));
+
+    current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload processing invocation")
+        .expect("invocation exists");
+    let mut next = current.clone();
+    next.transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .expect("Processing -> Verifying");
+    assert!(store
+        .persist_assistant_output(
+            &fixture.scope,
+            current.version(),
+            FencingToken::INITIAL,
+            next,
+            "durable answer".to_owned(),
+        )
+        .await
+        .expect("persist response and verifying state"));
+
+    // A new adapter instance represents a restarted worker process.
+    let restarted = PgExecutionStore::new(fixture.pool.clone());
+    let recovered = restarted
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload after restart")
+        .expect("invocation exists");
+    assert_eq!(recovered.status(), InvocationStatus::Verifying);
+    let output = restarted
+        .load_assistant_output(&fixture.scope, invocation_id)
+        .await
+        .expect("load persisted response")
+        .expect("assistant output survived restart");
+    assert_eq!(output, "durable answer");
+
+    let mut completed = recovered.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .expect("Verifying -> Completed");
+    assert!(restarted
+        .complete_invocation(
+            &fixture.scope,
+            recovered.version(),
+            FencingToken::INITIAL,
+            completed,
+        )
+        .await
+        .expect("persist terminal state"));
+
+    let terminal = restarted
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load terminal invocation")
+        .expect("terminal invocation exists");
+    assert_eq!(terminal.status(), InvocationStatus::Completed);
+    assert_eq!(
+        restarted
+            .load_assistant_output(&fixture.scope, invocation_id)
+            .await
+            .expect("load terminal output")
+            .as_deref(),
+        Some("durable answer")
+    );
+
     teardown(fixture).await;
 }
