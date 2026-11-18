@@ -147,6 +147,53 @@ pub trait InvocationWorkStore: ExecutionStore {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
+
+/// Read-only, tenant-scoped projection returned by the invocation status query.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvocationReadModel {
+    id: InvocationId,
+    status: crate::invocation::InvocationStatus,
+    result: Option<String>,
+    error_code: Option<String>,
+}
+
+impl InvocationReadModel {
+    #[must_use]
+    pub const fn new(
+        id: InvocationId,
+        status: crate::invocation::InvocationStatus,
+        result: Option<String>,
+        error_code: Option<String>,
+    ) -> Self {
+        Self { id, status, result, error_code }
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> InvocationId { self.id }
+
+    #[must_use]
+    pub const fn status(&self) -> crate::invocation::InvocationStatus { self.status }
+
+    #[must_use]
+    pub fn result(&self) -> Option<&str> { self.result.as_deref() }
+
+    #[must_use]
+    pub fn error_code(&self) -> Option<&str> { self.error_code.as_deref() }
+}
+
+/// Read-only persistence boundary for the client-visible invocation projection.
+/// Implementations must use the trusted Scope and return None for both a missing
+/// invocation and an invocation belonging to another tenant.
+pub trait InvocationReadStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn get_invocation(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> impl Future<Output = Result<Option<InvocationReadModel>, Self::Error>> + Send;
+}
+
 /// Provider-neutral chat completion boundary.
 ///
 /// Implementations adapt this contract to a concrete provider. SDK request,
