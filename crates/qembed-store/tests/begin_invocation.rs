@@ -287,9 +287,11 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         .expect("event payload should include its allowlisted type");
     assert_eq!(event_type, "invocation_received");
 
-    let replay = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "key-1"))
+    let mut replay_command = command(&fixture, "key-1");
+    replay_command.message_expires_at = SystemTime::UNIX_EPOCH;
+    let replay = begin_invocation(&fixture.pool, &fixture.scope, replay_command)
         .await
-        .expect("same key and payload should replay");
+        .expect("same key and payload should replay without validating a new message expiry");
     assert_eq!(replay, BeginInvocationOutcome::Replay { invocation_id });
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
     teardown(fixture).await;
@@ -538,5 +540,20 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
         Some("durable answer")
     );
 
+    teardown(fixture).await;
+}
+
+
+#[tokio::test]
+async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
+    let fixture = setup(None).await;
+    let mut invalid = command(&fixture, "invalid-input");
+    invalid.input_message = "   ".to_owned();
+
+    let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
+        .await
+        .expect_err("blank user input must be rejected");
+    assert!(matches!(error, BeginInvocationError::InvalidInputMessage));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
