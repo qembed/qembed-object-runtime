@@ -47,7 +47,7 @@ impl Principal {
         kind: PrincipalKind,
     ) -> Result<Self, PrincipalError> {
         if principal_id.as_uuid().is_nil() {
-            return Err(PrincipalError::NilCallerId);
+            return Err(PrincipalError::NilPrincipalId);
         }
 
         Ok(Self { principal_id, kind })
@@ -69,14 +69,14 @@ impl Principal {
 /// Errors produced while establishing a trusted principal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrincipalError {
-    /// The authentication boundary supplied the nil UUID as caller identity.
-    NilCallerId,
+    /// The authentication boundary supplied the nil UUID as principal identity.
+    NilPrincipalId,
 }
 
 impl fmt::Display for PrincipalError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NilCallerId => formatter.write_str("principal ID must not be nil"),
+            Self::NilPrincipalId => formatter.write_str("principal ID must not be nil"),
         }
     }
 }
@@ -93,19 +93,19 @@ mod tests {
         let principal_id = PrincipalId::new();
 
         let principal = Principal::from_verified_auth(principal_id, PrincipalKind::Authenticated)
-            .expect("non-nil caller ID must be accepted");
+            .expect("non-nil principal ID must be accepted");
 
         assert_eq!(principal.principal_id(), principal_id);
         assert_eq!(principal.kind(), PrincipalKind::Authenticated);
     }
 
     #[test]
-    fn verified_auth_context_rejects_nil_caller_id() {
+    fn verified_auth_context_rejects_nil_principal_id() {
         let error = Principal::from_verified_auth(
             PrincipalId::from_uuid(Uuid::nil()),
             PrincipalKind::Authenticated,
         )
-        .expect_err("nil caller ID must be rejected");
+        .expect_err("nil principal ID must be rejected");
 
         assert_eq!(error, PrincipalError::NilCallerId);
     }
