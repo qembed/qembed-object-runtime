@@ -19,6 +19,7 @@ pub mod snapshot_repository;
 
 use std::time::Duration;
 
+use qembed_domain::ids::{PrincipalId, TenantId, TraceId};
 use qembed_domain::scope::Scope;
 use sqlx::FromRow;
 use sqlx::PgPool;
@@ -71,9 +72,21 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
 /// accidentally reused after it has ended.
 pub struct TenantTransaction {
     transaction: Transaction<'static, Postgres>,
+    tenant_id: TenantId,
+    principal_id: PrincipalId,
+    transaction_token: TraceId,
 }
 
 impl TenantTransaction {
+    pub(crate) const fn transaction_token(&self) -> TraceId {
+        self.transaction_token
+    }
+
+    pub(crate) const fn matches_scope(&self, scope: &Scope) -> bool {
+        self.tenant_id == scope.tenant_id()
+            && self.principal_id == scope.principal().principal_id()
+    }
+
     /// Returns the PostgreSQL connection carrying this transaction's tenant context.
     ///
     /// Queries must be executed through this connection, not through the pool,
@@ -118,7 +131,12 @@ pub async fn begin_tenant_transaction(
         .execute(&mut *transaction)
         .await?;
 
-    Ok(TenantTransaction { transaction })
+    Ok(TenantTransaction {
+        transaction,
+        tenant_id: scope.tenant_id(),
+        principal_id: scope.principal().principal_id(),
+        transaction_token: TraceId::new(),
+    })
 }
 
 /// Executes a typed row query inside a tenant-scoped transaction.
