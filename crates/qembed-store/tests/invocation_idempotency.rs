@@ -27,7 +27,7 @@ async fn setup() -> (PgPool, String) {
         .expect("isolated test schema should be created");
 
     for ddl in [
-        format!("CREATE TABLE \"{schema}\".owner_principals (tenant_id UUID NOT NULL, caller_id UUID NOT NULL, disabled_at TIMESTAMPTZ, PRIMARY KEY (tenant_id, caller_id))"),
+        format!("CREATE TABLE \"{schema}\".owner_principals (tenant_id UUID NOT NULL, caller_id UUID NOT NULL, principal_kind TEXT NOT NULL CHECK (principal_kind='tenant_owner'), disabled_at TIMESTAMPTZ, PRIMARY KEY (tenant_id, caller_id))"),
         format!("CREATE TABLE \"{schema}\".callers (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, caller_kind TEXT NOT NULL, revoked_at TIMESTAMPTZ, UNIQUE (tenant_id, id))"),
         format!("CREATE TABLE \"{schema}\".principal_caller_delegations (delegation_id UUID PRIMARY KEY, tenant_id UUID NOT NULL, principal_id UUID NOT NULL, caller_id UUID NOT NULL, revoked_at TIMESTAMPTZ, FOREIGN KEY (tenant_id, principal_id) REFERENCES \"{schema}\".owner_principals(tenant_id, caller_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id))"),
         format!("CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL, trace_id UUID NOT NULL, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id))"),
@@ -69,7 +69,7 @@ async fn setup() -> (PgPool, String) {
 
 async fn prepare_delegation(pool: &PgPool, schema: &str, scope: &Scope, caller_id: CallerId) {
     sqlx::query(&format!(
-        "INSERT INTO \"{schema}\".owner_principals (tenant_id, caller_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING"
+        "INSERT INTO \"{schema}\".owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner') ON CONFLICT DO NOTHING"
     ))
     .bind(scope.tenant_id().to_string())
     .bind(scope.principal().principal_id().to_string())
