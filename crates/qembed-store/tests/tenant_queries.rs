@@ -71,8 +71,8 @@ async fn create_rls_fixture(transaction: &mut TenantTransaction, tenant_a: &str,
         "GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_query_probe TO qembed_tenant_rls_test",
     )
     .execute(transaction.connection())
-        .await
-        .expect("the test role should be allowed to read the fixture");
+    .await
+    .expect("the test role should be allowed to read the fixture");
 }
 
 async fn tenant_transaction(pool: &PgPool, tenant_id: TenantId) -> TenantTransaction {
