@@ -3,7 +3,7 @@
 use std::fmt;
 
 use qembed_domain::caller::CallerKind;
-use qembed_domain::ids::CallerId;
+use qembed_domain::ids::{CallerId, PrincipalId, TenantId, TraceId};
 
 use crate::{TenantTransaction, fetch_optional};
 
@@ -16,6 +16,9 @@ use crate::{TenantTransaction, fetch_optional};
 pub struct ResolvedCaller {
     caller_id: CallerId,
     kind: CallerKind,
+    tenant_id: TenantId,
+    principal_id: PrincipalId,
+    transaction_token: TraceId,
 }
 
 impl ResolvedCaller {
@@ -29,6 +32,13 @@ impl ResolvedCaller {
     #[must_use]
     pub const fn kind(self) -> CallerKind {
         self.kind
+    }
+
+    pub(crate) const fn is_bound_to(&self, transaction: &TenantTransaction, scope: &qembed_domain::scope::Scope) -> bool {
+        self.tenant_id == scope.tenant_id()
+            && self.principal_id == scope.principal().principal_id()
+            && self.transaction_token == transaction.transaction_token()
+            && transaction.matches_scope(scope)
     }
 }
 
@@ -64,7 +74,13 @@ pub async fn resolve_delegated_caller(
     let caller_id = row.0.parse().map_err(|_| CallerResolutionError::InvalidCallerId)?;
     let kind = CallerKind::parse(&row.1).ok_or(CallerResolutionError::UnknownCallerKind)?;
 
-    Ok(ResolvedCaller { caller_id, kind })
+    Ok(ResolvedCaller {
+        caller_id,
+        kind,
+        tenant_id: transaction.tenant_id(),
+        principal_id: transaction.principal_id(),
+        transaction_token: transaction.transaction_token(),
+    })
 }
 
 /// Failure to resolve an effective Caller.
