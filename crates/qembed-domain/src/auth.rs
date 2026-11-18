@@ -28,8 +28,9 @@ where
         return Err(OwnerAuthenticationError::NotOwner);
     }
 
-    let principal = Principal::from_verified_auth(identity.principal_id(), identity.principal_kind())
-        .map_err(OwnerAuthenticationError::InvalidPrincipal)?;
+    let principal =
+        Principal::from_verified_auth(identity.principal_id(), identity.principal_kind())
+            .map_err(OwnerAuthenticationError::InvalidPrincipal)?;
 
     Scope::from_verified_auth(identity.tenant_id(), principal)
         .map_err(OwnerAuthenticationError::InvalidScope)
