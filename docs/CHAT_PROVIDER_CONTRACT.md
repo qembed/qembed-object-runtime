@@ -41,6 +41,28 @@ appear in domain/runtime public APIs.
   fences with the typed `MalformedJson` error.
 - `none` preserves any otherwise-valid non-empty response text.
 
+## Retry identity and provider idempotency
+
+Every invocation's primary chat completion receives a stable
+`ProviderRequestContext`. Its opaque key is derived from the durable
+`InvocationId` and operation version, not from a worker ID or lease token, so
+reclaiming an expired lease does not change the key. The runtime supplies the
+same key on every attempt for that invocation.
+
+A provider route advertises idempotency support only when its adapter forwards
+the key unchanged and the upstream provider guarantees deduplication within
+its documented scope and retention window. Such adapters override
+`ChatProvider::complete_with_context` and mark their capability profile with
+`with_idempotency_keys()`. Providers without that guarantee may use the
+compatibility default, which ignores the context; the runtime must not claim
+that this prevents duplicate execution or charges.
+
+The key is not a fencing token: it deduplicates upstream execution where
+supported, while PostgreSQL lease ownership and fencing independently decide
+which worker may persist the result. If the provider's key retention window has
+expired, or the provider does not guarantee deduplication, duplicate execution
+remains possible. No exactly-once guarantee is implied.
+
 ## Provider support
 
 Before sending a request, the adapter exposes a local, side-effect-free
