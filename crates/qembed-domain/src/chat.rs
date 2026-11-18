@@ -80,6 +80,51 @@ pub enum StructuredOutputMode {
     JsonOnly,
 }
 
+/// Explicit capabilities advertised by one configured provider/model route.
+///
+/// This descriptor contains only provider-neutral features. It is configuration
+/// supplied by the adapter; it is never inferred from a model name or a
+/// successful/failed completion request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ChatCapabilities {
+    structured_output_modes: Vec<StructuredOutputMode>,
+}
+
+impl ChatCapabilities {
+    /// Creates a capability profile. Unconstrained text mode is always
+    /// supported; duplicate modes are removed.
+    #[must_use]
+    pub fn new(modes: impl IntoIterator<Item = StructuredOutputMode>) -> Self {
+        let mut structured_output_modes = vec![StructuredOutputMode::None];
+        for mode in modes {
+            if !structured_output_modes.contains(&mode) {
+                structured_output_modes.push(mode);
+            }
+        }
+        Self {
+            structured_output_modes,
+        }
+    }
+
+    /// Returns the modes explicitly present in this normalized profile.
+    #[must_use]
+    pub fn structured_output_modes(&self) -> &[StructuredOutputMode] {
+        &self.structured_output_modes
+    }
+
+    /// Whether this profile can satisfy the requested output mode.
+    #[must_use]
+    pub fn supports(&self, mode: StructuredOutputMode) -> bool {
+        mode == StructuredOutputMode::None || self.structured_output_modes.contains(&mode)
+    }
+}
+
+impl Default for ChatCapabilities {
+    fn default() -> Self {
+        Self::new([])
+    }
+}
+
 /// One provider-neutral message.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ChatMessage {

@@ -8,7 +8,7 @@
 use std::error::Error;
 use std::fmt;
 
-use qembed_domain::chat::{ChatRequest, ChatResponse};
+use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse};
 use qembed_domain::ports::ChatProvider;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +46,10 @@ pub enum MockChatProviderError {
     Unavailable,
     /// No script was registered for the exact request.
     UnscriptedRequest,
+    /// The request asks for a mode not advertised by the configured route.
+    UnsupportedCapability,
+    /// No capability profile is configured for the request's routing key.
+    UnconfiguredModel,
 }
 
 impl fmt::Display for MockChatProviderError {
@@ -54,6 +58,12 @@ impl fmt::Display for MockChatProviderError {
             Self::Timeout => "mock provider timed out",
             Self::Unavailable => "mock provider is unavailable",
             Self::UnscriptedRequest => "mock provider has no script for this request",
+            Self::UnsupportedCapability => {
+                "mock provider does not support the requested capability"
+            }
+            Self::UnconfiguredModel => {
+                "mock provider has no capability profile for the model routing key"
+            }
         };
         formatter.write_str(message)
     }
@@ -66,18 +76,48 @@ impl Error for MockChatProviderError {}
 /// Register each request exactly once with the with_response or with_error
 /// methods. An unregistered request returns UnscriptedRequest, making missing
 /// fixtures visible instead of silently returning a plausible response.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MockChatProvider {
     scripts: Vec<Script>,
+    capability_profiles: Vec<(String, ChatCapabilities)>,
+}
+
+impl Default for MockChatProvider {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockChatProvider {
     /// Creates an empty provider. Every request will fail until scripted.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             scripts: Vec::new(),
+            capability_profiles: vec![("test-chat".to_owned(), ChatCapabilities::default())],
         }
+    }
+
+    /// Replaces or registers the capability profile for a routing key.
+    ///
+    /// Profiles are explicit fixtures; no capability is inferred from a key.
+    #[must_use]
+    pub fn with_capabilities(
+        mut self,
+        model_key: impl Into<String>,
+        capabilities: ChatCapabilities,
+    ) -> Self {
+        let model_key = model_key.into();
+        if let Some((_, existing)) = self
+            .capability_profiles
+            .iter_mut()
+            .find(|(key, _)| key == &model_key)
+        {
+            *existing = capabilities;
+        } else {
+            self.capability_profiles.push((model_key, capabilities));
+        }
+        self
     }
 
     /// Registers the response for one exact request.
@@ -122,7 +162,21 @@ impl MockChatProvider {
 impl ChatProvider for MockChatProvider {
     type Error = MockChatProviderError;
 
+    fn capabilities(&self, model_key: &str) -> Option<ChatCapabilities> {
+        self.capability_profiles
+            .iter()
+            .find(|(key, _)| key == model_key)
+            .map(|(_, caps)| caps.clone())
+    }
+
     async fn complete(&self, request: ChatRequest) -> Result<ChatResponse, Self::Error> {
+        let capabilities = self
+            .capabilities(request.model_key())
+            .ok_or(MockChatProviderError::UnconfiguredModel)?;
+        if !capabilities.supports(request.structured_output()) {
+            return Err(MockChatProviderError::UnsupportedCapability);
+        }
+
         let script = self
             .scripts
             .iter()
@@ -227,6 +281,10 @@ mod tests {
         let json_request =
             request("same prompt").with_structured_output(StructuredOutputMode::JsonOnly);
         let provider = MockChatProvider::new()
+            .with_capabilities(
+                "test-chat",
+                qembed_domain::chat::ChatCapabilities::new([StructuredOutputMode::JsonOnly]),
+            )
             .with_response(plain_request, response("plain text"))
             .expect("unique script");
 
