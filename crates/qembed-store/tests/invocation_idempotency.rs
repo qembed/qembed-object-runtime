@@ -37,7 +37,7 @@ async fn setup() -> (PgPool, String) {
     }
 
     let resolver = format!(
-        r#"CREATE FUNCTION \"{schema}\".resolve_delegated_caller(p_caller_id UUID)
+        r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(p_caller_id UUID)
         RETURNS TABLE (caller_id UUID, caller_kind TEXT)
         LANGUAGE plpgsql AS $$
         DECLARE v_tenant UUID := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
