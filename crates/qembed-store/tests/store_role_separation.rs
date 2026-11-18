@@ -6,9 +6,9 @@ use qembed_domain::auth::authenticate_owner;
 use qembed_domain::ids::TenantId;
 use qembed_store::auth::{OwnerAuthenticator, OwnerCredentials};
 use qembed_store::run_migrations;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const RUNTIME_PASSWORD: &str = "runtime-test-only";
@@ -453,7 +453,10 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     )
     .await
     .expect("runtime login should authenticate using tenant-scoped RLS lookup");
-    assert_eq!(authenticated.tenant_id().to_string(), auth_tenant.to_string());
+    assert_eq!(
+        authenticated.tenant_id().to_string(),
+        auth_tenant.to_string()
+    );
 
     runtime.close().await;
     dispatcher.close().await;
