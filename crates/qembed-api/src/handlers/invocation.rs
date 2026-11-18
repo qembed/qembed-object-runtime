@@ -120,7 +120,6 @@ fn api_status_with_degraded(status: InvocationStatus) -> (InvocationApiStatus, b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qembed_domain::ids::InvocationId;
 
     #[test]
     fn cancellation_response_distinguishes_applied_repeated_and_terminal_requests() {
