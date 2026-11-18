@@ -786,6 +786,39 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
             .expect("new owner heartbeat")
     );
 
+    let verifying = worker_b
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load verifying invocation")
+        .expect("invocation exists");
+    let mut completed = verifying.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
+        .expect("Verifying can complete");
+    assert!(
+        worker_b
+            .complete_invocation_owned(
+                &fixture.scope,
+                "worker-b",
+                verifying.version(),
+                verifying.fencing_token(),
+                completed,
+            )
+            .await
+            .expect("terminal completion and lease release")
+    );
+    let terminal = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+        "SELECT status, lease_owner, lease_until::text FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read terminal invocation");
+    assert_eq!(terminal.0, "Completed");
+    assert_eq!(terminal.1, None);
+    assert_eq!(terminal.2, None);
+
     second_pool.close().await;
     teardown(fixture).await;
 }
