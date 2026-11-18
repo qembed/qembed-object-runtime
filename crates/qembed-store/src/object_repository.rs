@@ -130,14 +130,7 @@ impl ObjectRepository {
         append_object_event(
             &mut transaction,
             scope,
-            ObjectEvent {
-                event_id: EventId::new(),
-                object_id,
-                event_type: "object.validation_started",
-                state: "validating",
-                previous_version_id: None,
-                version_id: None,
-            },
+            ObjectEvent::validation_started(EventId::new(), object_id),
         )
         .await
         .map_err(ObjectRepositoryError::Database)?;
@@ -305,14 +298,13 @@ impl ObjectRepository {
         append_object_event(
             &mut transaction,
             scope,
-            ObjectEvent {
-                event_id: EventId::new(),
+            ObjectEvent::version_published(
+                EventId::new(),
                 object_id,
-                event_type: "object.version_published",
-                state: next_state,
-                previous_version_id: expected_current,
-                version_id: Some(version_id),
-            },
+                expected_current,
+                version_id,
+                object.state(),
+            ),
         )
         .await
         .map_err(ObjectRepositoryError::Database)?;

@@ -8,6 +8,8 @@ lints.workspace = true
 
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
+serde.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 sha2.workspace = true
 tokio.workspace = true
