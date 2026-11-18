@@ -9,6 +9,7 @@
 
 pub mod auth;
 mod cas;
+pub mod idempotency;
 pub use cas::{CasError, execute_cas};
 mod event_outbox;
 pub mod object_repository;

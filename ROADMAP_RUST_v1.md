@@ -273,9 +273,10 @@ SQLX_OFFLINE=true cargo check --workspace
 
 **Результат:** сквозной flow через реальный API, store и mock provider.
 
-- [ ] **RUST-035 (M)** Реализовать idempotency reservation для begin-invocation.
-  - Тесты: DB integration — одинаковый tenant/object/caller/key возвращает один invocation; конкурентные запросы не создают дубликаты.
-  - DoD: idempotency claim фиксируется до вызова модели.
+- [x] **RUST-035 (M)** Реализовать idempotency reservation для begin-invocation.
+  - Реализация: `qembed-store::idempotency::reserve_invocation_idempotency` резервирует ключ по `(tenant, object, trusted caller, key)` в tenant transaction; одинаковый payload возвращает исходный invocation ID, несовпадающий payload даёт конфликт. Deferred FK позволяет сначала claim, затем вставить invocation в той же транзакции.
+  - Тесты: PostgreSQL integration — повтор ключа, конкурентные запросы, payload mismatch, rollback claim и независимость tenant/object/caller scopes.
+  - DoD: reservation и invocation фиксируются до provider I/O; TTL и алгоритм хеширования не выдумываются этим слоем.
 
 - [ ] **RUST-036 (M)** Реализовать атомарный begin-invocation transaction.
   - Состав: invocation, pinned snapshot, pinned knowledge revision reference, critical event, outbox.
