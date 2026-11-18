@@ -252,7 +252,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: exact input/output; TokenUsage fixture; scripted timeout/provider error; missing/duplicate script; 32 concurrent identical calls.
   - DoD: provider immutable и не использует FIFO/shared cursor, mutex, network или clock; результаты конкурентных вызовов не зависят от порядка планирования. Архитектура описана в `docs/DETERMINISTIC_MOCK_CHAT_PROVIDER.md`.
 
-- [ ] **RUST-032 (S)** Реализовать structured output modes `JsonOnly` и `None`.
+- [x] **RUST-032 (S)** Реализовать structured output modes `JsonOnly` и `None`.
   - Реализация: `StructuredOutputMode` входит в `ChatRequest`; старые serialized requests и `ChatRequest::new` по умолчанию используют `None`. `qembed-llm` проверяет поддержку режима до provider I/O и валидирует нормализованный JSON response.
   - Тесты: mode serialization/default compatibility; valid JSON; malformed/trailing/prose response; plain text in `None`; unsupported `JsonOnly` rejected before request.
   - DoD: structured output contract provider-neutral; результат валиден для запрошенного режима либо возвращается типизированная `UnsupportedMode`/`MalformedJson` ошибка. Capability discovery остаётся RUST-033.
