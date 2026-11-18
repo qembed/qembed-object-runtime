@@ -4,7 +4,7 @@ RUST-036 composes the SQL-011 delegation resolver and RUST-035 idempotency primi
 
 ## Inputs
 
-`BeginInvocationCommand` contains the object, explicitly requested Caller ID, explicit InvocationPool, pinned Snapshot ID, idempotency key, opaque payload hash, caller-supplied absolute expiry, and trace ID. The caller ID is untrusted selection input until SQL-011 resolves it. The pool is an independent trusted policy decision; Caller kind is not used to derive it.
+`BeginInvocationCommand` contains the object, explicitly requested Caller ID, explicit InvocationPool, pinned Snapshot ID, idempotency key, opaque payload hash, caller-supplied absolute expiry, trace ID, original user input, and an explicit interaction-message retention deadline. The caller ID is untrusted selection input until SQL-011 resolves it. The pool is an independent trusted policy decision; Caller kind is not used to derive it.
 
 Payload canonicalization/hash algorithm and expiry policy remain upstream contracts. This Store layer does not invent them.
 
@@ -17,16 +17,17 @@ Payload canonicalization/hash algorithm and expiry policy remain upstream contra
 5. Verify the requested Snapshot belongs to the tenant/object and points to the Object's current Published version.
 6. Read and lock the object's current `knowledge_revisions.current_revision` `FOR SHARE`.
 7. Insert `object_invocations` with the resolved Caller, selected snapshot, pinned revision, explicit pool, Received state, and trace ID.
-8. Append the allowlisted `invocation.received` event and its outbox delivery row in the same transaction.
-9. Commit. Only then may the application call a ChatProvider or perform other external I/O.
+8. Insert exactly one `user` row into `interaction_messages` using the same effective Caller and invocation ID. Its expiry is supplied separately from idempotency-key expiry.
+9. Append the allowlisted `invocation.received` event and its outbox delivery row in the same transaction.
+10. Commit. Only then may the application call a ChatProvider or perform other external I/O.
 
 The SQL invocation-idempotency FK is DEFERRABLE INITIALLY DEFERRED. It permits the reservation to be claimed before the invocation row, but requires both to exist at commit.
 
 ## Atomicity and replay
 
-Any failure after the claim causes transaction rollback: no idempotency reservation, invocation, event, or outbox row survives. The integration suite injects failures at snapshot validation, invocation insert, event insert, and outbox insert.
+Any failure after the claim causes transaction rollback: no idempotency reservation, invocation, input message, event, or outbox row survives. The integration suite injects failures at snapshot validation, invocation insert, event insert, and outbox insert.
 
-A matching idempotency replay commits the read/lock transaction and returns the original InvocationId without creating another invocation, event, or outbox message. A different payload hash for the same effective Caller/key is a conflict. A different Caller has an independent key namespace.
+A matching idempotency replay commits the read/lock transaction and returns the original InvocationId without creating another invocation, input message, event, or outbox message. A different payload hash for the same effective Caller/key is a conflict. A different Caller has an independent key namespace.
 
 ## Locking and external side effects
 
