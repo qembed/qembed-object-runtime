@@ -192,6 +192,8 @@ fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
         snapshot_id: fixture.snapshot_id,
         idempotency_key: key.to_owned(),
         payload_hash: b"request-digest".to_vec(),
+        input_message: "hello from durable invocation input".to_owned(),
+        message_expires_at: SystemTime::now() + Duration::from_secs(86_400),
         idempotency_expires_at: SystemTime::now() + Duration::from_secs(3_600),
         trace_id: TraceId::new(),
     }
