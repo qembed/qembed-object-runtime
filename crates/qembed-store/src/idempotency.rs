@@ -11,7 +11,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use qembed_domain::ids::{InvocationId, ObjectId};
-use qembed_domain::scope::Scope;
+use crate::caller::ResolvedCaller;
 
 use crate::{TenantTransaction, fetch_optional};
 
@@ -90,7 +90,7 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// - `PayloadMismatch`: roll back and return an idempotency conflict.
 ///
 /// The key is scoped by the canonical SQL primary key
-/// (tenant, object, authenticated caller, key). The payload hash is treated as
+/// (tenant, object, effective Caller, key). The payload hash is treated as
 /// opaque bytes here; this function does not choose request canonicalization or
 /// a hash algorithm. Expiration is supplied by the caller because retention
 /// policy is not part of this adapter contract. An expired row remains reserved
@@ -100,7 +100,7 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// transaction reads and returns the winning invocation ID after it commits.
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
-    scope: &Scope,
+    caller: &ResolvedCaller,
     object_id: ObjectId,
     idempotency_key: &str,
     payload_hash: &[u8],
@@ -108,7 +108,7 @@ pub async fn reserve_invocation_idempotency(
     expires_at: SystemTime,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
     let expiry_micros = expiry_unix_micros(expires_at)?;
-    let caller_id = scope.principal().caller_id();
+    let caller_id = caller.caller_id();
 
     loop {
         let inserted = fetch_optional(
