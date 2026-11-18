@@ -11,7 +11,8 @@ use sqlx::PgPool;
 
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
 use crate::idempotency::{
-    IdempotencyReservation, IdempotencyReservationError, reserve_invocation_idempotency,
+    IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
+    reserve_invocation_idempotency,
 };
 use crate::{TenantTransaction, begin_tenant_transaction, execute, fetch_optional};
 
@@ -33,32 +34,6 @@ pub struct BeginInvocationCommand {
     pub trace_id: TraceId,
 }
 
-impl BeginInvocationCommand {
-    /// Creates a command with a caller-supplied stable idempotency digest and
-    /// absolute expiry. Hash construction and retention policy remain upstream.
-    #[must_use]
-    pub fn new(
-        object_id: ObjectId,
-        requested_caller_id: CallerId,
-        invocation_pool: InvocationPool,
-        snapshot_id: SnapshotId,
-        idempotency_key: impl Into<String>,
-        payload_hash: Vec<u8>,
-        idempotency_expires_at: SystemTime,
-        trace_id: TraceId,
-    ) -> Self {
-        Self {
-            object_id,
-            requested_caller_id,
-            invocation_pool,
-            snapshot_id,
-            idempotency_key: idempotency_key.into(),
-            payload_hash,
-            idempotency_expires_at,
-            trace_id,
-        }
-    }
-}
 
 /// Durable outcome of begin-invocation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,17 +172,15 @@ pub async fn begin_invocation(
     let caller = resolve_delegated_caller(&mut transaction, command.requested_caller_id).await?;
 
     let proposed_invocation_id = InvocationId::new();
-    let reservation = reserve_invocation_idempotency(
-        &mut transaction,
-        scope,
-        &caller,
+    let claim = IdempotencyClaim::new(
         command.object_id,
         &command.idempotency_key,
         &command.payload_hash,
         proposed_invocation_id,
         command.idempotency_expires_at,
-    )
-    .await?;
+    );
+    let reservation =
+        reserve_invocation_idempotency(&mut transaction, scope, &caller, &claim).await?;
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
