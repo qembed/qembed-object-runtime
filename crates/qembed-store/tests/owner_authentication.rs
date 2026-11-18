@@ -22,7 +22,7 @@ async fn seed_owner(pool: &sqlx::PgPool, tenant_id: TenantId, principal_id: Prin
         "INSERT INTO owner_credentials (tenant_id, caller_id, token_hash) VALUES ($1::uuid, $2::uuid, $3)",
     )
     .bind(tenant_id.to_string())
-    .bind(caller_id.to_string())
+    .bind(principal_id.to_string())
     .bind(token_hash)
     .execute(pool)
     .await
@@ -51,7 +51,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     .expect("valid owner credentials should authenticate");
 
     assert_eq!(scope.tenant_id(), tenant_a);
-    assert_eq!(scope.principal().principal_id(), caller_a);
+    assert_eq!(scope.principal().principal_id(), principal_a);
     assert_eq!(scope.principal().kind(), PrincipalKind::TenantOwner);
 
     // Raw API credentials are never persisted; only the fixed-size digest is stored.
@@ -59,7 +59,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
         "SELECT token_hash FROM owner_credentials WHERE tenant_id = $1::uuid AND caller_id = $2::uuid",
     )
     .bind(tenant_a.to_string())
-    .bind(caller_a.to_string())
+    .bind(principal_a.to_string())
     .fetch_one(&pool)
     .await
     .expect("credential digest should exist");
@@ -81,13 +81,13 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     // A disabled principal cannot authenticate even with its correct token.
     let disabled_tenant = TenantId::new();
     let disabled_principal = PrincipalId::new();
-    let disabled_token = format!("disabled-token-{}", CallerId::new());
+    let disabled_token = format!("disabled-token-{}", PrincipalId::new());
     seed_owner(&pool, disabled_tenant, disabled_principal, &disabled_token).await;
     sqlx::query(
         "UPDATE owner_principals SET disabled_at = now() WHERE tenant_id = $1::uuid AND caller_id = $2::uuid",
     )
     .bind(disabled_tenant.to_string())
-    .bind(disabled_caller.to_string())
+    .bind(disabled_principal.to_string())
     .execute(&pool)
     .await
     .expect("principal should be disabled");
