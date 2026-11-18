@@ -59,4 +59,4 @@ or rollback and cannot leak to the next pool borrower.
 - The dispatcher is trusted to process all tenants' outbox messages. Its access
   is intentionally broader than a tenant-scoped runtime, but only on the outbox.
 - The current outbox schema has no lease/claim/attempt model. This role contract
-  does not invent one; it covers only SELECT and `delivered_at) acknowledgement.
+  does not invent one; it covers only SELECT and `delivered_at` acknowledgement.
