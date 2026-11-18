@@ -7,6 +7,7 @@
 use std::fmt;
 
 use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse, StructuredOutputMode};
+use qembed_domain::ports::ChatProvider;
 
 /// Failure while applying a structured-output contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
