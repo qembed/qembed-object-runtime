@@ -199,7 +199,7 @@ fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
     }
 }
 
-async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64) {
+async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64, i64) {
     let invocations = sqlx::query_scalar("SELECT count(*) FROM object_invocations")
         .fetch_one(&fixture.pool)
         .await
@@ -216,7 +216,11 @@ async fn counts(fixture: &Fixture) -> (i64, i64, i64, i64) {
         .fetch_one(&fixture.pool)
         .await
         .expect("outbox count");
-    (invocations, idempotency, events, outbox)
+    let messages = sqlx::query_scalar("SELECT count(*) FROM interaction_messages")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("interaction message count");
+    (invocations, idempotency, events, outbox, messages)
 }
 
 async fn teardown(fixture: Fixture) {
@@ -251,7 +255,7 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         }
         other => panic!("expected Created, got {other:?}"),
     };
-    assert_eq!(counts(&fixture).await, (1, 1, 1, 1));
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
 
     let persisted = sqlx::query_as::<_, (String, String, i64, String)>(
         "SELECT caller_id::text, snapshot_id::text, knowledge_revision, pool FROM object_invocations WHERE id=$1::uuid"
@@ -289,7 +293,7 @@ async fn any_failure_after_idempotency_claim_rolls_back_the_entire_begin() {
         .await
         .expect_err("missing snapshot must fail");
     assert!(matches!(error, BeginInvocationError::SnapshotNotFound));
-    assert_eq!(counts(&fixture).await, (0, 0, 0, 0));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
 
