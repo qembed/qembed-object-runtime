@@ -34,7 +34,7 @@ impl ResolvedCaller {
         self.kind
     }
 
-    pub(crate) const fn is_bound_to(&self, transaction: &TenantTransaction, scope: &qembed_domain::scope::Scope) -> bool {
+    pub(crate) fn is_bound_to(&self, transaction: &TenantTransaction, scope: &qembed_domain::scope::Scope) -> bool {
         self.tenant_id == scope.tenant_id()
             && self.principal_id == scope.principal().principal_id()
             && self.transaction_token == transaction.transaction_token()
