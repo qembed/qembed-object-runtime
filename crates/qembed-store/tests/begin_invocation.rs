@@ -692,6 +692,20 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
     .await
     .expect("expire worker A lease for deterministic reclaim");
 
+    assert!(
+        !worker_a
+            .heartbeat_invocation(
+                &fixture.scope,
+                invocation_id,
+                "worker-a",
+                old_claim.fencing_token(),
+                60,
+            )
+            .await
+            .expect("expired heartbeat is a normal miss"),
+        "an expired lease must be reclaimed, not revived"
+    );
+
     let new_claim = worker_b
         .claim_invocation(&fixture.scope, invocation_id, "worker-b", 60)
         .await
