@@ -4,7 +4,6 @@ use std::fmt;
 
 use qembed_domain::caller::CallerKind;
 use qembed_domain::ids::CallerId;
-use qembed_domain::scope::Scope;
 
 use crate::{TenantTransaction, fetch_optional};
 
@@ -42,7 +41,6 @@ impl ResolvedCaller {
 /// or identity disablement.
 pub async fn resolve_delegated_caller(
     transaction: &mut TenantTransaction,
-    _scope: &Scope,
     requested_caller_id: CallerId,
 ) -> Result<ResolvedCaller, CallerResolutionError> {
     let row = fetch_optional(
