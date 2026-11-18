@@ -79,7 +79,6 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 }
 
 /// Reserves an invocation key before the invocation row is inserted.
-/// Reserves an invocation key before the invocation row is inserted.
 ///
 /// The caller must pass a transaction opened with `begin_tenant_transaction`
 /// for the same `scope`. The caller also owns transaction commit/rollback:
