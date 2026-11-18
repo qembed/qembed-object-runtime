@@ -122,11 +122,10 @@ impl MockChatProvider {
 impl ChatProvider for MockChatProvider {
     type Error = MockChatProviderError;
 
-    fn complete(
+    async fn complete(
         &self,
         request: ChatRequest,
-    ) -> impl std::future::Future<Output = Result<ChatResponse, Self::Error>> + Send {
-        async move {
+    ) -> Result<ChatResponse, Self::Error> {
             let script = self
                 .scripts
                 .iter()
@@ -137,7 +136,6 @@ impl ChatProvider for MockChatProvider {
                 ScriptedOutcome::Response(response) => Ok(response.clone()),
                 ScriptedOutcome::Error(error) => Err(*error),
             }
-        }
     }
 }
 
