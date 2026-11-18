@@ -4,13 +4,13 @@ qembed-llm provides an in-memory implementation of the domain ChatProvider port 
 
 ## Script selection
 
-A script is keyed by the complete ChatRequest value, including its structured output mode. Each request can be registered exactly once with either a response or a typed failure. A request with no script fails with UnscriptedRequest.
+A script is keyed by the complete ChatRequest value, including its structured output mode. Each request can be registered exactly once with either a response or a `ChatProviderError`. Missing scripts and invalid mock routes map to the neutral `Other` category; fixture setup errors remain `MockConfigurationError`.
 
 The mock deliberately does not use a FIFO response queue. A shared queue makes results depend on task scheduling when tests issue concurrent requests. Exact request matching makes each result independent of call order. The provider is immutable after construction and needs no mutex.
 
 ## Failure simulation
 
-Timeout and Unavailable are immediate typed outcomes. Timeout simulation does not sleep or consult a clock: tests exercise error handling without introducing timing flakiness or slowing the suite.
+Timeout, RateLimited, Unavailable, MalformedOutput, and Other can be scripted as immediate provider-neutral outcomes. Timeout simulation does not sleep or consult a clock: tests exercise error handling without introducing timing flakiness or slowing the suite.
 
 ## Usage fixtures
 
