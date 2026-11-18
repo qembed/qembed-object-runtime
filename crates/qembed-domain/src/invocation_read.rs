@@ -21,18 +21,31 @@ impl InvocationReadModel {
         result: Option<String>,
         error_code: Option<String>,
     ) -> Self {
-        Self { id, status, result, error_code }
+        Self {
+            id,
+            status,
+            result,
+            error_code,
+        }
     }
 
     #[must_use]
-    pub const fn id(&self) -> InvocationId { self.id }
+    pub const fn id(&self) -> InvocationId {
+        self.id
+    }
 
     #[must_use]
-    pub const fn status(&self) -> InvocationStatus { self.status }
+    pub const fn status(&self) -> InvocationStatus {
+        self.status
+    }
 
     #[must_use]
-    pub fn result(&self) -> Option<&str> { self.result.as_deref() }
+    pub fn result(&self) -> Option<&str> {
+        self.result.as_deref()
+    }
 
     #[must_use]
-    pub fn error_code(&self) -> Option<&str> { self.error_code.as_deref() }
+    pub fn error_code(&self) -> Option<&str> {
+        self.error_code.as_deref()
+    }
 }
