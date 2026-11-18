@@ -112,6 +112,7 @@ pub mod chat;
 pub mod ids;
 pub mod invocation;
 pub mod invocation_lease;
+pub mod invocation_read;
 pub mod jcs;
 pub mod object;
 pub mod object_version;

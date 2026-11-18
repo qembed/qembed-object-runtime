@@ -300,9 +300,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: одинаковый invocation ID даёт одинаковый key; другой invocation — другой key; default provider path не заявляет idempotency; lease owner/token не участвуют в key.
   - DoD: повтор после lease reclaim использует тот же provider key; exactly-once не обещается для provider-ов без подтверждённой upstream idempotency.
 
-- [ ] **RUST-039 (S)** Реализовать `GET invocation`.
-  - Тесты: API integration — queued/running/succeeded/failed; tenant isolation; скрытие внутренних payloads.
-  - DoD: клиент получает только разрешённый status/result/error.
+- [x] **RUST-039 (S)** Реализовать read path `GET invocation`.
+  - Реализация: tenant-scoped `InvocationReadStore`, runtime query service и минимизированный API response; внутренние tenant/caller/snapshot/trace/lease/fencing/version и незавершённый assistant output не выдаются.
+  - Тесты: PostgreSQL integration — queued/running/succeeded/failed, tenant isolation, assistant output скрыт до terminal success; API serialization — только allowlisted response fields.
+  - DoD: клиент получает только публичный status/result/stable error code; отсутствующий и чужой invocation дают одинаковый not-found результат.
 
 - [ ] **RUST-040 (S)** Реализовать cancellation contract.
   - Тесты: unit на state transitions; API integration на cancel, repeated cancel и terminal invocation.

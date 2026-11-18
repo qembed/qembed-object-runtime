@@ -6,11 +6,12 @@ use qembed_domain::caller::InvocationPool;
 use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
-use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
+use qembed_domain::ports::{ExecutionStore, InvocationReadStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
+use qembed_store::invocation_query::PgInvocationQueryStore;
 use qembed_store::invocation_worker::PgExecutionStore;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -820,5 +821,192 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
     assert_eq!(terminal.2, None);
 
     second_pool.close().await;
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "read-projection-success"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+
+    let query_store = PgInvocationQueryStore::new(fixture.pool.clone());
+    let queued = query_store
+        .get_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("read queued invocation")
+        .expect("invocation exists");
+    assert_eq!(queued.status(), InvocationStatus::Received);
+    assert_eq!(queued.result(), None);
+    assert_eq!(queued.error_code(), None);
+
+    let other_tenant_scope = scope_for_tenant(TenantId::new());
+    assert!(
+        query_store
+            .get_invocation(&other_tenant_scope, invocation_id)
+            .await
+            .expect("cross-tenant lookup is a normal miss")
+            .is_none(),
+        "an invocation from another tenant must be indistinguishable from a missing ID"
+    );
+
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let received = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load invocation")
+        .expect("invocation exists");
+    let mut context_loading = received.clone();
+    context_loading
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                received.version(),
+                FencingToken::INITIAL,
+                context_loading,
+            )
+            .await
+            .expect("persist context loading")
+    );
+
+    let context = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload invocation")
+        .expect("invocation exists");
+    let mut processing = context.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                context.version(),
+                FencingToken::INITIAL,
+                processing,
+            )
+            .await
+            .expect("persist processing")
+    );
+
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload processing invocation")
+        .expect("invocation exists");
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .expect("Processing -> Verifying");
+    assert!(
+        store
+            .persist_assistant_output(
+                &fixture.scope,
+                processing.version(),
+                FencingToken::INITIAL,
+                verifying,
+                "private until completed".to_owned(),
+            )
+            .await
+            .expect("persist assistant output")
+    );
+
+    let running = query_store
+        .get_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("read verifying invocation")
+        .expect("invocation exists");
+    assert_eq!(running.status(), InvocationStatus::Verifying);
+    assert_eq!(
+        running.result(),
+        None,
+        "unfinished assistant output is not exposed"
+    );
+
+    let verifying = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload verifying invocation")
+        .expect("invocation exists");
+    let mut completed = verifying.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .expect("Verifying -> Completed");
+    assert!(
+        store
+            .complete_invocation(
+                &fixture.scope,
+                verifying.version(),
+                FencingToken::INITIAL,
+                completed,
+            )
+            .await
+            .expect("complete invocation")
+    );
+
+    let succeeded = query_store
+        .get_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("read completed invocation")
+        .expect("invocation exists");
+    assert_eq!(succeeded.status(), InvocationStatus::Completed);
+    assert_eq!(succeeded.result(), Some("private until completed"));
+    assert_eq!(succeeded.error_code(), None);
+
+    let failed_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "read-projection-failed"),
+    )
+    .await
+    .expect("begin failure case")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let failed_current = store
+        .load_invocation(&fixture.scope, failed_id)
+        .await
+        .expect("load failure case")
+        .expect("invocation exists");
+    let mut failed = failed_current.clone();
+    failed
+        .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
+        .expect("Received -> Failed");
+    assert!(
+        store
+            .fail_invocation(
+                &fixture.scope,
+                failed_current.version(),
+                FencingToken::INITIAL,
+                failed,
+                "provider_timeout",
+            )
+            .await
+            .expect("persist failure")
+    );
+
+    let failure_view = query_store
+        .get_invocation(&fixture.scope, failed_id)
+        .await
+        .expect("read failed invocation")
+        .expect("invocation exists");
+    assert_eq!(failure_view.status(), InvocationStatus::Failed);
+    assert_eq!(failure_view.result(), None);
+    assert_eq!(failure_view.error_code(), Some("provider_timeout"));
+
     teardown(fixture).await;
 }
