@@ -65,7 +65,6 @@ impl AuthenticatedIdentity {
 pub trait AuthenticationPort: Send + Sync {
     type Credentials: Send;
     type Error: Error + Send + Sync + 'static;
-    type Error: Error + Send + Sync + 'static;
 
     fn authenticate(
         &self,
