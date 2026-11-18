@@ -3,9 +3,9 @@
 use std::fmt;
 
 use qembed_domain::caller::CallerKind;
-use qembed_domain::ids::{CallerId, PrincipalId, TenantId, TraceId};
+use qembed_domain::ids::{CallerId, PrincipalId, TenantId};
 
-use crate::{TenantTransaction, fetch_optional};
+use crate::{TenantTransaction, TransactionToken, fetch_optional};
 
 /// A Caller proven to be actively delegated to the authenticated Principal.
 ///
@@ -18,7 +18,7 @@ pub struct ResolvedCaller {
     kind: CallerKind,
     tenant_id: TenantId,
     principal_id: PrincipalId,
-    transaction_token: TraceId,
+    transaction_token: TransactionToken,
 }
 
 impl ResolvedCaller {
