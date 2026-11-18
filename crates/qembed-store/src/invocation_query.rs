@@ -111,7 +111,12 @@ impl InvocationReadStore for PgInvocationQueryStore {
                     }
                 }
             }
-            Ok(InvocationReadModel::new(invocation_id, status, result, error_code))
+            Ok(InvocationReadModel::new(
+                invocation_id,
+                status,
+                result,
+                error_code,
+            ))
         })
         .transpose()
     }
