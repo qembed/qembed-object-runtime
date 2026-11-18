@@ -17,9 +17,10 @@ mod event_outbox;
 pub mod object_repository;
 pub mod snapshot_repository;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use qembed_domain::ids::{PrincipalId, TenantId, TraceId};
+use qembed_domain::ids::{PrincipalId, TenantId};
 use qembed_domain::scope::Scope;
 use sqlx::FromRow;
 use sqlx::PgPool;
@@ -70,11 +71,16 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
 /// The wrapped connection is available only while this value is borrowed. Commit
 /// and rollback consume the wrapper so a tenant-scoped transaction cannot be
 /// accidentally reused after it has ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TransactionToken(u64);
+
+static NEXT_TRANSACTION_TOKEN: AtomicU64 = AtomicU64::new(1);
+
 pub struct TenantTransaction {
     transaction: Transaction<'static, Postgres>,
     tenant_id: TenantId,
     principal_id: PrincipalId,
-    transaction_token: TraceId,
+    transaction_token: TransactionToken,
 }
 
 impl TenantTransaction {
@@ -86,7 +92,7 @@ impl TenantTransaction {
         self.principal_id
     }
 
-    pub(crate) const fn transaction_token(&self) -> TraceId {
+    pub(crate) const fn transaction_token(&self) -> TransactionToken {
         self.transaction_token
     }
 
@@ -144,7 +150,7 @@ pub async fn begin_tenant_transaction(
         transaction,
         tenant_id: scope.tenant_id(),
         principal_id: scope.principal().principal_id(),
-        transaction_token: TraceId::new(),
+        transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
     })
 }
 
