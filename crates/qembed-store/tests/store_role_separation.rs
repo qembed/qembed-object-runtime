@@ -3,7 +3,7 @@ mod common;
 use std::str::FromStr;
 
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use qembed_store::run_migrations;
 use uuid::Uuid;
 
@@ -170,12 +170,12 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .execute(&mut *tx)
         .await
         .expect("runtime should update its own object");
-    let error = sqlx::query("UPDATE objects SET state = 'validating' WHERE tenant_id = $1")
+    let hidden_update = sqlx::query("UPDATE objects SET state = 'validating' WHERE tenant_id = $1")
         .bind(tenant_b)
         .execute(&mut *tx)
         .await
-        .expect_err("RLS must prevent cross-tenant object mutation");
-    assert_sqlstate(error, "42501");
+        .expect("RLS should hide foreign tenant rows from UPDATE");
+    assert_eq!(hidden_update.rows_affected(), 0);
     tx.rollback().await.expect("runtime transaction should roll back");
 
     // Runtime may append event/outbox records but cannot rewrite immutable rows
@@ -212,7 +212,9 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
 
     // Dispatcher has a deliberate cross-tenant view of the outbox only.
     let mut tx = dispatcher.begin().await.expect("dispatcher transaction should begin");
-    let queue_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox_messages")
+    let queue_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox_messages WHERE tenant_id IN ($1, $2)")
+        .bind(tenant_a)
+        .bind(tenant_b)
         .fetch_one(&mut *tx)
         .await
         .expect("dispatcher should read the global outbox");
