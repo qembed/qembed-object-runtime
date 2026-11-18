@@ -10,11 +10,11 @@
 //! External callers cannot construct a `Principal` from fields:
 //!
 //! ```compile_fail
-//! use qembed_domain::ids::CallerId;
+//! use qembed_domain::ids::PrincipalId;
 //! use qembed_domain::principal::{Principal, PrincipalKind};
 //!
 //! let _ = Principal {
-//!     caller_id: CallerId::new(),
+//!     principal_id: PrincipalId::new(),
 //!     kind: PrincipalKind::Authenticated,
 //! };
 //! ```
@@ -134,7 +134,7 @@ pub mod test_support {
     #[must_use]
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
         let principal =
-            Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated)
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated)
                 .expect("a generated caller ID must be valid");
 
         Scope::from_verified_auth(tenant_id, principal)
