@@ -7,7 +7,12 @@ use qembed_store::auth::{OwnerAuthenticationError, OwnerAuthenticator, OwnerCred
 use qembed_store::run_migrations;
 use sha2::{Digest, Sha256};
 
-async fn seed_owner(pool: &sqlx::PgPool, tenant_id: TenantId, principal_id: PrincipalId, token: &str) {
+async fn seed_owner(
+    pool: &sqlx::PgPool,
+    tenant_id: TenantId,
+    principal_id: PrincipalId,
+    token: &str,
+) {
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )
