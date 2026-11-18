@@ -155,6 +155,29 @@ mod tests {
         assert!(provider.capabilities("unknown-route").is_none());
     }
 
+    #[tokio::test]
+    async fn mock_rejects_unsupported_capability_before_completion() {
+        use crate::mock::{MockChatProvider, MockChatProviderError};
+        use qembed_domain::chat::{ChatFinishReason, ChatMessage, ChatRole};
+
+        let request = ChatRequest::new(
+            "test-chat",
+            vec![ChatMessage::new(ChatRole::User, "hello").expect("valid message")],
+            16,
+        )
+        .expect("valid request")
+        .with_structured_output(StructuredOutputMode::JsonOnly);
+        let response = ChatResponse::new("{}", ChatFinishReason::Stop, None).expect("valid response");
+        let provider = MockChatProvider::new()
+            .with_response(request.clone(), response)
+            .expect("unique fixture");
+
+        assert_eq!(
+            provider.complete(request).await.unwrap_err(),
+            MockChatProviderError::UnsupportedCapability
+        );
+    }
+
     #[test]
     fn unsupported_mode_is_rejected_before_provider_request() {
         let request = qembed_domain::chat::ChatRequest::new(
