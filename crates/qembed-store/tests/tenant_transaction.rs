@@ -16,12 +16,11 @@ async fn assert_tenant_setting(pool: &PgPool, expected: Option<&str>) {
 }
 
 async fn assert_principal_setting(pool: &PgPool, expected: Option<&str>) {
-    let actual: Option<String> = sqlx::query_scalar(
-        "SELECT NULLIF(current_setting('app.principal_id', true), '')",
-    )
-    .fetch_one(pool)
-    .await
-    .expect("principal setting should be readable outside a transaction");
+    let actual: Option<String> =
+        sqlx::query_scalar("SELECT NULLIF(current_setting('app.principal_id', true), '')")
+            .fetch_one(pool)
+            .await
+            .expect("principal setting should be readable outside a transaction");
     assert_eq!(actual.as_deref(), expected);
 }
 
@@ -52,9 +51,15 @@ async fn tenant_setting_is_transaction_local_after_commit_and_rollback() {
         .await
         .expect("tenant setting should be present inside the transaction");
     assert_eq!(inside, tenant_id.to_string());
-    let principal_inside: String = sqlx::query_scalar("SELECT current_setting('app.principal_id', true)")
-        .fetch_one(transaction.connection()).await.expect("Principal context should be present");
-    assert_eq!(principal_inside, scope.principal().principal_id().to_string());
+    let principal_inside: String =
+        sqlx::query_scalar("SELECT current_setting('app.principal_id', true)")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("Principal context should be present");
+    assert_eq!(
+        principal_inside,
+        scope.principal().principal_id().to_string()
+    );
 
     transaction
         .commit()
