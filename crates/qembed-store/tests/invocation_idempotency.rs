@@ -31,7 +31,7 @@ async fn setup() -> (PgPool, String) {
             "CREATE TABLE \"{schema}\".owner_principals (tenant_id UUID NOT NULL, caller_id UUID NOT NULL, principal_kind TEXT NOT NULL CHECK (principal_kind='tenant_owner'), disabled_at TIMESTAMPTZ, PRIMARY KEY (tenant_id, caller_id))"
         ),
         format!(
-            "CREATE TABLE \"{schema}\".callers (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, token_hash BYTEA NOT NULL, caller_kind TEXT NOT NULL, revoked_at TIMESTAMPTZ, UNIQUE (tenant_id, id))"
+            "CREATE TABLE \"{schema}\".callers (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, token_hash BYTEA NOT NULL, caller_kind TEXT NOT NULL CHECK (caller_kind IN ('Anonymous','Authenticated','Service')), revoked_at TIMESTAMPTZ, UNIQUE (tenant_id, id), UNIQUE (tenant_id, token_hash))"
         ),
         format!(
             "CREATE TABLE \"{schema}\".principal_caller_delegations (delegation_id UUID PRIMARY KEY, tenant_id UUID NOT NULL, principal_id UUID NOT NULL, caller_id UUID NOT NULL, revoked_at TIMESTAMPTZ, FOREIGN KEY (tenant_id, principal_id) REFERENCES \"{schema}\".owner_principals(tenant_id, caller_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id))"
@@ -91,10 +91,11 @@ async fn prepare_delegation(pool: &PgPool, schema: &str, scope: &Scope, caller_i
     .expect("test Principal should be present");
 
     sqlx::query(&format!(
-        "INSERT INTO \"{schema}\".callers (id, tenant_id, caller_kind) VALUES ($1::uuid, $2::uuid, 'Authenticated')"
+        "INSERT INTO \"{schema}\".callers (id, tenant_id, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')"
     ))
     .bind(caller_id.to_string())
     .bind(scope.tenant_id().to_string())
+    .bind(caller_id.into_uuid().as_bytes().to_vec())
     .execute(pool)
     .await
     .expect("test Caller should be present");
