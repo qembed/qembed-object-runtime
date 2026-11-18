@@ -376,7 +376,6 @@ mod tests {
             ChatContractError::TooManyMessages
         );
 
-        let oversized = user_message(&"x".repeat(MAX_CHAT_MESSAGE_BYTES));
         assert_eq!(
             ChatMessage::new(ChatRole::User, "x".repeat(MAX_CHAT_MESSAGE_BYTES + 1)).unwrap_err(),
             ChatContractError::MessageTooLarge
