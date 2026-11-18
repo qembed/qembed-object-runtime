@@ -24,43 +24,6 @@ async fn setup() -> Fixture {
         .await
         .expect("migrations should apply");
 
-    sqlx::query(
-        "DO $role$ BEGIN
-            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'qembed_runtime_immutable_test') THEN
-                CREATE ROLE qembed_runtime_immutable_test
-                    NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
-                    NOREPLICATION NOBYPASSRLS;
-            END IF;
-        END $role$",
-    )
-    .execute(&pool)
-    .await
-    .expect("restricted runtime test role should exist");
-
-    sqlx::query(
-        "ALTER ROLE qembed_runtime_immutable_test
-            NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
-            NOREPLICATION NOBYPASSRLS",
-    )
-    .execute(&pool)
-    .await
-    .expect("runtime test role must not have elevated attributes");
-
-    sqlx::query("GRANT USAGE ON SCHEMA public TO qembed_runtime_immutable_test")
-        .execute(&pool)
-        .await
-        .expect("runtime role should resolve application tables");
-    sqlx::query(
-        "REVOKE ALL PRIVILEGES ON TABLE snapshots, events FROM qembed_runtime_immutable_test",
-    )
-    .execute(&pool)
-    .await
-    .expect("previous test grants should be reset");
-    sqlx::query("GRANT SELECT, INSERT ON TABLE snapshots, events TO qembed_runtime_immutable_test")
-        .execute(&pool)
-        .await
-        .expect("runtime role should receive only append/read table privileges");
-
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
@@ -113,7 +76,7 @@ async fn runtime_transaction(pool: &PgPool, scope: &Scope) -> qembed_store::Tena
     let mut transaction = begin_tenant_transaction(pool, scope)
         .await
         .expect("tenant transaction should begin");
-    sqlx::query("SET LOCAL ROLE qembed_runtime_immutable_test")
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
         .execute(transaction.connection())
         .await
         .expect("transaction should assume the restricted runtime role");
