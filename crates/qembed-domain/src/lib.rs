@@ -107,6 +107,7 @@
 //! ```
 
 pub mod auth;
+pub mod chat;
 pub mod ids;
 pub mod invocation;
 pub mod jcs;

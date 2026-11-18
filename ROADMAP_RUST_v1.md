@@ -243,7 +243,7 @@ SQLX_OFFLINE=true cargo check --workspace
 
 **Результат:** runtime работает с provider через стабильный контракт; тесты не зависят от внешнего API.
 
-- [ ] **RUST-030 (S)** Определить `ChatProvider` port и request/response types.
+- [x] **RUST-030 (S)** Определить `ChatProvider` port и request/response types.
   - Тесты: contract tests для обязательных полей, limits и serialization.
   - DoD: provider SDK-типы не протекают в domain/runtime contracts.
 
