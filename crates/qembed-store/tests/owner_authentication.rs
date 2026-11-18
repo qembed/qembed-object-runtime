@@ -1,18 +1,18 @@
 mod common;
 
 use qembed_domain::auth::{OwnerAuthenticationError as DomainAuthError, authenticate_owner};
-use qembed_domain::ids::{CallerId, TenantId};
+use qembed_domain::ids::{PrincipalId, TenantId};
 use qembed_domain::principal::PrincipalKind;
 use qembed_store::auth::{OwnerAuthenticationError, OwnerAuthenticator, OwnerCredentials};
 use qembed_store::run_migrations;
 use sha2::{Digest, Sha256};
 
-async fn seed_owner(pool: &sqlx::PgPool, tenant_id: TenantId, caller_id: CallerId, token: &str) {
+async fn seed_owner(pool: &sqlx::PgPool, tenant_id: TenantId, principal_id: PrincipalId, token: &str) {
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )
     .bind(tenant_id.to_string())
-    .bind(caller_id.to_string())
+    .bind(principal_id.to_string())
     .execute(pool)
     .await
     .expect("owner principal fixture should be inserted");
@@ -38,9 +38,9 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
 
     // Valid credentials resolve the persisted caller and tenant into a trusted Scope.
     let tenant_a = TenantId::new();
-    let caller_a = CallerId::new();
-    let token_a = format!("owner-token-{}", CallerId::new());
-    seed_owner(&pool, tenant_a, caller_a, &token_a).await;
+    let principal_a = PrincipalId::new();
+    let token_a = format!("owner-token-{}", PrincipalId::new());
+    seed_owner(&pool, tenant_a, principal_a, &token_a).await;
 
     let authenticator = OwnerAuthenticator::new(pool.clone());
     let scope = authenticate_owner(
@@ -51,7 +51,7 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
     .expect("valid owner credentials should authenticate");
 
     assert_eq!(scope.tenant_id(), tenant_a);
-    assert_eq!(scope.principal().caller_id(), caller_a);
+    assert_eq!(scope.principal().principal_id(), caller_a);
     assert_eq!(scope.principal().kind(), PrincipalKind::TenantOwner);
 
     // Raw API credentials are never persisted; only the fixed-size digest is stored.
@@ -80,9 +80,9 @@ async fn owner_authentication_enforces_owner_and_tenant_boundaries() {
 
     // A disabled principal cannot authenticate even with its correct token.
     let disabled_tenant = TenantId::new();
-    let disabled_caller = CallerId::new();
+    let disabled_principal = PrincipalId::new();
     let disabled_token = format!("disabled-token-{}", CallerId::new());
-    seed_owner(&pool, disabled_tenant, disabled_caller, &disabled_token).await;
+    seed_owner(&pool, disabled_tenant, disabled_principal, &disabled_token).await;
     sqlx::query(
         "UPDATE owner_principals SET disabled_at = now() WHERE tenant_id = $1::uuid AND caller_id = $2::uuid",
     )
