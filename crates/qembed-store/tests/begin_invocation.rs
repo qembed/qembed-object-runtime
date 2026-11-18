@@ -1060,9 +1060,7 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
     assert!(row.1.is_some(), "cancellation timestamp is durable");
     assert_eq!(row.2, None, "cancellation releases the lease");
     assert_eq!(row.3, 1, "cancellation advances the fencing token");
-    assert!(
-        row.4 > i64::try_from(claim.version()).expect("version fits in bigint")
-    );
+    assert!(row.4 > i64::try_from(claim.version()).expect("version fits in bigint"));
 
     assert!(
         !store
