@@ -78,6 +78,14 @@ pub struct TenantTransaction {
 }
 
 impl TenantTransaction {
+    pub(crate) const fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
+
+    pub(crate) const fn principal_id(&self) -> PrincipalId {
+        self.principal_id
+    }
+
     pub(crate) const fn transaction_token(&self) -> TraceId {
         self.transaction_token
     }
