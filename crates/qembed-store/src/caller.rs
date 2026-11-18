@@ -34,7 +34,11 @@ impl ResolvedCaller {
         self.kind
     }
 
-    pub(crate) fn is_bound_to(&self, transaction: &TenantTransaction, scope: &qembed_domain::scope::Scope) -> bool {
+    pub(crate) fn is_bound_to(
+        &self,
+        transaction: &TenantTransaction,
+        scope: &qembed_domain::scope::Scope,
+    ) -> bool {
         self.tenant_id == scope.tenant_id()
             && self.principal_id == scope.principal().principal_id()
             && self.transaction_token == transaction.transaction_token()
@@ -71,7 +75,10 @@ pub async fn resolve_delegated_caller(
     })?
     .ok_or(CallerResolutionError::NotDelegated)?;
 
-    let caller_id = row.0.parse().map_err(|_| CallerResolutionError::InvalidCallerId)?;
+    let caller_id = row
+        .0
+        .parse()
+        .map_err(|_| CallerResolutionError::InvalidCallerId)?;
     let kind = CallerKind::parse(&row.1).ok_or(CallerResolutionError::UnknownCallerKind)?;
 
     Ok(ResolvedCaller {
@@ -99,9 +106,15 @@ pub enum CallerResolutionError {
 impl fmt::Display for CallerResolutionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotDelegated => formatter.write_str("Caller is not actively delegated to this Principal"),
-            Self::InvalidCallerId => formatter.write_str("delegation resolver returned an invalid Caller ID"),
-            Self::UnknownCallerKind => formatter.write_str("delegation resolver returned an unknown Caller kind"),
+            Self::NotDelegated => {
+                formatter.write_str("Caller is not actively delegated to this Principal")
+            }
+            Self::InvalidCallerId => {
+                formatter.write_str("delegation resolver returned an invalid Caller ID")
+            }
+            Self::UnknownCallerKind => {
+                formatter.write_str("delegation resolver returned an unknown Caller kind")
+            }
             Self::Database(error) => write!(formatter, "Caller resolution database error: {error}"),
         }
     }
