@@ -74,10 +74,7 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     /// Creates a message after enforcing the per-message content limit.
-    pub fn new(
-        role: ChatRole,
-        content: impl Into<String>,
-    ) -> Result<Self, ChatContractError> {
+    pub fn new(role: ChatRole, content: impl Into<String>) -> Result<Self, ChatContractError> {
         let content = content.into();
         if content.trim().is_empty() {
             return Err(ChatContractError::EmptyMessageContent);
@@ -150,7 +147,10 @@ impl ChatRequest {
         if !(1..=MAX_CHAT_OUTPUT_TOKENS).contains(&max_output_tokens) {
             return Err(ChatContractError::InvalidOutputTokenLimit);
         }
-        let total_bytes = messages.iter().map(|message| message.content.len()).sum::<usize>();
+        let total_bytes = messages
+            .iter()
+            .map(|message| message.content.len())
+            .sum::<usize>();
         if total_bytes > MAX_CHAT_REQUEST_BYTES {
             return Err(ChatContractError::RequestTooLarge);
         }
@@ -297,8 +297,7 @@ impl<'de> Deserialize<'de> for ChatResponse {
         }
 
         let raw = RawResponse::deserialize(deserializer)?;
-        Self::new(raw.content, raw.finish_reason, raw.usage)
-            .map_err(serde::de::Error::custom)
+        Self::new(raw.content, raw.finish_reason, raw.usage).map_err(serde::de::Error::custom)
     }
 }
 
@@ -323,8 +322,7 @@ mod tests {
         .expect("valid request");
 
         let json = serde_json::to_string(&request).expect("request should serialize");
-        let decoded: ChatRequest =
-            serde_json::from_str(&json).expect("request should deserialize");
+        let decoded: ChatRequest = serde_json::from_str(&json).expect("request should deserialize");
         assert_eq!(decoded, request);
         assert!(json.contains("\"model_key\":\"default-chat\""));
         assert!(!json.contains("openai"));
@@ -343,7 +341,10 @@ mod tests {
         let decoded: ChatResponse =
             serde_json::from_str(&json).expect("response should deserialize");
         assert_eq!(decoded, response);
-        assert_eq!(decoded.usage().expect("usage is present").input_tokens(), 12);
+        assert_eq!(
+            decoded.usage().expect("usage is present").input_tokens(),
+            12
+        );
     }
 
     #[test]
@@ -369,9 +370,7 @@ mod tests {
 
     #[test]
     fn request_enforces_message_count_and_total_content_limits() {
-        let too_many = (0..=MAX_CHAT_MESSAGES)
-            .map(|_| user_message("x"))
-            .collect();
+        let too_many = (0..=MAX_CHAT_MESSAGES).map(|_| user_message("x")).collect();
         assert_eq!(
             ChatRequest::new("default-chat", too_many, 100).unwrap_err(),
             ChatContractError::TooManyMessages
@@ -379,12 +378,16 @@ mod tests {
 
         let oversized = user_message(&"x".repeat(MAX_CHAT_MESSAGE_BYTES));
         assert_eq!(
-            ChatMessage::new(ChatRole::User, "x".repeat(MAX_CHAT_MESSAGE_BYTES + 1))
-                .unwrap_err(),
+            ChatMessage::new(ChatRole::User, "x".repeat(MAX_CHAT_MESSAGE_BYTES + 1)).unwrap_err(),
             ChatContractError::MessageTooLarge
         );
         let total_oversized = (0..5)
-            .map(|index| user_message(&format!("{index}{}", "z".repeat(MAX_CHAT_MESSAGE_BYTES - 1))))
+            .map(|index| {
+                user_message(&format!(
+                    "{index}{}",
+                    "z".repeat(MAX_CHAT_MESSAGE_BYTES - 1)
+                ))
+            })
             .collect();
         assert_eq!(
             ChatRequest::new("default-chat", total_oversized, 100).unwrap_err(),
