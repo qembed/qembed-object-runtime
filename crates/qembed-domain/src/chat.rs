@@ -410,10 +410,10 @@ mod tests {
         assert!(serde_json::from_str::<ChatRequest>(&unknown_extension).is_err());
 
         assert!(serde_json::from_str::<ChatMessage>(r#"{"content":"hello"}"#).is_err());
-        assert!(serde_json::from_str::<ChatResponse>(
-            r#"{"finish_reason":"stop","usage":null}"#
-        )
-        .is_err());
+        assert!(
+            serde_json::from_str::<ChatResponse>(r#"{"finish_reason":"stop","usage":null}"#)
+                .is_err()
+        );
     }
 
     #[test]
