@@ -96,7 +96,11 @@ impl AuthenticationPort for OwnerAuthenticator {
         // matched in the query; it is not promoted to an authenticated identity.
         // Keeping set_config and SELECT in one transaction prevents tenant context
         // from leaking through a pooled connection after commit or rollback.
-        let mut transaction = self.pool.begin().await.map_err(OwnerAuthenticationError::Database)?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(OwnerAuthenticationError::Database)?;
         sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
             .bind(credentials.tenant_id.to_string())
             .execute(&mut *transaction)
