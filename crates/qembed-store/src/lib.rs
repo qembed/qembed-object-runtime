@@ -14,6 +14,7 @@ mod cas;
 pub mod idempotency;
 mod invocation_lease;
 pub mod invocation_worker;
+pub mod invocation_query;
 pub use cas::{CasError, execute_cas};
 mod event_outbox;
 pub mod object_repository;
