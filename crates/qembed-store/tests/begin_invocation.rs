@@ -6,7 +6,7 @@ use qembed_domain::caller::InvocationPool;
 use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId};
 use qembed_domain::invocation::{FencingToken, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
-use qembed_domain::ports::{ExecutionStore, InvocationReadStore, InvocationWorkStore};
+use qembed_domain::ports::{ExecutionStore, InvocationCancellationOutcome, InvocationCancellationStore, InvocationReadStore, InvocationWorkStore};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
@@ -1008,5 +1008,47 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     assert_eq!(failure_view.result(), None);
     assert_eq!(failure_view.error_code(), Some("provider_timeout"));
 
+    teardown(fixture).await;
+}
+
+
+#[tokio::test]
+async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "cancel-active-worker")).await.expect("begin invocation") {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let claim = store.claim_invocation(&fixture.scope, invocation_id, "worker-cancel", 60).await.expect("claim").expect("claimable");
+    let outcome = store.cancel_invocation(&fixture.scope, invocation_id).await.expect("cancel");
+    assert_eq!(outcome, InvocationCancellationOutcome::Cancelled { newly_cancelled: true });
+    let row = sqlx::query_as::<_, (String, Option<String>, Option<String>, i64, i64)>(
+        "SELECT status, cancel_requested_at::text, lease_owner, fencing_token, version FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid"
+    ).bind(fixture.scope.tenant_id().to_string()).bind(invocation_id.to_string()).fetch_one(&fixture.pool).await.expect("read cancelled");
+    assert_eq!(row.0, "Cancelled"); assert!(row.1.is_some()); assert_eq!(row.2, None); assert_eq!(row.3, 1); assert!(row.4 > claim.version() as i64);
+    assert!(!store.heartbeat_invocation(&fixture.scope, invocation_id, "worker-cancel", claim.fencing_token(), 60).await.expect("stale heartbeat"));
+    assert_eq!(store.cancel_invocation(&fixture.scope, invocation_id).await.expect("repeat"), InvocationCancellationOutcome::Cancelled { newly_cancelled: false });
+    assert_eq!(store.cancel_invocation(&fixture.scope, InvocationId::new()).await.expect("missing"), InvocationCancellationOutcome::NotFound);
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "cancel-terminal")).await.expect("begin invocation") {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let current = store.load_invocation(&fixture.scope, invocation_id).await.expect("load").expect("exists");
+    let mut failed = current.clone();
+    failed.transition_to(InvocationStatus::Failed, FencingToken::INITIAL).expect("Received -> Failed");
+    assert!(store.fail_invocation(&fixture.scope, current.version(), FencingToken::INITIAL, failed, "provider_timeout").await.expect("persist failure"));
+    assert_eq!(store.cancel_invocation(&fixture.scope, invocation_id).await.expect("cancel terminal"), InvocationCancellationOutcome::AlreadyTerminal(InvocationStatus::Failed));
+    let row = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT status, cancel_requested_at::text FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid"
+    ).bind(fixture.scope.tenant_id().to_string()).bind(invocation_id.to_string()).fetch_one(&fixture.pool).await.expect("read failed");
+    assert_eq!(row.0, "Failed"); assert_eq!(row.1, None);
     teardown(fixture).await;
 }

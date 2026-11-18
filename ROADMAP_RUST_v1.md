@@ -305,9 +305,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration — queued/running/succeeded/failed, tenant isolation, assistant output скрыт до terminal success; API serialization — только allowlisted response fields.
   - DoD: клиент получает только публичный status/result/stable error code; отсутствующий и чужой invocation дают одинаковый not-found результат.
 
-- [ ] **RUST-040 (S)** Реализовать cancellation contract.
-  - Тесты: unit на state transitions; API integration на cancel, repeated cancel и terminal invocation.
-  - DoD: cancellation persisted; API не обещает отмену уже совершённого внешнего side effect.
+- [x] **RUST-040 (S)** Реализовать cancellation contract.
+  - Реализация: tenant-scoped cancellation port/service/handler; PostgreSQL атомарно переводит nonterminal invocation в Cancelled, фиксирует `cancel_requested_at`, завершает lifecycle, освобождает lease и увеличивает fencing token. Повторная отмена идемпотентна; другой terminal state не перезаписывается.
+  - Тесты: PostgreSQL integration — active lease fencing, heartbeat stale-owner rejection, repeated cancel, unknown ID и terminal invocation.
+  - DoD: cancellation durable; stale worker больше не может записать результат; API явно сообщает, была ли отмена применена, и не обещает отменить уже совершённый внешний side effect.
 
 - [ ] **RUST-041 (M)** Реализовать минимальный budget reservation/settlement для mock path.
   - Тесты: unit на вычисление effective budget; DB integration на reserve/settle, повтор и rollback.

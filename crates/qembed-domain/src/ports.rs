@@ -162,6 +162,24 @@ pub trait InvocationReadStore: Send + Sync {
     > + Send;
 }
 
+/// Result of an idempotent invocation cancellation request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvocationCancellationOutcome {
+    Cancelled { newly_cancelled: bool },
+    AlreadyTerminal(crate::invocation::InvocationStatus),
+    NotFound,
+}
+
+/// Persistence boundary for durable invocation cancellation.
+pub trait InvocationCancellationStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+    fn cancel_invocation(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> impl Future<Output = Result<InvocationCancellationOutcome, Self::Error>> + Send;
+}
+
 /// Provider-neutral chat completion boundary.
 ///
 /// Implementations adapt this contract to a concrete provider. SDK request,
