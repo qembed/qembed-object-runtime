@@ -269,6 +269,15 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         fixture.caller_id.into_uuid(),
         "Principal and Caller identities must not rely on UUID equality"
     );
+    let input_message: String = sqlx::query_scalar(
+        "SELECT content FROM interaction_messages WHERE invocation_id=$1::uuid AND role='user'",
+    )
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("original user input should be durable");
+    assert_eq!(input_message, "hello from durable invocation input");
+
     let event_type: String = sqlx::query_scalar("SELECT payload->>'type' FROM events")
         .fetch_one(&fixture.pool)
         .await
@@ -279,7 +288,7 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         .await
         .expect("same key and payload should replay");
     assert_eq!(replay, BeginInvocationOutcome::Replay { invocation_id });
-    assert_eq!(counts(&fixture).await, (1, 1, 1, 1));
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
     teardown(fixture).await;
 }
 
