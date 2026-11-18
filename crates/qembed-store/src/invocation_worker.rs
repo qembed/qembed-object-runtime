@@ -307,7 +307,9 @@ fn validate_next_state(
     if next.version()
         != expected_version
             .checked_add(1)
-            .ok_or(InvocationStoreError::InvalidRequestedState("expected version overflow"))?
+            .ok_or(InvocationStoreError::InvalidRequestedState(
+                "expected version overflow",
+            ))?
     {
         return Err(InvocationStoreError::InvalidRequestedState(
             "next invocation version must advance exactly once",
@@ -330,8 +332,8 @@ fn reconstitute_invocation(
     let caller_id = parse_id::<CallerId>(&row.3, "caller_id")?;
     let snapshot_id = parse_id::<SnapshotId>(&row.4, "snapshot_id")?;
     let status = parse_status(&row.5)?;
-    let version = u64::try_from(row.6)
-        .map_err(|_| InvocationStoreError::InvalidPersistedValue("version"))?;
+    let version =
+        u64::try_from(row.6).map_err(|_| InvocationStoreError::InvalidPersistedValue("version"))?;
     let token = u64::try_from(row.7)
         .map_err(|_| InvocationStoreError::InvalidPersistedValue("fencing_token"))?;
     Ok(Invocation::from_persisted(
