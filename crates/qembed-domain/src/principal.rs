@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::ids::CallerId;
+use crate::ids::PrincipalId;
 
 /// The trust level established by the authentication boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -28,11 +28,11 @@ pub enum PrincipalKind {
 /// use qembed_domain::ids::CallerId;
 /// use qembed_domain::principal::{Principal, PrincipalKind};
 ///
-/// let _ = Principal::from_verified_auth(CallerId::new(), PrincipalKind::Authenticated);
+/// let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Principal {
-    caller_id: CallerId,
+    principal_id: PrincipalId,
     kind: PrincipalKind,
 }
 
@@ -43,20 +43,20 @@ impl Principal {
     /// directly from an HTTP request body.
     #[allow(dead_code)] // Used by the trusted authentication boundary as it is introduced.
     pub(crate) fn from_verified_auth(
-        caller_id: CallerId,
+        principal_id: PrincipalId,
         kind: PrincipalKind,
     ) -> Result<Self, PrincipalError> {
-        if caller_id.as_uuid().is_nil() {
+        if principal_id.as_uuid().is_nil() {
             return Err(PrincipalError::NilCallerId);
         }
 
-        Ok(Self { caller_id, kind })
+        Ok(Self { principal_id, kind })
     }
 
     /// Returns the server-established caller identity.
     #[must_use]
-    pub const fn caller_id(&self) -> CallerId {
-        self.caller_id
+    pub const fn principal_id(&self) -> PrincipalId {
+        self.principal_id
     }
 
     /// Returns the trust level established by authentication.
@@ -76,7 +76,7 @@ pub enum PrincipalError {
 impl fmt::Display for PrincipalError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NilCallerId => formatter.write_str("caller ID must not be nil"),
+            Self::NilCallerId => formatter.write_str("principal ID must not be nil"),
         }
     }
 }
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn verified_auth_context_creates_principal() {
-        let caller_id = CallerId::new();
+        let caller_id = PrincipalId::new();
 
         let principal = Principal::from_verified_auth(caller_id, PrincipalKind::Authenticated)
             .expect("non-nil caller ID must be accepted");
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn verified_auth_context_rejects_nil_caller_id() {
         let error = Principal::from_verified_auth(
-            CallerId::from_uuid(Uuid::nil()),
+            PrincipalId::from_uuid(Uuid::nil()),
             PrincipalKind::Authenticated,
         )
         .expect_err("nil caller ID must be rejected");
