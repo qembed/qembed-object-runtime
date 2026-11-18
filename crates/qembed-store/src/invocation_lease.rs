@@ -265,11 +265,6 @@ fn validate_next(
 }
 
 fn reconstitute(row: InvocationRow) -> Result<Invocation, InvocationStoreError> {
-    let parse = |value: &str, field| {
-        value
-            .parse()
-            .map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
-    };
     let status = match row.5.as_str() {
         "Received" => InvocationStatus::Received,
         "ContextLoading" => InvocationStatus::ContextLoading,
@@ -289,13 +284,17 @@ fn reconstitute(row: InvocationRow) -> Result<Invocation, InvocationStoreError> 
     let token = u64::try_from(row.7)
         .map_err(|_| InvocationStoreError::InvalidPersistedValue("fencing_token"))?;
     Ok(Invocation::from_persisted(
-        parse::<InvocationId>(&row.0, "id")?,
-        parse::<TenantId>(&row.1, "tenant_id")?,
-        parse::<ObjectId>(&row.2, "object_id")?,
-        parse::<CallerId>(&row.3, "caller_id")?,
-        parse::<SnapshotId>(&row.4, "snapshot_id")?,
+        parse_id::<InvocationId>(&row.0, "id")?,
+        parse_id::<TenantId>(&row.1, "tenant_id")?,
+        parse_id::<ObjectId>(&row.2, "object_id")?,
+        parse_id::<CallerId>(&row.3, "caller_id")?,
+        parse_id::<SnapshotId>(&row.4, "snapshot_id")?,
         InvocationCheckpoint::new(status, version, FencingToken::from_value(token)),
     ))
+}
+
+fn parse_id<T: FromStr>(value: &str, field: &'static str) -> Result<T, InvocationStoreError> {
+    value.parse().map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
 }
 
 fn to_i64(value: u64, field: &'static str) -> Result<i64, InvocationStoreError> {
