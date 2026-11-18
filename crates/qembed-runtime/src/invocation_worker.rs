@@ -802,7 +802,11 @@ mod lifecycle_tests {
             contexts: Arc::clone(&contexts),
         };
         let config = InvocationWorkerConfig::new("test-chat", 128).expect("valid worker config");
-        (InvocationWorker::new(store, provider, config), calls, contexts)
+        (
+            InvocationWorker::new(store, provider, config),
+            calls,
+            contexts,
+        )
     }
 
     #[tokio::test]
@@ -823,7 +827,9 @@ mod lifecycle_tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(
             contexts.lock().expect("provider context lock").as_slice(),
-            &[ProviderRequestContext::for_invocation(id).idempotency_key().to_owned()]
+            &[ProviderRequestContext::for_invocation(id)
+                .idempotency_key()
+                .to_owned()]
         );
         let state = store.0.lock().expect("fake store lock");
         assert_eq!(state.invocation.status(), InvocationStatus::Completed);
