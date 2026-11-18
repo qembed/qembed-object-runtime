@@ -1,8 +1,7 @@
 //! Provider-neutral validation for structured chat output.
 //!
-//! Capability checks happen before the provider request. Response validation
-//! happens after the provider returns normalized content. RUST-033 may replace
-//! the explicit supported-mode slice with a richer capability descriptor.
+//! Capability negotiation happens before the provider request. Response
+//! validation happens after the provider returns normalized content.
 
 use std::fmt;
 
@@ -11,7 +10,6 @@ use qembed_domain::chat::{ChatCapabilities, ChatRequest, ChatResponse, Structure
 /// Failure while applying a structured-output contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StructuredOutputError {
-    /// The selected provider configuration cannot satisfy this output mode.
     /// No provider configuration exists for the requested routing key.
     UnconfiguredModel,
     /// The selected provider configuration cannot satisfy this output mode.
