@@ -81,7 +81,7 @@ pub struct MockChatProvider {
 impl MockChatProvider {
     /// Creates an empty provider. Every request will fail until scripted.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             scripts: Vec::new(),
             capability_profiles: vec![("test-chat".to_owned(), ChatCapabilities::default())],
