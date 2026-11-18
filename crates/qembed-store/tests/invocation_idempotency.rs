@@ -219,10 +219,7 @@ async fn repeated_key_returns_the_original_invocation_without_creating_a_duplica
         &schema,
         &scope,
         caller_id,
-        object_id,
-        "request-123",
-        PAYLOAD_HASH,
-        first_id,
+        idempotency_claim(object_id, "request-123", PAYLOAD_HASH, first_id),
     )
     .await
     .expect("first request should reserve the key");
@@ -238,10 +235,7 @@ async fn repeated_key_returns_the_original_invocation_without_creating_a_duplica
         &schema,
         &scope,
         caller_id,
-        object_id,
-        "request-123",
-        PAYLOAD_HASH,
-        InvocationId::new(),
+        idempotency_claim(object_id, "request-123", PAYLOAD_HASH, InvocationId::new()),
     )
     .await
     .expect("same key and payload should replay");
@@ -280,10 +274,7 @@ async fn concurrent_same_key_requests_converge_on_one_invocation() {
             &first_schema,
             &first_scope,
             caller_id,
-            object_id,
-            "concurrent-key",
-            PAYLOAD_HASH,
-            InvocationId::new(),
+            idempotency_claim(object_id, "concurrent-key", PAYLOAD_HASH, InvocationId::new()),
         )
         .await
         .expect("first concurrent request should resolve")
@@ -300,10 +291,7 @@ async fn concurrent_same_key_requests_converge_on_one_invocation() {
             &second_schema,
             &second_scope,
             caller_id,
-            object_id,
-            "concurrent-key",
-            PAYLOAD_HASH,
-            InvocationId::new(),
+            idempotency_claim(object_id, "concurrent-key", PAYLOAD_HASH, InvocationId::new()),
         )
         .await
         .expect("second concurrent request should resolve")
@@ -341,10 +329,7 @@ async fn same_key_with_different_payload_is_rejected() {
         &schema,
         &scope,
         caller_id,
-        object_id,
-        "payload-bound-key",
-        b"payload-a",
-        original_id,
+        idempotency_claim(object_id, "payload-bound-key", b"payload-a", original_id),
     )
     .await
     .expect("first request should reserve the key");
@@ -426,10 +411,7 @@ async fn rolling_back_a_new_claim_releases_the_key() {
         &schema,
         &scope,
         caller_id,
-        object_id,
-        "rollback-key",
-        PAYLOAD_HASH,
-        committed_id,
+        idempotency_claim(object_id, "rollback-key", PAYLOAD_HASH, committed_id),
     )
     .await
     .expect("a rolled-back key should be available again");
@@ -519,10 +501,7 @@ async fn idempotency_key_is_scoped_by_tenant_object_and_effective_caller() {
             &schema,
             &scope_a,
             caller_a,
-            object_a,
-            "same-key",
-            PAYLOAD_HASH,
-            first_id
+            idempotency_claim(object_a, "same-key", PAYLOAD_HASH, first_id),
         )
         .await
         .expect("first scope should acquire key"),
@@ -540,10 +519,7 @@ async fn idempotency_key_is_scoped_by_tenant_object_and_effective_caller() {
                 &schema,
                 scope,
                 caller,
-                object_id,
-                "same-key",
-                PAYLOAD_HASH,
-                InvocationId::new()
+                idempotency_claim(object_id, "same-key", PAYLOAD_HASH, InvocationId::new()),
             )
             .await
             .expect("different idempotency scope should acquire key"),
