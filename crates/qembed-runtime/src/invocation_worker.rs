@@ -6,13 +6,15 @@
 
 use std::error::Error;
 use std::fmt;
+use std::time::Duration;
 
 use qembed_domain::chat::{
     ChatContractError, ChatMessage, ChatProviderError, ChatRequest, ChatRole,
 };
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::{Invocation, InvocationError, InvocationStatus};
-use qembed_domain::ports::{ChatProvider, InvocationWorkStore};
+use qembed_domain::invocation_lease::InvocationLeaseStore;
+use qembed_domain::ports::ChatProvider;
 use qembed_domain::scope::Scope;
 
 /// Application-owned model route and output budget for the mock-first path.
@@ -20,6 +22,8 @@ use qembed_domain::scope::Scope;
 pub struct InvocationWorkerConfig {
     model_key: String,
     max_output_tokens: u32,
+    worker_id: String,
+    lease_seconds: u32,
 }
 
 impl InvocationWorkerConfig {
@@ -36,7 +40,20 @@ impl InvocationWorkerConfig {
         Ok(Self {
             model_key,
             max_output_tokens,
+            worker_id: format!("worker-{}", InvocationId::new()),
+            lease_seconds: 60,
         })
+    }
+
+    /// Overrides the generated worker identity and lease duration.
+    ///
+    /// The owner must be unique to this live worker instance. Lease durations
+    /// are validated by the PostgreSQL adapter; 3..=3600 seconds are supported.
+    #[must_use]
+    pub fn with_lease(mut self, worker_id: impl Into<String>, lease_seconds: u32) -> Self {
+        self.worker_id = worker_id.into();
+        self.lease_seconds = lease_seconds;
+        self
     }
 }
 
@@ -117,7 +134,7 @@ pub struct InvocationWorker<S, P> {
 
 impl<S, P> InvocationWorker<S, P>
 where
-    S: InvocationWorkStore,
+    S: InvocationLeaseStore,
     P: ChatProvider,
 {
     #[must_use]
@@ -139,6 +156,37 @@ where
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<InvocationWorkerOutcome, InvocationWorkerError<S::Error>> {
+        let claimed = self
+            .store
+            .claim_invocation(
+                scope,
+                invocation_id,
+                &self.config.worker_id,
+                self.config.lease_seconds,
+            )
+            .await
+            .map_err(InvocationWorkerError::Store)?;
+        if claimed.is_none() {
+            let existing = self
+                .store
+                .load_invocation(scope, invocation_id)
+                .await
+                .map_err(InvocationWorkerError::Store)?
+                .ok_or(InvocationWorkerError::NotFound)?;
+            return match existing.status() {
+                InvocationStatus::Completed | InvocationStatus::CompletedDegraded => {
+                    let content = self.store.load_assistant_output(scope, invocation_id)
+                        .await.map_err(InvocationWorkerError::Store)?
+                        .ok_or(InvocationWorkerError::MissingPersistedOutput)?;
+                    Ok(InvocationWorkerOutcome::Completed { invocation_id, content })
+                }
+                status if status.is_terminal() => Ok(InvocationWorkerOutcome::AlreadyTerminal {
+                    invocation_id, status,
+                }),
+                _ => Err(InvocationWorkerError::Conflict),
+            };
+        }
+
         for _ in 0..8 {
             let invocation = self
                 .store
@@ -146,6 +194,16 @@ where
                 .await
                 .map_err(InvocationWorkerError::Store)?
                 .ok_or(InvocationWorkerError::NotFound)?;
+            let live = self.store.heartbeat_invocation(
+                scope,
+                invocation_id,
+                &self.config.worker_id,
+                invocation.fencing_token(),
+                self.config.lease_seconds,
+            ).await.map_err(InvocationWorkerError::Store)?;
+            if !live {
+                return Err(InvocationWorkerError::Conflict);
+            }
 
             match invocation.status() {
                 InvocationStatus::Received => {
@@ -176,7 +234,30 @@ where
                         return Err(InvocationWorkerError::ProviderRouteNotConfigured);
                     }
 
-                    match self.provider.complete(request).await {
+                    let provider_future = self.provider.complete(request);
+                    tokio::pin!(provider_future);
+                    let heartbeat_period = Duration::from_secs(u64::from((self.config.lease_seconds / 3).max(1)));
+                    let mut heartbeat = tokio::time::interval(heartbeat_period);
+                    heartbeat.tick().await;
+                    let provider_result = loop {
+                        tokio::select! {
+                            result = &mut provider_future => break result,
+                            _ = heartbeat.tick() => {
+                                let renewed = self.store.heartbeat_invocation(
+                                    scope,
+                                    invocation_id,
+                                    &self.config.worker_id,
+                                    invocation.fencing_token(),
+                                    self.config.lease_seconds,
+                                ).await.map_err(InvocationWorkerError::Store)?;
+                                if !renewed {
+                                    return Err(InvocationWorkerError::Conflict);
+                                }
+                            }
+                        }
+                    };
+
+                    match provider_result {
                         Ok(response) => {
                             let mut next = invocation.clone();
                             next.transition_to(
@@ -186,8 +267,9 @@ where
                             .map_err(InvocationWorkerError::InvalidTransition)?;
                             let persisted = self
                                 .store
-                                .persist_assistant_output(
+                                .persist_assistant_output_owned(
                                     scope,
+                                    &self.config.worker_id,
                                     invocation.version(),
                                     invocation.fencing_token(),
                                     next,
@@ -209,8 +291,9 @@ where
                             .map_err(InvocationWorkerError::InvalidTransition)?;
                             let persisted = self
                                 .store
-                                .fail_invocation(
+                                .fail_invocation_owned(
                                     scope,
+                                    &self.config.worker_id,
                                     invocation.version(),
                                     invocation.fencing_token(),
                                     next,
@@ -240,8 +323,9 @@ where
                         .map_err(InvocationWorkerError::InvalidTransition)?;
                     let completed = self
                         .store
-                        .complete_invocation(
+                        .complete_invocation_owned(
                             scope,
+                            &self.config.worker_id,
                             invocation.version(),
                             invocation.fencing_token(),
                             next,
@@ -291,7 +375,7 @@ where
             .map_err(InvocationWorkerError::InvalidTransition)?;
         let changed = self
             .store
-            .compare_and_set_invocation(scope, current.version(), current.fencing_token(), next)
+            .compare_and_set_owned(scope, &self.config.worker_id, current.version(), current.fencing_token(), next)
             .await
             .map_err(InvocationWorkerError::Store)?;
         if changed {
