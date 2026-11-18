@@ -204,7 +204,14 @@ impl InvocationLeaseStore for PgExecutionStore {
     ) -> Result<bool, Self::Error> {
         validate_next(scope, expected_version, expected_fencing_token, &next)?;
         if next.status() != InvocationStatus::Failed
-            || !matches!(error_code, "provider_timeout" | "provider_rate_limited" | "provider_unavailable" | "provider_malformed_output" | "provider_other")
+            || !matches!(
+                error_code,
+                "provider_timeout"
+                    | "provider_rate_limited"
+                    | "provider_unavailable"
+                    | "provider_malformed_output"
+                    | "provider_other"
+            )
         {
             return Err(InvocationStoreError::InvalidRequestedState(
                 "failure must use a stable allowlisted provider error code",
@@ -250,9 +257,13 @@ fn validate_next(
             "invocation tenant differs from trusted Scope",
         ));
     }
-    if next.version() != expected_version.checked_add(1).ok_or(
-        InvocationStoreError::InvalidRequestedState("expected version overflow"),
-    )? {
+    if next.version()
+        != expected_version
+            .checked_add(1)
+            .ok_or(InvocationStoreError::InvalidRequestedState(
+                "expected version overflow",
+            ))?
+    {
         return Err(InvocationStoreError::InvalidRequestedState(
             "next invocation version must advance exactly once",
         ));
@@ -280,8 +291,8 @@ fn reconstitute(row: InvocationRow) -> Result<Invocation, InvocationStoreError> 
         "Cancelled" => InvocationStatus::Cancelled,
         _ => return Err(InvocationStoreError::InvalidPersistedValue("status")),
     };
-    let version = u64::try_from(row.6)
-        .map_err(|_| InvocationStoreError::InvalidPersistedValue("version"))?;
+    let version =
+        u64::try_from(row.6).map_err(|_| InvocationStoreError::InvalidPersistedValue("version"))?;
     let token = u64::try_from(row.7)
         .map_err(|_| InvocationStoreError::InvalidPersistedValue("fencing_token"))?;
     Ok(Invocation::from_persisted(
@@ -295,7 +306,9 @@ fn reconstitute(row: InvocationRow) -> Result<Invocation, InvocationStoreError> 
 }
 
 fn parse_id<T: FromStr>(value: &str, field: &'static str) -> Result<T, InvocationStoreError> {
-    value.parse().map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
+    value
+        .parse()
+        .map_err(|_| InvocationStoreError::InvalidPersistedValue(field))
 }
 
 fn to_i64(value: u64, field: &'static str) -> Result<i64, InvocationStoreError> {
