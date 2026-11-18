@@ -12,7 +12,7 @@ pub struct InvocationQueryService<S> {
 
 impl<S> InvocationQueryService<S> {
     #[must_use]
-    pub const fn new(store: S) -> Self {
+    pub fn new(store: S) -> Self {
         Self { store }
     }
 }
