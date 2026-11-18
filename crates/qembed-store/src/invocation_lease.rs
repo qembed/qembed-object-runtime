@@ -5,7 +5,6 @@ use std::str::FromStr;
 use qembed_domain::ids::{CallerId, InvocationId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
-use qembed_domain::ports::InvocationWorkStore;
 use qembed_domain::scope::Scope;
 
 use crate::invocation_worker::{InvocationStoreError, PgExecutionStore};
@@ -124,7 +123,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         let inserted = execute(
             &mut transaction,
             sqlx::query(
-                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT gen_random_uuid(), invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $8, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$1::uuid AND invocation.object_id=$2::uuid AND invocation.id=$3::uuid AND invocation.lease_owner=$4 AND invocation.lease_until > now() AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
+                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT gen_random_uuid(), invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $7, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$1::uuid AND invocation.object_id=$2::uuid AND invocation.id=$3::uuid AND invocation.lease_owner=$4 AND invocation.lease_until > now() AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
             )
             .bind(scope.tenant_id().to_string())
             .bind(next.object_id().to_string())
@@ -132,7 +131,6 @@ impl InvocationLeaseStore for PgExecutionStore {
             .bind(owner)
             .bind(to_i64(expected_version, "expected version")?)
             .bind(to_i64(expected_fencing_token.value(), "fencing token")?)
-            .bind(content.clone())
             .bind(content),
         )
         .await?;
