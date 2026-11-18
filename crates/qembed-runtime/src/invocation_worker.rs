@@ -531,7 +531,7 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
-    async fn worker_claims_processes_and_finishes_with_durable_result() {
+    async fn worker_processes_and_finishes_with_durable_result() {
         let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
         let response = ChatResponse::new("hello back", ChatFinishReason::Stop, None)
             .expect("valid provider response");
