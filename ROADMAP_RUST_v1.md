@@ -211,7 +211,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration — state+event+outbox commit; forced failure откатывает state/event/outbox; duplicate delivery identity отклоняется unique constraint.
   - DoD: critical event и outbox создаются атомарно с state transition; повторная delivery identity не создаёт вторую outbox запись.
 
-- [ ] **RUST-025 (S)** Реализовать typed event DTO и payload allowlist.
+- [x] **RUST-025 (S)** Реализовать typed event DTO и payload allowlist.
   - Реализация: Store принимает только приватные Serialize-only DTO для известных Object lifecycle events; event type/topic выводится из enum variant; payload сериализуется из allowlisted полей, произвольный JSON и deserialization boundary отсутствуют.
   - Тесты: serialization tests проверяют точный набор полей для validation-started/version-published; negative assertions исключают secrets, credentials, arguments и raw payload.
   - DoD: произвольный JSON и чувствительные payloads не проходят в event API.
