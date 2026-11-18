@@ -4,7 +4,7 @@ qembed-llm provides an in-memory implementation of the domain ChatProvider port 
 
 ## Script selection
 
-A script is keyed by the complete ChatRequest value. Each request can be registered exactly once with either a response or a typed failure. A request with no script fails with UnscriptedRequest.
+A script is keyed by the complete ChatRequest value, including its structured output mode. Each request can be registered exactly once with either a response or a typed failure. A request with no script fails with UnscriptedRequest.
 
 The mock deliberately does not use a FIFO response queue. A shared queue makes results depend on task scheduling when tests issue concurrent requests. Exact request matching makes each result independent of call order. The provider is immutable after construction and needs no mutex.
 
