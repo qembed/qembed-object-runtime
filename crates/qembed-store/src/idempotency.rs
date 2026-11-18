@@ -16,6 +16,36 @@ use qembed_domain::scope::Scope;
 
 use crate::{TenantTransaction, fetch_optional};
 
+/// Inputs for one caller-scoped idempotency reservation.
+#[derive(Clone, Copy, Debug)]
+pub struct IdempotencyClaim<'a> {
+    object_id: ObjectId,
+    idempotency_key: &'a str,
+    payload_hash: &'a [u8],
+    proposed_invocation_id: InvocationId,
+    expires_at: SystemTime,
+}
+
+impl<'a> IdempotencyClaim<'a> {
+    /// Creates a reservation claim without choosing hash or expiry policy.
+    #[must_use]
+    pub const fn new(
+        object_id: ObjectId,
+        idempotency_key: &'a str,
+        payload_hash: &'a [u8],
+        proposed_invocation_id: InvocationId,
+        expires_at: SystemTime,
+    ) -> Self {
+        Self {
+            object_id,
+            idempotency_key,
+            payload_hash,
+            proposed_invocation_id,
+            expires_at,
+        }
+    }
+}
+
 /// Outcome of reserving an idempotency key inside a begin-invocation transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IdempotencyReservation {
@@ -123,11 +153,11 @@ pub async fn reserve_invocation_idempotency(
                 "INSERT INTO invocation_idempotency (tenant_id, object_id, caller_id, idempotency_key, payload_hash, invocation_id, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, to_timestamp($7::double precision / 1000000.0)) ON CONFLICT (tenant_id, object_id, caller_id, idempotency_key) DO NOTHING RETURNING invocation_id::text",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(object_id.to_string())
+            .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
-            .bind(idempotency_key)
-            .bind(payload_hash)
-            .bind(proposed_invocation_id.to_string())
+            .bind(claim.idempotency_key)
+            .bind(claim.payload_hash)
+            .bind(claim.proposed_invocation_id.to_string())
             .bind(expiry_micros as f64),
         )
         .await
@@ -135,7 +165,7 @@ pub async fn reserve_invocation_idempotency(
 
         if inserted.is_some() {
             return Ok(IdempotencyReservation::Reserved {
-                invocation_id: proposed_invocation_id,
+                invocation_id: claim.proposed_invocation_id,
             });
         }
 
@@ -158,7 +188,7 @@ pub async fn reserve_invocation_idempotency(
             continue;
         };
 
-        if existing_hash != payload_hash {
+        if existing_hash != claim.payload_hash {
             return Err(IdempotencyReservationError::PayloadMismatch);
         }
 
