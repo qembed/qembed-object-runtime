@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use qembed_domain::ids::{InvocationId, ObjectId};
 use qembed_domain::scope::Scope;
 
-use crate::{TenantTransaction, execute, fetch_optional};
+use crate::{TenantTransaction, fetch_optional};
 
 /// Outcome of reserving an idempotency key inside a begin-invocation transaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
