@@ -278,7 +278,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration — повтор ключа, конкурентные запросы, payload mismatch, rollback claim и независимость tenant/object/caller scopes.
   - DoD: reservation и invocation фиксируются до provider I/O; TTL и алгоритм хеширования не выдумываются этим слоем.
 
-- [ ] **RUST-036 (M, implementation in progress)** Реализовать атомарный begin-invocation transaction и SQL-011 Principal/Caller delegation integration.
+- [ ] **RUST-036 (M, implementation ready for review in PR #36; stable + MSRV CI green)** Реализовать атомарный begin-invocation transaction и SQL-011 Principal/Caller delegation integration.
   - Реализация: отдельные PrincipalId и CallerId; transaction-local app.tenant_id + app.principal_id; SQL-011 resolve_delegated_caller с блокировками; idempotency scoped по ResolvedCaller; explicit InvocationPool; атомарные snapshot/revision pin, invocation insert, critical event и outbox.
   - Тесты: PostgreSQL integration — commit/replay, caller scoping, invalid snapshot rollback, injected failures at invocation/event/outbox writes. SQL clean-install/smoke validation remains a separate qembed-sql gate.
   - Документация: PRINCIPAL_CALLER_DELEGATION.md, BEGIN_INVOCATION_TRANSACTION.md, idempotency contract and Store role matrix.
