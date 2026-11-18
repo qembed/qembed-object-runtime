@@ -66,6 +66,16 @@ impl std::error::Error for IdempotencyReservationError {
     }
 }
 
+// Converts the supplied absolute expiry to PostgreSQL epoch microseconds.
+fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservationError> {
+    let micros = expires_at
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| IdempotencyReservationError::ExpiryOutOfRange)?
+        .as_micros();
+    i64::try_from(micros).map_err(|_| IdempotencyReservationError::ExpiryOutOfRange)
+}
+
+/// Reserves an invocation key before the invocation row is inserted.
 /// Reserves an invocation key before the invocation row is inserted.
 ///
 /// The caller must pass a transaction opened with `begin_tenant_transaction`
@@ -86,15 +96,6 @@ impl std::error::Error for IdempotencyReservationError {
 ///
 /// Concurrent inserts serialize on the database primary key. The losing
 /// transaction reads and returns the winning invocation ID after it commits.
-fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservationError> {
-    let micros = expires_at
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| IdempotencyReservationError::ExpiryOutOfRange)?
-        .as_micros();
-    i64::try_from(micros).map_err(|_| IdempotencyReservationError::ExpiryOutOfRange)
-}
-
-/// Reserves an invocation key before the invocation row is inserted.
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
     scope: &Scope,
@@ -168,7 +169,7 @@ mod tests {
     #[test]
     fn expiry_is_converted_to_unix_microseconds() {
         let expiry = UNIX_EPOCH + std::time::Duration::from_micros(1_234_567);
-        assert_eq!(expiry_unix_micros(expiry), Ok(1_234_567));
+        assert_eq!(expiry_unix_micros(expiry).expect("expiry should fit"), 1_234_567);
     }
 
     #[test]
