@@ -114,7 +114,7 @@ mod tests {
         {
             ready(Ok(AuthenticatedIdentity::new(
                 TenantId::new(),
-                CallerId::new(),
+                PrincipalId::new(),
                 PrincipalKind::Authenticated,
             )))
         }
