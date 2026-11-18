@@ -91,7 +91,7 @@ impl AuthenticationPort for OwnerAuthenticator {
     ) -> Result<AuthenticatedIdentity, Self::Error> {
         let token_hash = Sha256::digest(credentials.token.as_bytes()).to_vec();
 
-        // This lookup happens before a trusted Scope exists. The caller-supplied
+        // This lookup happens before a trusted Scope exists. The request-supplied
         // tenant ID is used only as a transaction-local RLS selector and is also
         // matched in the query; it is not promoted to an authenticated identity.
         // Keeping set_config and SELECT in one transaction prevents tenant context
@@ -132,14 +132,14 @@ impl AuthenticationPort for OwnerAuthenticator {
             .await
             .map_err(OwnerAuthenticationError::Database)?;
 
-        let Some((tenant_id, caller_id)) = row else {
+        let Some((tenant_id, principal_id)) = row else {
             return Err(OwnerAuthenticationError::InvalidCredentials);
         };
 
         let tenant_id = tenant_id
             .parse::<TenantId>()
             .map_err(|_| OwnerAuthenticationError::InvalidCredentials)?;
-        let principal_id = caller_id
+        let principal_id = principal_id
             .parse::<PrincipalId>()
             .map_err(|_| OwnerAuthenticationError::InvalidCredentials)?;
 
