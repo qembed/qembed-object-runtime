@@ -11,7 +11,7 @@ pub enum PrincipalKind {
     Authenticated,
     /// A caller authenticated as the tenant owner.
     TenantOwner,
-    /// An unauthenticated caller represented by a server-issued caller ID.
+    /// An unauthenticated caller represented by a server-issued principal ID.
     Anonymous,
 }
 
@@ -25,7 +25,7 @@ pub enum PrincipalKind {
 /// External callers cannot mint one:
 ///
 /// ```compile_fail
-/// use qembed_domain::ids::CallerId;
+/// use qembed_domain::ids::PrincipalId;
 /// use qembed_domain::principal::{Principal, PrincipalKind};
 ///
 /// let _ = Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated);
@@ -53,7 +53,7 @@ impl Principal {
         Ok(Self { principal_id, kind })
     }
 
-    /// Returns the server-established caller identity.
+    /// Returns the server-established principal identity.
     #[must_use]
     pub const fn principal_id(&self) -> PrincipalId {
         self.principal_id
@@ -90,12 +90,12 @@ mod tests {
 
     #[test]
     fn verified_auth_context_creates_principal() {
-        let caller_id = PrincipalId::new();
+        let principal_id = PrincipalId::new();
 
-        let principal = Principal::from_verified_auth(caller_id, PrincipalKind::Authenticated)
+        let principal = Principal::from_verified_auth(principal_id, PrincipalKind::Authenticated)
             .expect("non-nil caller ID must be accepted");
 
-        assert_eq!(principal.caller_id(), caller_id);
+        assert_eq!(principal.principal_id(), principal_id);
         assert_eq!(principal.kind(), PrincipalKind::Authenticated);
     }
 
