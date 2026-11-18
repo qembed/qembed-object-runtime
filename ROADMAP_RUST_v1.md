@@ -286,6 +286,8 @@ SQLX_OFFLINE=true cargo check --workspace
 
 - [ ] **RUST-037 (M, implementation in progress)** Реализовать минимальный invocation worker lifecycle.
   - Реализация: durable user input is committed with begin-invocation; worker resumes from persisted Invocation status; provider output is persisted before Verifying → Completed; terminal status/result are committed together where possible. No lease/reclaim semantics here (RUST-038).
+  - Тесты: runtime mock-provider tests — claim/process/finish and provider failure; PostgreSQL integration — persisted input, CAS transitions, response durability, restart at Verifying, terminal result retrieval, idempotent replay does not duplicate input.
+  - Документация: INVOCATION_WORKER_LIFECYCLE.md, BEGIN_INVOCATION_TRANSACTION.md, README.
   - DoD: invocation lifecycle сохраняется в PostgreSQL и переживает рестарт процесса.
 
 - [ ] **RUST-038 (M)** Реализовать invocation lease и fencing-token CAS.
