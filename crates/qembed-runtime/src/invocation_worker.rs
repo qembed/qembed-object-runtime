@@ -695,10 +695,8 @@ mod lifecycle_tests {
         ) -> Result<bool, Self::Error> {
             let response = ChatResponse::new(content, ChatFinishReason::Stop, None)
                 .expect("legacy fake response should satisfy the response contract");
-            self.persist_provider_response_owned(
-                scope, owner, version, token, next, response,
-            )
-            .await
+            self.persist_provider_response_owned(scope, owner, version, token, next, response)
+                .await
         }
 
         async fn load_provider_call_attempt(
