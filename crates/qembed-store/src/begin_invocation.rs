@@ -294,10 +294,10 @@ pub async fn begin_invocation(
     .bind(command.snapshot_id.to_string())
     .fetch_optional(transaction.connection())
     .await
-    .map_err(BeginInvocationError::Database)?
-    .ok_or(BeginInvocationError::SnapshotNotFound)?;
+    .map_err(BeginInvocationError::Database)?;
     let snapshot_limit = snapshot_limits
-        .get("max_tokens_per_invocation")
+        .as_ref()
+        .and_then(|limits| limits.get("max_tokens_per_invocation"))
         .and_then(serde_json::Value::as_u64)
         .filter(|limit| *limit > 0)
         .ok_or(BeginInvocationError::SnapshotBudgetInvalid)?;
