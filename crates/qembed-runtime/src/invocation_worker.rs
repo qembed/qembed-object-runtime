@@ -262,7 +262,7 @@ where
                         }
                         ProviderCallAttemptState::ConfirmedNotAccepted
                         | ProviderCallAttemptState::CancelledBeforeSend => {
-                            return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
+                            return Err(InvocationWorkerError::Conflict);
                         }
                         ProviderCallAttemptState::NotStarted => {}
                     }
