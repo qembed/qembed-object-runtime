@@ -8,8 +8,12 @@
 //! was checked. The evidence is intended to cross the trusted runtime-to-Store
 //! boundary; it is not an API DTO or a client-provided assertion.
 //!
+//! The coverage report is informational: it makes implemented and unimplemented
+//! areas explicit, but it is neither validation evidence nor authorization.
+//!
 //! The validator version is an immutable implementation identifier. Any
-//! change to the rules implemented under this identifier requires a new value.
+//! change to the semantic rules implemented under this identifier requires a
+//! new value. Reporting-only changes do not change the rule-set version.
 //!
 //! Evidence cannot be serialized or reconstructed from request data:
 //!
@@ -35,17 +39,187 @@ use crate::snapshot::Snapshot;
 /// Coverage is intentionally limited to the positive integer budget invariant.
 pub const OBJECT_VALIDATOR_VERSION: &str = "m0-r3-bounded-budget-v1";
 
+/// Semantic areas whose current validation status is reported explicitly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValidationArea {
+    InvocationBudget,
+    ObjectSchema,
+    ToolConfiguration,
+    ProviderConfiguration,
+    PermissionConfiguration,
+    SecurityPolicyConfiguration,
+    UnknownFieldCompatibility,
+}
+
+/// Whether this validator implements a verified rule for an area.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoverageStatus {
+    /// At least the identified rule is implemented and backed by a verified source.
+    Validated,
+    /// No verified rule set is currently implemented for this area.
+    ///
+    /// This is not a blanket rejection of fields in that area.
+    NotValidatedSpecificationGap,
+}
+
+/// One stable, documented statement about validator coverage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ValidationCoverage {
+    area: ValidationArea,
+    status: CoverageStatus,
+    rule_or_gap_id: &'static str,
+    explanation: &'static str,
+}
+
+impl ValidationCoverage {
+    #[must_use]
+    pub const fn area(&self) -> ValidationArea {
+        self.area
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> CoverageStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn rule_or_gap_id(&self) -> &'static str {
+        self.rule_or_gap_id
+    }
+
+    #[must_use]
+    pub const fn explanation(&self) -> &'static str {
+        self.explanation
+    }
+}
+
+const VALIDATION_COVERAGE: &[ValidationCoverage] = &[
+    ValidationCoverage {
+        area: ValidationArea::InvocationBudget,
+        status: CoverageStatus::Validated,
+        rule_or_gap_id: "M0-R3-ADDENDUM-5",
+        explanation: "limits.max_tokens_per_invocation must be a positive JSON integer",
+    },
+    ValidationCoverage {
+        area: ValidationArea::ObjectSchema,
+        status: CoverageStatus::NotValidatedSpecificationGap,
+        rule_or_gap_id: "GAP-044-01",
+        explanation: "the complete object/configuration semantic schema is unavailable",
+    },
+    ValidationCoverage {
+        area: ValidationArea::ToolConfiguration,
+        status: CoverageStatus::NotValidatedSpecificationGap,
+        rule_or_gap_id: "GAP-044-02",
+        explanation: "tool declaration semantics and supported configuration are not established",
+    },
+    ValidationCoverage {
+        area: ValidationArea::ProviderConfiguration,
+        status: CoverageStatus::NotValidatedSpecificationGap,
+        rule_or_gap_id: "GAP-044-03",
+        explanation: "provider configuration and compatibility semantics are not established",
+    },
+    ValidationCoverage {
+        area: ValidationArea::PermissionConfiguration,
+        status: CoverageStatus::NotValidatedSpecificationGap,
+        rule_or_gap_id: "GAP-044-04",
+        explanation: "permission configuration semantics are not established",
+    },
+    ValidationCoverage {
+        area: ValidationArea::SecurityPolicyConfiguration,
+        status: CoverageStatus::NotValidatedSpecificationGap,
+        rule_or_gap_id: "GAP-044-04",
+        explanation: "security-policy configuration semantics are not established",
+    },
+    ValidationCoverage {
+        area: ValidationArea::UnknownFieldCompatibility,
+        status: CoverageStatus::NotValidatedSpecificationGap,
+        rule_or_gap_id: "GAP-044-05",
+        explanation: "unknown-field and extension compatibility policy is not established",
+    },
+];
+
+/// Informational, immutable description of the validator's actual rule coverage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ValidationReport {
+    validator_version: &'static str,
+    coverage: &'static [ValidationCoverage],
+}
+
+impl ValidationReport {
+    #[must_use]
+    pub const fn validator_version(&self) -> &'static str {
+        self.validator_version
+    }
+
+    #[must_use]
+    pub const fn coverage(&self) -> &'static [ValidationCoverage] {
+        self.coverage
+    }
+
+    /// True only when every reported area has verified validation coverage.
+    #[must_use]
+    pub fn is_complete(&self) -> bool {
+        self.coverage
+            .iter()
+            .all(|entry| entry.status() == CoverageStatus::Validated)
+    }
+}
+
+/// Result of bounded validation: opaque publication evidence plus coverage metadata.
+#[must_use = "inspect the validation report and pass the evidence to the publication Store"]
+#[derive(Debug, PartialEq, Eq)]
+pub struct ValidationOutcome {
+    evidence: ValidationEvidence,
+    report: ValidationReport,
+}
+
+impl ValidationOutcome {
+    #[must_use]
+    pub const fn evidence(&self) -> &ValidationEvidence {
+        &self.evidence
+    }
+
+    #[must_use]
+    pub const fn report(&self) -> &ValidationReport {
+        &self.report
+    }
+
+    /// Splits the outcome for trusted callers that need both values separately.
+    #[must_use]
+    pub fn into_parts(self) -> (ValidationEvidence, ValidationReport) {
+        (self.evidence, self.report)
+    }
+
+    /// Consumes the report and returns only the opaque evidence.
+    ///
+    /// Prefer retaining the report when presenting validation status to an
+    /// operator or API caller; this method exists for existing trusted flows.
+    #[must_use]
+    pub fn into_evidence(self) -> ValidationEvidence {
+        self.evidence
+    }
+}
+
 /// Trusted semantic checks for the currently confirmed snapshot invariants.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ObjectValidator;
 
 impl ObjectValidator {
-    /// Validates the semantic rules currently confirmed by surviving M0 r3
-    /// artifacts and returns evidence bound to this exact snapshot.
+    /// Backwards-compatible evidence-only entry point.
     ///
-    /// This is deliberately not a claim that tools, providers, permissions,
-    /// security policies, or unknown extensions have been fully validated.
+    /// New callers that need to present truthful coverage should use
+    /// `validate_with_report()`.
     pub fn validate(snapshot: &Snapshot) -> Result<ValidationEvidence, ObjectValidationError> {
+        Self::validate_with_report(snapshot).map(ValidationOutcome::into_evidence)
+    }
+
+    /// Validates confirmed rules and returns evidence plus explicit coverage.
+    ///
+    /// This does not claim that tools, providers, permissions, security policies,
+    /// or unknown extensions have been fully validated.
+    pub fn validate_with_report(
+        snapshot: &Snapshot,
+    ) -> Result<ValidationOutcome, ObjectValidationError> {
         let document: Value = serde_json::from_slice(snapshot.canonical_json())
             .map_err(|_| ObjectValidationError::InvalidSnapshotJson)?;
 
@@ -69,7 +243,7 @@ impl ObjectValidator {
             .filter(|limit| *limit > 0)
             .ok_or(ObjectValidationError::MaxTokensPerInvocationMustBePositiveInteger)?;
 
-        Ok(ValidationEvidence {
+        let evidence = ValidationEvidence {
             tenant_id: snapshot.tenant_id(),
             object_id: snapshot.object_id(),
             object_version_id: snapshot.object_version_id(),
@@ -77,7 +251,13 @@ impl ObjectValidator {
             content_hash: *snapshot.content_hash(),
             max_tokens_per_invocation,
             validator_version: OBJECT_VALIDATOR_VERSION,
-        })
+        };
+        let report = ValidationReport {
+            validator_version: OBJECT_VALIDATOR_VERSION,
+            coverage: VALIDATION_COVERAGE,
+        };
+
+        Ok(ValidationOutcome { evidence, report })
     }
 }
 
@@ -190,6 +370,50 @@ mod tests {
     }
 
     #[test]
+    fn report_lists_the_confirmed_rule_and_every_open_semantic_gap() {
+        let snapshot = snapshot(br#"{"limits":{"max_tokens_per_invocation":4096}}"#);
+        let outcome = ObjectValidator::validate_with_report(&snapshot)
+            .expect("valid budget is accepted with a coverage report");
+        let report = outcome.report();
+
+        assert_eq!(report.validator_version(), OBJECT_VALIDATOR_VERSION);
+        assert!(!report.is_complete());
+        assert_eq!(report.coverage().len(), 7);
+        assert_eq!(outcome.evidence().max_tokens_per_invocation(), 4096);
+        assert!(outcome.evidence().matches_snapshot(&snapshot));
+
+        assert_eq!(report.coverage()[0].area(), ValidationArea::InvocationBudget);
+        assert_eq!(report.coverage()[0].status(), CoverageStatus::Validated);
+        assert_eq!(report.coverage()[0].rule_or_gap_id(), "M0-R3-ADDENDUM-5");
+
+        let gap_ids: Vec<_> = report.coverage()[1..]
+            .iter()
+            .map(ValidationCoverage::rule_or_gap_id)
+            .collect();
+        assert_eq!(
+            gap_ids,
+            [
+                "GAP-044-01",
+                "GAP-044-02",
+                "GAP-044-03",
+                "GAP-044-04",
+                "GAP-044-04",
+                "GAP-044-05",
+            ]
+        );
+        assert!(report.coverage()[1..]
+            .iter()
+            .all(|entry| entry.status() == CoverageStatus::NotValidatedSpecificationGap));
+    }
+
+    #[test]
+    fn evidence_only_entry_point_remains_compatible() {
+        let snapshot = snapshot(br#"{"limits":{"max_tokens_per_invocation":4096}}"#);
+        let evidence = ObjectValidator::validate(&snapshot).expect("valid budget is accepted");
+        assert!(evidence.matches_snapshot(&snapshot));
+    }
+
+    #[test]
     fn rejects_missing_limits_and_missing_budget() {
         assert_eq!(
             ObjectValidator::validate(&snapshot(br#"{"config":{}}"#)),
@@ -215,7 +439,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_negative_fractional_and_string_budgets() {
-        for value in ["0", "-1", "1.5", "\"10\""] {
+        for value in ["0", "-1", "1.5", ""10""] {
             let json = format!(r#"{{"limits":{{"max_tokens_per_invocation":{value}}}}}"#);
             let candidate = snapshot(json.as_bytes());
             assert_eq!(

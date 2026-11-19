@@ -331,11 +331,15 @@ SQLX_OFFLINE=true cargo check --workspace
 - [ ] **RUST-044 (M)** Собрать Owner API: create object/version, publish, invoke, inspect invocation.
   - Архитектурный контракт: [Owner API and trusted publication validation](docs/OWNER_API_PUBLICATION_VALIDATION.md).
   - Первый кодовый срез: bounded domain validator `m0-r3-bounded-budget-v1`; проверяет только подтверждённый положительный integer `limits.max_tokens_per_invocation` и выпускает snapshot-bound opaque evidence. Полная семантическая валидация не заявляется.
+  - Одобренное улучшение (2026-11-19): `ObjectValidator::validate_with_report()` возвращает evidence вместе с явным coverage report. Report перечисляет проверенный invariant и непроверенные области, связанные с GAP-044-01…05; статус gap означает «не проверено», а не автоматическую недопустимость произвольного JSON.
+  - Coverage report — информационный результат, не authorization capability и не замена opaque evidence. Существующий `validate()` сохраняет совместимый путь получения evidence.
+  - Новые semantic rules не добавлять без нормативного источника или отдельного согласования; изменение самих правил требует нового immutable validator version.
   - Owner API не управляет переходами `Validating`/`Published`; публикация требует успешного результата доверенного validator, привязанного к tenant/object/version/snapshot (и hash/ruleset version).
   - Snapshot JCS/integrity и semantic object validation — разные проверки; известный M0 invariant `limits.max_tokens_per_invocation` — положительный JSON integer.
   - Draft version + snapshot создаются одной Store-транзакцией; validation/network I/O выполняются вне неё; publish сохраняет expected-pointer CAS и атомарность Store.
   - До endpoint implementation зафиксировать bounded semantic-rules baseline и закрыть оставшиеся specification gaps; identical-content version semantics уже утверждены в qembed-sql ADR RUST-044 (см. архитектурный документ).
   - Тесты: API integration на каждый endpoint; auth/tenant negative cases; DTO validation; validator identity binding; PostgreSQL rollback и stale-pointer race cases.
+  - Semantic coverage tests: подтверждённый budget rule помечен как validated; каждая открытая specification gap явно помечена not_validated; report не объявляет полное покрытие и не меняет результат publication authorization.
   - DoD: handler-ы только валидируют transport input и вызывают runtime use cases; Store публикует только с доверенным доказательством validation.
 
 - [ ] **RUST-045 (M)** Добавить полный walking-skeleton end-to-end test.
