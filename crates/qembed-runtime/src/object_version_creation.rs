@@ -64,7 +64,6 @@ pub enum ObjectVersionCreationError<E> {
 mod tests {
     use std::convert::Infallible;
     use std::future::{Future, ready};
-    
     use qembed_domain::{
         ids::TenantId,
         ports::{DraftVersionCreation, ObjectVersionCreationStore},
@@ -124,7 +123,7 @@ mod tests {
     #[tokio::test]
     async fn create_rejects_noncanonical_snapshot_bytes() {
         let scope = scope_for_tenant(TenantId::new());
-        let service = ObjectVersionCreationService::new(RecordingStore::default());
+        let service = ObjectVersionCreationService::new(RecordingStore);
 
         assert!(matches!(
             service.create(&scope, ObjectId::new(), 1, br#"{ "x":1}"#.to_vec()).await,
