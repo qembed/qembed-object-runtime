@@ -246,6 +246,7 @@ where
                                     .store
                                     .mark_provider_outcome_unknown_owned(
                                         scope,
+                                        invocation.object_id(),
                                         invocation_id,
                                         &self.config.worker_id,
                                         invocation.version(),
@@ -288,6 +289,7 @@ where
                         .store
                         .mark_provider_may_have_been_sent_owned(
                             scope,
+                            invocation.object_id(),
                             invocation_id,
                             &self.config.worker_id,
                             invocation.version(),
