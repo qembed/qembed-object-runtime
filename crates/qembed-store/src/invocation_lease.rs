@@ -327,9 +327,7 @@ impl InvocationLeaseStore for PgExecutionStore {
             attempt.usage(),
         )
         .await
-        .map_err(|_| {
-            InvocationStoreError::InvalidRequestedState("provider usage settlement failed")
-        })?;
+        .map_err(InvocationStoreError::Settlement)?;
 
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
 
