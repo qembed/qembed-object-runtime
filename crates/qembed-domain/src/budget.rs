@@ -143,9 +143,33 @@ mod tests {
     }
 
     #[test]
-    fn missing_provider_usage_uses_estimate_and_marks_degraded() {
-        let settled = settle_token_usage(20, None);
-        assert_eq!(settled.actual_tokens(), 20);
+    fn input_estimate_rejects_arithmetic_overflow() {
+        assert_eq!(
+            estimate_input_tokens(usize::MAX),
+            Err(TokenBudgetError::ArithmeticOverflow)
+        );
+    }
+
+    #[test]
+    fn output_allowance_rejects_zero_configured_limit() {
+        assert_eq!(
+            output_token_allowance(100, 0, 0),
+            Err(TokenBudgetError::NoOutputCapacity)
+        );
+    }
+
+    #[test]
+    fn output_allowance_rejects_input_estimate_at_or_above_budget() {
+        assert_eq!(
+            output_token_allowance(100, 101, 20),
+            Err(TokenBudgetError::NoOutputCapacity)
+        );
+    }
+
+    #[test]
+    fn missing_usage_never_settles_as_zero_when_reservation_is_nonzero() {
+        let settled = settle_token_usage(1, None);
+        assert_eq!(settled.actual_tokens(), 1);
         assert!(settled.is_degraded());
     }
 }
