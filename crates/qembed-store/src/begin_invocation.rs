@@ -12,8 +12,8 @@ use qembed_domain::scope::Scope;
 use serde::Serialize;
 use sqlx::PgPool;
 
-pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::budget_reservation::reserve_invocation_budget;
+pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
 use crate::idempotency::{
     IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
@@ -85,7 +85,9 @@ impl fmt::Display for BeginInvocationError {
                 write!(formatter, "idempotency reservation failed: {error}")
             }
             Self::Budget(error) => write!(formatter, "{error}"),
-            Self::SnapshotBudgetInvalid => formatter.write_str("snapshot token budget is missing or invalid"),
+            Self::SnapshotBudgetInvalid => {
+                formatter.write_str("snapshot token budget is missing or invalid")
+            }
             Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
             Self::ObjectNotActive => formatter.write_str("object is not active for invocation"),
             Self::SnapshotNotFound => {
