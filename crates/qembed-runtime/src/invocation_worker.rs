@@ -14,8 +14,8 @@ use qembed_domain::chat::{
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::{Invocation, InvocationError, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
-use qembed_domain::provider_call_attempt::ProviderCallAttemptState;
 use qembed_domain::ports::ChatProvider;
+use qembed_domain::provider_call_attempt::ProviderCallAttemptState;
 use qembed_domain::scope::Scope;
 
 /// Application-owned model route and output budget for the mock-first path.
@@ -68,7 +68,9 @@ pub enum InvocationWorkerOutcome {
         invocation_id: InvocationId,
         error_code: &'static str,
     },
-    OutcomeUnknown { invocation_id: InvocationId },
+    OutcomeUnknown {
+        invocation_id: InvocationId,
+    },
     AlreadyTerminal {
         invocation_id: InvocationId,
         status: InvocationStatus,
@@ -228,24 +230,38 @@ where
                         .await?;
                 }
                 InvocationStatus::Processing => {
-                    let attempt = self.store.load_provider_call_attempt(scope, invocation_id)
-                        .await.map_err(InvocationWorkerError::Store)?
+                    let attempt = self
+                        .store
+                        .load_provider_call_attempt(scope, invocation_id)
+                        .await
+                        .map_err(InvocationWorkerError::Store)?
                         .ok_or(InvocationWorkerError::Conflict)?;
                     match attempt.state() {
                         ProviderCallAttemptState::ResponseReceived => {
                             return Err(InvocationWorkerError::Conflict);
                         }
-                        ProviderCallAttemptState::MayHaveBeenSent | ProviderCallAttemptState::OutcomeUnknown => {
+                        ProviderCallAttemptState::MayHaveBeenSent
+                        | ProviderCallAttemptState::OutcomeUnknown => {
                             if attempt.state() == ProviderCallAttemptState::MayHaveBeenSent {
-                                let marked = self.store.mark_provider_outcome_unknown_owned(
-                                    scope, invocation_id, &self.config.worker_id,
-                                    invocation.version(), invocation.fencing_token(),
-                                ).await.map_err(InvocationWorkerError::Store)?;
-                                if !marked { return Err(InvocationWorkerError::Conflict); }
+                                let marked = self
+                                    .store
+                                    .mark_provider_outcome_unknown_owned(
+                                        scope,
+                                        invocation_id,
+                                        &self.config.worker_id,
+                                        invocation.version(),
+                                        invocation.fencing_token(),
+                                    )
+                                    .await
+                                    .map_err(InvocationWorkerError::Store)?;
+                                if !marked {
+                                    return Err(InvocationWorkerError::Conflict);
+                                }
                             }
                             return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
                         }
-                        ProviderCallAttemptState::ConfirmedNotAccepted | ProviderCallAttemptState::CancelledBeforeSend => {
+                        ProviderCallAttemptState::ConfirmedNotAccepted
+                        | ProviderCallAttemptState::CancelledBeforeSend => {
                             return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
                         }
                         ProviderCallAttemptState::NotStarted => {}
@@ -269,11 +285,20 @@ where
                         return Err(InvocationWorkerError::ProviderRouteNotConfigured);
                     }
 
-                    let may_send = self.store.mark_provider_may_have_been_sent_owned(
-                        scope, invocation_id, &self.config.worker_id,
-                        invocation.version(), invocation.fencing_token(),
-                    ).await.map_err(InvocationWorkerError::Store)?;
-                    if !may_send { return Err(InvocationWorkerError::Conflict); }
+                    let may_send = self
+                        .store
+                        .mark_provider_may_have_been_sent_owned(
+                            scope,
+                            invocation_id,
+                            &self.config.worker_id,
+                            invocation.version(),
+                            invocation.fencing_token(),
+                        )
+                        .await
+                        .map_err(InvocationWorkerError::Store)?;
+                    if !may_send {
+                        return Err(InvocationWorkerError::Conflict);
+                    }
 
                     let provider_context = ProviderRequestContext::for_invocation(invocation_id);
                     let provider_future = self
@@ -328,14 +353,20 @@ where
                             }
                         }
                         Err(_error) => {
-                            let persisted = self.store.mark_provider_outcome_unknown_owned(
-                                scope,
-                                invocation_id,
-                                &self.config.worker_id,
-                                invocation.version(),
-                                invocation.fencing_token(),
-                            ).await.map_err(InvocationWorkerError::Store)?;
-                            if !persisted { return Err(InvocationWorkerError::Conflict); }
+                            let persisted = self
+                                .store
+                                .mark_provider_outcome_unknown_owned(
+                                    scope,
+                                    invocation_id,
+                                    &self.config.worker_id,
+                                    invocation.version(),
+                                    invocation.fencing_token(),
+                                )
+                                .await
+                                .map_err(InvocationWorkerError::Store)?;
+                            if !persisted {
+                                return Err(InvocationWorkerError::Conflict);
+                            }
                             return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
                         }
                     }
@@ -433,8 +464,8 @@ mod lifecycle_tests {
     use qembed_domain::ids::{CallerId, ObjectId, SnapshotId, TenantId};
     use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint};
     use qembed_domain::invocation_lease::InvocationLeaseStore;
-    use qembed_domain::provider_call_attempt::{ProviderCallAttempt, ProviderCallAttemptState};
     use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
+    use qembed_domain::provider_call_attempt::{ProviderCallAttempt, ProviderCallAttemptState};
     use qembed_domain::test_support::scope_for_tenant;
 
     use super::*;
@@ -552,7 +583,10 @@ mod lifecycle_tests {
             }
             let next = if state.usage.is_none() {
                 Invocation::from_persisted(
-                    next.id(), next.tenant_id(), next.object_id(), next.caller_id(),
+                    next.id(),
+                    next.tenant_id(),
+                    next.object_id(),
+                    next.caller_id(),
                     next.snapshot_id(),
                     InvocationCheckpoint::new(
                         InvocationStatus::CompletedDegraded,
@@ -680,8 +714,12 @@ mod lifecycle_tests {
         }
 
         async fn mark_provider_may_have_been_sent_owned(
-            &self, scope: &Scope, invocation_id: InvocationId, owner: &str,
-            version: u64, token: FencingToken,
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
         ) -> Result<bool, Self::Error> {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
@@ -690,14 +728,20 @@ mod lifecycle_tests {
                 || state.invocation.fencing_token() != token
                 || state.lease_owner.as_deref() != Some(owner)
                 || state.attempt != ProviderCallAttemptState::NotStarted
-            { return Ok(false); }
+            {
+                return Ok(false);
+            }
             state.attempt = ProviderCallAttemptState::MayHaveBeenSent;
             Ok(true)
         }
 
         async fn mark_provider_outcome_unknown_owned(
-            &self, scope: &Scope, invocation_id: InvocationId, owner: &str,
-            version: u64, token: FencingToken,
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
         ) -> Result<bool, Self::Error> {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
@@ -706,14 +750,22 @@ mod lifecycle_tests {
                 || state.invocation.fencing_token() != token
                 || state.lease_owner.as_deref() != Some(owner)
                 || state.attempt != ProviderCallAttemptState::MayHaveBeenSent
-            { return Ok(false); }
+            {
+                return Ok(false);
+            }
             state.attempt = ProviderCallAttemptState::OutcomeUnknown;
             Ok(true)
         }
 
         async fn persist_provider_response_owned(
-            &self, scope: &Scope, owner: &str, version: u64, token: FencingToken,
-            next: Invocation, content: String, usage: Option<qembed_domain::chat::TokenUsage>,
+            &self,
+            scope: &Scope,
+            owner: &str,
+            version: u64,
+            token: FencingToken,
+            next: Invocation,
+            content: String,
+            usage: Option<qembed_domain::chat::TokenUsage>,
         ) -> Result<bool, Self::Error> {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
@@ -722,7 +774,9 @@ mod lifecycle_tests {
                 || state.lease_owner.as_deref() != Some(owner)
                 || state.attempt != ProviderCallAttemptState::MayHaveBeenSent
                 || state.invocation.status() != InvocationStatus::Processing
-            { return Ok(false); }
+            {
+                return Ok(false);
+            }
             state.output = Some(content);
             state.usage = usage;
             state.attempt = ProviderCallAttemptState::ResponseReceived;
@@ -826,7 +880,11 @@ mod lifecycle_tests {
             output: output.map(str::to_owned),
             error_code: None,
             lease_owner: None,
-            attempt: if status == InvocationStatus::Verifying && output.is_some() { ProviderCallAttemptState::ResponseReceived } else { ProviderCallAttemptState::NotStarted },
+            attempt: if status == InvocationStatus::Verifying && output.is_some() {
+                ProviderCallAttemptState::ResponseReceived
+            } else {
+                ProviderCallAttemptState::NotStarted
+            },
             usage: None,
         })));
         (scope, invocation_id, store)
@@ -880,7 +938,10 @@ mod lifecycle_tests {
                 .to_owned()]
         );
         let state = store.0.lock().expect("fake store lock");
-        assert_eq!(state.invocation.status(), InvocationStatus::CompletedDegraded);
+        assert_eq!(
+            state.invocation.status(),
+            InvocationStatus::CompletedDegraded
+        );
         assert_eq!(state.output.as_deref(), Some("hello back"));
     }
 
@@ -911,8 +972,14 @@ mod lifecycle_tests {
         let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
         let (worker, calls, _contexts) = worker(store.clone(), Err(ChatProviderError::Timeout));
 
-        let outcome = worker.process(&scope, id).await.expect("ambiguous outcome is recorded");
-        assert_eq!(outcome, InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id });
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("ambiguous outcome is recorded");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id }
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         let state = store.0.lock().expect("fake store lock");
         assert_eq!(state.invocation.status(), InvocationStatus::Processing);
@@ -930,8 +997,14 @@ mod lifecycle_tests {
         let response = ChatResponse::new("must not be used", ChatFinishReason::Stop, None)
             .expect("valid provider response");
         let (worker, calls, _) = worker(store.clone(), Ok(response));
-        let outcome = worker.process(&scope, id).await.expect("worker does not resend");
-        assert_eq!(outcome, InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id });
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("worker does not resend");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id }
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
