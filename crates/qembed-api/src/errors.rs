@@ -5,9 +5,7 @@
 //! into this response type.
 
 use qembed_runtime::error::RuntimeError;
-use qembed_store::begin_invocation::{
-    BeginInvocationError, BudgetReservationError,
-};
+use qembed_store::begin_invocation::{BeginInvocationError, BudgetReservationError};
 use qembed_store::caller::CallerResolutionError;
 use qembed_store::idempotency::IdempotencyReservationError;
 use qembed_store::invocation_query::InvocationQueryError;
@@ -133,9 +131,7 @@ pub fn map_invocation_query_error(_: &InvocationQueryError) -> ApiError {
 #[must_use]
 pub fn map_invocation_store_error(error: &InvocationStoreError) -> ApiError {
     match error {
-        InvocationStoreError::InvalidRequestedState(_) => {
-            map_runtime_error(RuntimeError::Conflict)
-        }
+        InvocationStoreError::InvalidRequestedState(_) => map_runtime_error(RuntimeError::Conflict),
         InvocationStoreError::Database(_)
         | InvocationStoreError::Settlement(_)
         | InvocationStoreError::InvalidPersistedValue(_)
@@ -156,7 +152,7 @@ pub const fn map_unclassified_error<E: std::error::Error + ?Sized>(_: &E) -> Api
 mod tests {
     use super::*;
     use qembed_domain::chat::{ChatContractError, ChatProviderError};
-    use qembed_store::begin_invocation::{BudgetRejection, BeginInvocationError};
+    use qembed_store::begin_invocation::{BeginInvocationError, BudgetRejection};
 
     #[test]
     fn every_runtime_category_has_a_stable_status_and_code() {
@@ -211,11 +207,7 @@ mod tests {
     #[test]
     fn begin_invocation_semantic_failures_map_without_exposing_store_details() {
         let cases = [
-            (
-                BeginInvocationError::ObjectNotFound,
-                404,
-                "not_found",
-            ),
+            (BeginInvocationError::ObjectNotFound, 404, "not_found"),
             (
                 BeginInvocationError::Idempotency(IdempotencyReservationError::PayloadMismatch),
                 409,
@@ -228,11 +220,7 @@ mod tests {
                 429,
                 "budget_exceeded",
             ),
-            (
-                BeginInvocationError::ObjectNotActive,
-                409,
-                "conflict",
-            ),
+            (BeginInvocationError::ObjectNotActive, 409, "conflict"),
             (
                 BeginInvocationError::InvalidInputMessage,
                 400,
@@ -254,9 +242,8 @@ mod tests {
 
     #[test]
     fn query_and_invocation_store_failures_use_safe_fallbacks() {
-        let query = map_invocation_query_error(&InvocationQueryError::InvalidPersistedValue(
-            "status",
-        ));
+        let query =
+            map_invocation_query_error(&InvocationQueryError::InvalidPersistedValue("status"));
         assert_eq!(query.status(), 500);
         assert_eq!(query.body().code, "internal_error");
 
@@ -266,9 +253,8 @@ mod tests {
         assert_eq!(rejected_write.status(), 409);
         assert_eq!(rejected_write.body().code, "conflict");
 
-        let malformed_store = map_invocation_store_error(
-            &InvocationStoreError::AmbiguousMessage("assistant"),
-        );
+        let malformed_store =
+            map_invocation_store_error(&InvocationStoreError::AmbiguousMessage("assistant"));
         assert_eq!(malformed_store.status(), 500);
         assert_eq!(malformed_store.body().code, "internal_error");
     }
@@ -285,7 +271,13 @@ mod tests {
             })
         );
         let serialized = json.to_string().to_lowercase();
-        for forbidden in ["sqlx", "postgres", "provider_sdk", "connection refused", "select "] {
+        for forbidden in [
+            "sqlx",
+            "postgres",
+            "provider_sdk",
+            "connection refused",
+            "select ",
+        ] {
             assert!(!serialized.contains(forbidden));
         }
     }
