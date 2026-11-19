@@ -76,13 +76,11 @@ mod tests {
 
     #[test]
     fn missing_usage_is_distinct_from_explicit_zero_usage() {
-        use crate::chat::TokenUsage;
         use super::{ProviderCallAttempt, ProviderCallAttemptState};
+        use crate::chat::TokenUsage;
 
-        let missing = ProviderCallAttempt::from_persisted(
-            ProviderCallAttemptState::ResponseReceived,
-            None,
-        );
+        let missing =
+            ProviderCallAttempt::from_persisted(ProviderCallAttemptState::ResponseReceived, None);
         let explicit_zero = ProviderCallAttempt::from_persisted(
             ProviderCallAttemptState::ResponseReceived,
             Some(TokenUsage::new(0, 0)),
