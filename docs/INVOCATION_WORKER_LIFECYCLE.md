@@ -15,6 +15,7 @@ A matching idempotency replay returns before inserting another message. The inpu
 Each transition reloads the persisted Invocation and uses the domain state machine plus PostgreSQL optimistic version/fencing-token predicates.
 
 - `Received → ContextLoading` and `ContextLoading → Processing` are independent committed CAS transitions.
+- Unowned compare-and-set cannot enter `Processing`, `ExecutingTool`, or `Verifying`; those execution states require the lease-fenced store contract.
 - A `provider_call_attempts` row is created with the budget reservation. Before provider I/O, the worker commits `NotStarted → MayHaveBeenSent` under its live lease; if that write fails, it does not send.
 - Provider I/O happens only while no SQL transaction is open.
 - The provider response, normalized usage (nullable only when unavailable), assistant message, `ResponseReceived`, and `Processing → Verifying` commit in one tenant-scoped transaction.
