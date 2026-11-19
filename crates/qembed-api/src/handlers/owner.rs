@@ -199,11 +199,12 @@ enum CreateObjectVersionBodyError {
 fn parse_create_object_version_body(
     body: &[u8],
 ) -> Result<(u32, Vec<u8>), CreateObjectVersionBodyError> {
-    // Canonicalize the envelope first: the strict JCS parser rejects duplicate
-    // keys anywhere in the request before serde_json can collapse them.
-    let canonical_envelope = canonicalize_json(body).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    // Deserialize the DTO from the original bytes first so integer-only fields
+    // reject floating-point spellings such as 1.0. Then run the strict parser
+    // over the original envelope to reject duplicate keys before using it.
     let request: CreateObjectVersionRequest =
-        serde_json::from_slice(&canonical_envelope).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+        serde_json::from_slice(body).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    canonicalize_json(body).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
     if request.schema_version <= 0 {
         return Err(CreateObjectVersionBodyError::Invalid);
     }
@@ -427,6 +428,10 @@ mod tests {
         );
         assert!(
             parse_create_object_version_body(br#"{"schema_version":2147483648,"config":{}}"#)
+                .is_err()
+        );
+        assert!(
+            parse_create_object_version_body(br#"{"schema_version":1.0,"config":{}}"#)
                 .is_err()
         );
     }
