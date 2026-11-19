@@ -19,6 +19,7 @@ mod invocation_lease;
 pub mod invocation_query;
 pub mod invocation_worker;
 pub mod readiness;
+pub use readiness::{PgReadinessFailure, PgReadinessProbe};
 pub use cas::{CasError, execute_cas};
 mod event_outbox;
 pub mod object_repository;
