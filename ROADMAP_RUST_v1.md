@@ -330,6 +330,7 @@ SQLX_OFFLINE=true cargo check --workspace
 
 - [ ] **RUST-044 (M)** Собрать Owner API: create object/version, publish, invoke, inspect invocation.
   - Архитектурный контракт: [Owner API and trusted publication validation](docs/OWNER_API_PUBLICATION_VALIDATION.md).
+  - Первый кодовый срез: bounded domain validator `m0-r3-bounded-budget-v1`; проверяет только подтверждённый положительный integer `limits.max_tokens_per_invocation` и выпускает snapshot-bound opaque evidence. Полная семантическая валидация не заявляется.
   - Owner API не управляет переходами `Validating`/`Published`; публикация требует успешного результата доверенного validator, привязанного к tenant/object/version/snapshot (и hash/ruleset version).
   - Snapshot JCS/integrity и semantic object validation — разные проверки; известный M0 invariant `limits.max_tokens_per_invocation` — положительный JSON integer.
   - Draft version + snapshot создаются одной Store-транзакцией; validation/network I/O выполняются вне неё; publish сохраняет expected-pointer CAS и атомарность Store.
