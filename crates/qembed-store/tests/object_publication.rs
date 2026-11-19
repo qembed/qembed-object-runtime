@@ -128,7 +128,10 @@ async fn create_draft_version(
     object_id: ObjectId,
     tenant_id: TenantId,
     number: u64,
-) -> (ObjectVersionId, qembed_domain::object_validation::ValidationEvidence) {
+) -> (
+    ObjectVersionId,
+    qembed_domain::object_validation::ValidationEvidence,
+) {
     let version_id = ObjectVersionId::new();
     let version = ObjectVersion::new(version_id, tenant_id, object_id, number)
         .expect("version number must be positive");
@@ -138,10 +141,8 @@ async fn create_draft_version(
         object_id,
         version_id,
         1,
-        format!(
-            r#"{{"limits":{{"max_tokens_per_invocation":4096}},"version":{number}}}"#
-        )
-        .into_bytes(),
+        format!(r#"{{"limits":{{"max_tokens_per_invocation":4096}},"version":{number}}}"#)
+            .into_bytes(),
     )
     .build()
     .expect("snapshot should be valid canonical JSON");

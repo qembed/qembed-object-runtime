@@ -15,7 +15,7 @@ use std::fmt;
 
 use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
-use qembed_domain::object_validation::{ValidationEvidence, OBJECT_VALIDATOR_VERSION};
+use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::Snapshot;
