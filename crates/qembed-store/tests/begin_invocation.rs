@@ -1384,6 +1384,19 @@ async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
             .await
             .expect("commit pre-send marker")
     );
+    assert!(
+        store
+            .mark_provider_outcome_unknown_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("record ambiguous provider outcome")
+    );
 
     sqlx::query(&format!(
         "ALTER TABLE \"{}\".interaction_messages ADD CONSTRAINT reject_assistant_response CHECK (role <> 'assistant')",
@@ -1428,7 +1441,7 @@ async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
     .fetch_one(&fixture.pool)
     .await
     .expect("read attempt after rollback");
-    assert_eq!(attempt, ("MayHaveBeenSent".to_owned(), None, None));
+    assert_eq!(attempt, ("OutcomeUnknown".to_owned(), None, None));
     let current = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
