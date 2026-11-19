@@ -5,7 +5,7 @@
 -- concurrent inserts cannot introduce a duplicate between those operations.
 LOCK TABLE snapshots IN ACCESS EXCLUSIVE MODE;
 
-DO $
+DO $$
 BEGIN
     IF EXISTS (
         SELECT 1
