@@ -2,8 +2,8 @@ mod common;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::object::Object;
-use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::object_validation::ObjectValidator;
+use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::SnapshotBuilder;
 use qembed_domain::test_support::scope_for_tenant;
@@ -26,9 +26,15 @@ async fn publication_rejects_a_legacy_version_without_a_snapshot() {
     .expect("test fixture should insert a legacy version-only row");
 
     let unpersisted_snapshot = SnapshotBuilder::new(
-        SnapshotId::new(), scope.tenant_id(), object_id, version_id, 1,
+        SnapshotId::new(),
+        scope.tenant_id(),
+        object_id,
+        version_id,
+        1,
         br#"{"limits":{"max_tokens_per_invocation":4096}}"#.to_vec(),
-    ).build().expect("candidate snapshot should be canonical");
+    )
+    .build()
+    .expect("candidate snapshot should be canonical");
     let evidence = ObjectValidator::validate(&unpersisted_snapshot)
         .expect("candidate snapshot should pass bounded validation");
     let error = repository
@@ -132,7 +138,10 @@ async fn create_draft_version(
         object_id,
         version_id,
         1,
-        format!(r#"{{"limits":{{"max_tokens_per_invocation":4096}},"version":{number}}}"#).into_bytes(),
+        format!(
+            r#"{{"limits":{{"max_tokens_per_invocation":4096}},"version":{number}}}"#
+        )
+        .into_bytes(),
     )
     .build()
     .expect("snapshot should be valid canonical JSON");
@@ -156,7 +165,8 @@ async fn create_draft_version(
 async fn publication_and_replacement_update_version_and_object_atomically() {
     let (pool, repository, scope, object_id) = setup().await;
     let tenant_id = scope.tenant_id();
-    let (first, first_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
+    let (first, first_evidence) =
+        create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
 
     repository
         .publish_version(&scope, object_id, first, None, &first_evidence)
@@ -172,8 +182,14 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
     .await
     .expect("publication event should be committed with the pointer");
     assert_eq!(publication_event.0, "object.version_published");
-    assert_eq!(publication_event.1["snapshot_id"], first_evidence.snapshot_id().to_string());
-    assert_eq!(publication_event.1["validator_version"], "m0-r3-bounded-budget-v1");
+    assert_eq!(
+        publication_event.1["snapshot_id"],
+        serde_json::json!(first_evidence.snapshot_id().to_string())
+    );
+    assert_eq!(
+        publication_event.1["validator_version"],
+        serde_json::json!("m0-r3-bounded-budget-v1")
+    );
 
     let first_state: (String, Option<String>) = sqlx::query_as(
         "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
@@ -196,7 +212,8 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
     .expect("first version should exist");
     assert_eq!(first_status, "published");
 
-    let (second, second_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
+    let (second, second_evidence) =
+        create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
     repository
         .publish_version(&scope, object_id, second, Some(first), &second_evidence)
         .await
@@ -244,7 +261,8 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
 async fn failed_object_pointer_update_rolls_back_both_version_changes() {
     let (pool, repository, scope, object_id) = setup().await;
     let tenant_id = scope.tenant_id();
-    let (version_id, evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
+    let (version_id, evidence) =
+        create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
 
     // Inject a failure at the final object-pointer update, after the version
     // row has been changed. The enclosing transaction must undo that change.
@@ -314,8 +332,10 @@ async fn failed_object_pointer_update_rolls_back_both_version_changes() {
 async fn concurrent_first_publications_allow_exactly_one_winner() {
     let (pool, repository, scope, object_id) = setup().await;
     let tenant_id = scope.tenant_id();
-    let (first, first_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
-    let (second, second_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
+    let (first, first_evidence) =
+        create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
+    let (second, second_evidence) =
+        create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
 
     let (first_result, second_result) = tokio::join!(
         repository.publish_version(&scope, object_id, first, None, &first_evidence),
