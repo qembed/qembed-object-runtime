@@ -1302,6 +1302,174 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
 }
 
 #[tokio::test]
+async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "response-transaction-rollback"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-response-rollback";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("persist processing state")
+    );
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load processing")
+        .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+
+    sqlx::query(&format!(
+        "ALTER TABLE \"{}\".interaction_messages ADD CONSTRAINT reject_assistant_response CHECK (role <> 'assistant')",
+        fixture.schema
+    ))
+    .execute(&fixture.admin_pool)
+    .await
+    .expect("install assistant insert failure");
+
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
+        .expect("Processing -> Verifying");
+    let response = qembed_domain::chat::ChatResponse::new(
+        "provider already answered",
+        qembed_domain::chat::ChatFinishReason::Stop,
+        Some(TokenUsage::new(4, 2)),
+    )
+    .expect("valid normalized response");
+    let error = store
+        .persist_provider_response_owned(
+            &fixture.scope,
+            owner,
+            processing.version(),
+            processing.fencing_token(),
+            verifying.clone(),
+            response.clone(),
+        )
+        .await
+        .expect_err("assistant insert constraint should abort the response transaction");
+    assert!(matches!(
+        error,
+        qembed_store::invocation_worker::InvocationStoreError::Database(_)
+    ));
+
+    let attempt: (String, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read attempt after rollback");
+    assert_eq!(attempt, ("MayHaveBeenSent".to_owned(), None, None));
+    let current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("read invocation after rollback")
+        .expect("invocation exists");
+    assert_eq!(current.status(), InvocationStatus::Processing);
+    let assistant_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM interaction_messages WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND role='assistant'",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("count assistant messages");
+    assert_eq!(assistant_count, 0);
+
+    sqlx::query(&format!(
+        "ALTER TABLE \"{}\".interaction_messages DROP CONSTRAINT reject_assistant_response",
+        fixture.schema
+    ))
+    .execute(&fixture.admin_pool)
+    .await
+    .expect("remove assistant insert failure");
+    assert!(
+        store
+            .persist_provider_response_owned(
+                &fixture.scope,
+                owner,
+                current.version(),
+                current.fencing_token(),
+                verifying,
+                response,
+            )
+            .await
+            .expect("retry response persistence without another provider call")
+    );
+    let persisted_attempt: (String, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read committed response attempt");
+    assert_eq!(
+        persisted_attempt,
+        ("ResponseReceived".to_owned(), Some(4), Some(2))
+    );
+    teardown(fixture).await;
+}
+
+#[tokio::test]
 async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
