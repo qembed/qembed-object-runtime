@@ -49,7 +49,7 @@ explicit mapping tests when the public contract is intentionally changed.
 
 ## Classification rules
 
-- A malformed client DTO or invalid domain request maps to InvalidRequest.
+- A malformed client DTO or invalid request-side ChatContractError maps to InvalidRequest. Chat response contract failures (empty or oversized provider output) map to ProviderFailure, not InvalidRequest.
 - Authentication rejection maps to Unauthenticated; an authenticated
   principal that lacks an authorization grant maps to Forbidden.
 - Missing resources and resources outside the caller's tenant scope must be
