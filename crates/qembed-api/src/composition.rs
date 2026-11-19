@@ -14,7 +14,7 @@ use qembed_domain::{
 use qembed_runtime::invocation_query::InvocationQueryService;
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
-    auth::{OwnerAuthenticator, OwnerCredentials, OwnerAuthenticationError as StoreAuthError},
+    auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
     invocation_query::PgInvocationQueryStore,
 };
 use sqlx::PgPool;
