@@ -181,6 +181,58 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .await
         .expect("runtime transaction should roll back");
 
+    // Provider attempts are tenant-isolated and their state guard rejects
+    // rewinding a request after the conservative pre-send marker.
+    let attempt_id = Uuid::new_v4();
+    let mut tx = set_tenant(&runtime, tenant_a).await;
+    sqlx::query(
+        "INSERT INTO provider_call_attempts (tenant_id, object_id, invocation_id) VALUES ($1, $2, $3)",
+    )
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_id)
+    .execute(&mut *tx)
+    .await
+    .expect("runtime should create a tenant-scoped provider attempt");
+    sqlx::query(
+        "UPDATE provider_call_attempts SET state='MayHaveBeenSent' WHERE tenant_id=$1 AND object_id=$2 AND invocation_id=$3",
+    )
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_id)
+    .execute(&mut *tx)
+    .await
+    .expect("runtime should commit the pre-send marker");
+    let foreign_attempts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM provider_call_attempts WHERE tenant_id=$1",
+    )
+    .bind(tenant_b)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("RLS should hide another tenant's provider attempts");
+    assert_eq!(foreign_attempts, 0);
+    sqlx::query("SAVEPOINT provider_attempt_guard")
+        .execute(&mut *tx)
+        .await
+        .expect("provider attempt guard savepoint should be created");
+    let error = sqlx::query(
+        "UPDATE provider_call_attempts SET state='NotStarted' WHERE tenant_id=$1 AND object_id=$2 AND invocation_id=$3",
+    )
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_id)
+    .execute(&mut *tx)
+    .await
+    .expect_err("runtime must not rewind a potentially sent provider call");
+    assert_sqlstate(error, "23514");
+    sqlx::query("ROLLBACK TO SAVEPOINT provider_attempt_guard")
+        .execute(&mut *tx)
+        .await
+        .expect("provider attempt guard probe should recover the transaction");
+    tx.rollback()
+        .await
+        .expect("provider attempt transaction should roll back");
+
     // Runtime may append event/outbox records but cannot rewrite immutable rows
     // or acknowledge delivery (that capability belongs to the dispatcher).
     let mut tx = set_tenant(&runtime, tenant_a).await;
