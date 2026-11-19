@@ -546,76 +546,105 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
         .expect("durable user input");
     assert_eq!(input, "hello from durable invocation input");
 
-    let mut current = store
-        .load_invocation(&fixture.scope, invocation_id)
+    let owner = "worker-before-restart";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load invocation")
-        .expect("invocation exists");
-    assert_eq!(current.status(), InvocationStatus::Received);
+        .expect("claim invocation")
+        .expect("invocation is claimable");
+    assert_eq!(claimed.status(), InvocationStatus::Received);
 
-    let mut next = current.clone();
-    next.transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+    let mut context_loading = claimed.clone();
+    context_loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
         .expect("Received -> ContextLoading");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                current.version(),
-                FencingToken::INITIAL,
-                next,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                context_loading.clone(),
             )
             .await
             .expect("persist context-loading state")
     );
 
-    current = store
-        .load_invocation(&fixture.scope, invocation_id)
-        .await
-        .expect("reload invocation")
-        .expect("invocation exists");
-    let mut next = current.clone();
-    next.transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+    let mut processing = context_loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, context_loading.fencing_token())
         .expect("ContextLoading -> Processing");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                current.version(),
-                FencingToken::INITIAL,
-                next,
+                owner,
+                context_loading.version(),
+                context_loading.fencing_token(),
+                processing,
             )
             .await
             .expect("persist processing state")
     );
 
-    current = store
+    let processing = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
         .expect("reload processing invocation")
         .expect("invocation exists");
-    let mut next = current.clone();
-    next.transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
         .expect("Processing -> Verifying");
     assert!(
         store
-            .persist_assistant_output(
+            .persist_provider_response_owned(
                 &fixture.scope,
-                current.version(),
-                FencingToken::INITIAL,
-                next,
-                "durable answer".to_owned(),
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+                verifying,
+                qembed_domain::chat::ChatResponse::new(
+                    "durable answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid normalized response"),
             )
             .await
             .expect("persist response and verifying state")
     );
 
-    // A new adapter instance represents a restarted worker process.
+    // A new adapter instance and lease owner represent a restarted worker.
+    sqlx::query(
+        "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("expire pre-restart lease");
     let restarted = PgExecutionStore::new(fixture.pool.clone());
+    let recovery_owner = "worker-after-restart";
     let recovered = restarted
-        .load_invocation(&fixture.scope, invocation_id)
+        .claim_invocation(&fixture.scope, invocation_id, recovery_owner, 60)
         .await
-        .expect("reload after restart")
-        .expect("invocation exists");
+        .expect("reclaim after restart")
+        .expect("Verifying invocation is reclaimable");
     assert_eq!(recovered.status(), InvocationStatus::Verifying);
     let output = restarted
         .load_assistant_output(&fixture.scope, invocation_id)
@@ -626,18 +655,19 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
 
     let mut completed = recovered.clone();
     completed
-        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Completed, recovered.fencing_token())
         .expect("Verifying -> Completed");
     assert!(
         restarted
-            .complete_invocation(
+            .complete_invocation_owned(
                 &fixture.scope,
+                recovery_owner,
                 recovered.version(),
-                FencingToken::INITIAL,
+                recovered.fencing_token(),
                 completed,
             )
             .await
-            .expect("persist terminal state")
+            .expect("settle and persist terminal state")
     );
 
     let terminal = restarted
