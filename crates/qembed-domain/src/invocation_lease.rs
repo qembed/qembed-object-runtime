@@ -98,8 +98,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         expected_version: u64,
         expected_fencing_token: FencingToken,
         next: Invocation,
-        content: String,
-        usage: Option<crate::chat::TokenUsage>,
+        response: crate::chat::ChatResponse,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
     /// Complete Verifying → Completed and release the lease atomically.
