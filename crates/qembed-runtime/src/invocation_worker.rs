@@ -231,7 +231,7 @@ where
                 InvocationStatus::Processing => {
                     let attempt = self
                         .store
-                        .load_provider_call_attempt(scope, invocation_id)
+                        .load_provider_call_attempt(scope, invocation.object_id(), invocation_id)
                         .await
                         .map_err(InvocationWorkerError::Store)?
                         .ok_or(InvocationWorkerError::Conflict)?;
@@ -491,6 +491,7 @@ mod lifecycle_tests {
         ) -> Result<Option<Invocation>, Self::Error> {
             let state = self.0.lock().expect("fake store lock");
             Ok((state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.object_id() == object_id
                 && state.invocation.id() == invocation_id)
                 .then(|| state.invocation.clone()))
         }
@@ -604,6 +605,7 @@ mod lifecycle_tests {
         async fn load_provider_call_attempt(
             &self,
             scope: &Scope,
+            object_id: ObjectId,
             invocation_id: InvocationId,
         ) -> Result<Option<ProviderCallAttempt>, Self::Error> {
             let state = self.0.lock().expect("fake store lock");
