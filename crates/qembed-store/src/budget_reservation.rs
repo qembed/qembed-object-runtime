@@ -102,8 +102,8 @@ pub(crate) async fn reserve_invocation_budget(
     let estimate_i64 =
         i64::try_from(estimate).map_err(|_| BudgetReservationError::ArithmeticOverflow)?;
 
-    let usage_date: chrono::NaiveDate = sqlx::query_scalar(
-        "SELECT (now() AT TIME ZONE 'UTC')::date",
+    let usage_date: String = sqlx::query_scalar(
+        "SELECT (now() AT TIME ZONE 'UTC')::date::text",
     )
     .fetch_one(transaction.connection())
     .await
@@ -112,7 +112,7 @@ pub(crate) async fn reserve_invocation_budget(
     // Sum both pool partitions. The object budget lock prevents another
     // reservation path from changing either row until this transaction ends.
     let object_usage: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(sum(consumed_tokens + reserved_tokens), 0)::bigint FROM usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND usage_date=$3",
+        "SELECT COALESCE(sum(consumed_tokens + reserved_tokens), 0)::bigint FROM usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND usage_date=$3::date",
     )
     .bind(scope.tenant_id().to_string())
     .bind(object_id.to_string())
@@ -121,7 +121,7 @@ pub(crate) async fn reserve_invocation_budget(
     .await
     .map_err(BudgetReservationError::Database)?;
     let caller_usage: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(consumed_tokens + reserved_tokens, 0)::bigint FROM caller_usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND caller_id=$3::uuid AND usage_date=$4",
+        "SELECT COALESCE(consumed_tokens + reserved_tokens, 0)::bigint FROM caller_usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND caller_id=$3::uuid AND usage_date=$4::date",
     )
     .bind(scope.tenant_id().to_string())
     .bind(object_id.to_string())
@@ -162,7 +162,7 @@ pub(crate) async fn reserve_invocation_budget(
     execute(
         transaction,
         sqlx::query(
-            "INSERT INTO usage_counters (tenant_id, object_id, usage_date, pool, reserved_tokens, reserved_cost_micros) VALUES ($1::uuid,$2::uuid,$3,$4,$5,0) ON CONFLICT (tenant_id,object_id,usage_date,pool) DO UPDATE SET reserved_tokens=usage_counters.reserved_tokens + EXCLUDED.reserved_tokens",
+            "INSERT INTO usage_counters (tenant_id, object_id, usage_date, pool, reserved_tokens, reserved_cost_micros) VALUES ($1::uuid,$2::uuid,$3::date,$4,$5,0) ON CONFLICT (tenant_id,object_id,usage_date,pool) DO UPDATE SET reserved_tokens=usage_counters.reserved_tokens + EXCLUDED.reserved_tokens",
         )
         .bind(scope.tenant_id().to_string())
         .bind(object_id.to_string())
@@ -176,7 +176,7 @@ pub(crate) async fn reserve_invocation_budget(
     execute(
         transaction,
         sqlx::query(
-            "INSERT INTO caller_usage_counters (tenant_id,object_id,caller_id,usage_date,reserved_tokens) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5) ON CONFLICT (tenant_id,object_id,caller_id,usage_date) DO UPDATE SET reserved_tokens=caller_usage_counters.reserved_tokens + EXCLUDED.reserved_tokens",
+            "INSERT INTO caller_usage_counters (tenant_id,object_id,caller_id,usage_date,reserved_tokens) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::date,$5) ON CONFLICT (tenant_id,object_id,caller_id,usage_date) DO UPDATE SET reserved_tokens=caller_usage_counters.reserved_tokens + EXCLUDED.reserved_tokens",
         )
         .bind(scope.tenant_id().to_string())
         .bind(object_id.to_string())
@@ -190,7 +190,7 @@ pub(crate) async fn reserve_invocation_budget(
     execute(
         transaction,
         sqlx::query(
-            "INSERT INTO budget_reservations (id,tenant_id,object_id,invocation_id,pool,usage_date,reserved_tokens,reserved_cost_micros,status,expires_at) VALUES (gen_random_uuid(),$1::uuid,$2::uuid,$3::uuid,$4,$5,$6,0,'Reserved',now() + ($7::text || ' milliseconds')::interval)",
+            "INSERT INTO budget_reservations (id,tenant_id,object_id,invocation_id,pool,usage_date,reserved_tokens,reserved_cost_micros,status,expires_at) VALUES (gen_random_uuid(),$1::uuid,$2::uuid,$3::uuid,$4,$5::date,$6,0,'Reserved',now() + ($7::text || ' milliseconds')::interval)",
         )
         .bind(scope.tenant_id().to_string())
         .bind(object_id.to_string())
