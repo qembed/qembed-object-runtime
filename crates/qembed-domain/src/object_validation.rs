@@ -185,7 +185,7 @@ impl ValidationOutcome {
     }
 
     /// Splits the outcome for trusted callers that need both values separately.
-    #[must_use]
+    #[must_use = "retain the validation evidence and its coverage report"]
     pub fn into_parts(self) -> (ValidationEvidence, ValidationReport) {
         (self.evidence, self.report)
     }
@@ -194,7 +194,7 @@ impl ValidationOutcome {
     ///
     /// Prefer retaining the report when presenting validation status to an
     /// operator or API caller; this method exists for existing trusted flows.
-    #[must_use]
+    #[must_use = "publication evidence must be checked by the Store"]
     pub fn into_evidence(self) -> ValidationEvidence {
         self.evidence
     }
