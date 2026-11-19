@@ -36,7 +36,9 @@ impl fmt::Display for InvocationStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
-            Self::Settlement(error) => write!(formatter, "invocation usage settlement failed: {error}"),
+            Self::Settlement(error) => {
+                write!(formatter, "invocation usage settlement failed: {error}")
+            }
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted invocation has invalid {field}")
             }
