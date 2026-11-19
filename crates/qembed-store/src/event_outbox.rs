@@ -1,6 +1,6 @@
 //! Typed, allowlisted event payloads and atomic event/outbox writes.
 
-use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId};
+use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::ObjectState;
 use qembed_domain::scope::Scope;
 use serde::Serialize;
@@ -27,6 +27,8 @@ enum ObjectEventPayload {
         state: &'static str,
         previous_version_id: Option<ObjectVersionId>,
         version_id: ObjectVersionId,
+        snapshot_id: SnapshotId,
+        validator_version: &'static str,
     },
 }
 
@@ -47,6 +49,8 @@ impl ObjectEvent {
         previous_version_id: Option<ObjectVersionId>,
         version_id: ObjectVersionId,
         state: ObjectState,
+        snapshot_id: SnapshotId,
+        validator_version: &'static str,
     ) -> Self {
         Self {
             event_id,
@@ -55,6 +59,8 @@ impl ObjectEvent {
                 state: object_state_name(state),
                 previous_version_id,
                 version_id,
+                snapshot_id,
+                validator_version,
             },
         }
     }
@@ -128,7 +134,7 @@ fn event_object_id(payload: &ObjectEventPayload) -> ObjectId {
 #[cfg(test)]
 mod tests {
     use super::{ObjectEvent, ObjectEventPayload};
-    use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId};
+    use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
     use qembed_domain::object::ObjectState;
 
     #[test]
@@ -158,11 +164,13 @@ mod tests {
             Some(ObjectVersionId::new()),
             ObjectVersionId::new(),
             ObjectState::Active,
+            SnapshotId::new(),
+            "m0-r3-bounded-budget-v1",
         );
         let json = serde_json::to_value(payload.payload).expect("payload should serialize");
         let object = json.as_object().expect("payload should be a JSON object");
 
-        assert_eq!(object.len(), 5);
+        assert_eq!(object.len(), 7);
         assert_eq!(
             object.get("type").and_then(|value| value.as_str()),
             Some("version_published")
@@ -174,6 +182,8 @@ mod tests {
         assert!(object.contains_key("object_id"));
         assert!(object.contains_key("previous_version_id"));
         assert!(object.contains_key("version_id"));
+        assert!(object.contains_key("snapshot_id"));
+        assert_eq!(object.get("validator_version").and_then(|v| v.as_str()), Some("m0-r3-bounded-budget-v1"));
         assert!(!contains_sensitive_key(object));
     }
 

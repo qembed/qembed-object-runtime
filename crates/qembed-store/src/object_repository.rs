@@ -16,6 +16,7 @@ use std::fmt;
 use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
+use qembed_domain::object_validation::{ValidationEvidence, OBJECT_VALIDATOR_VERSION};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::Snapshot;
 use sqlx::PgPool;
@@ -229,7 +230,17 @@ impl ObjectRepository {
         object_id: ObjectId,
         version_id: ObjectVersionId,
         expected_current: Option<ObjectVersionId>,
+        evidence: &ValidationEvidence,
     ) -> Result<(), ObjectRepositoryError> {
+        if evidence.tenant_id() != scope.tenant_id()
+            || evidence.object_id() != object_id
+            || evidence.object_version_id() != version_id
+            || evidence.validator_version() != OBJECT_VALIDATOR_VERSION
+            || evidence.max_tokens_per_invocation() == 0
+        {
+            return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
+        }
+
         let mut transaction = begin_tenant_transaction(&self.pool, scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
@@ -271,10 +282,10 @@ impl ObjectRepository {
         .map_err(ObjectRepositoryError::Database)?
         .ok_or(ObjectRepositoryError::VersionNotFound)?;
 
-        let snapshot_exists = fetch_optional(
+        let persisted_snapshot = fetch_optional(
             &mut transaction,
-            sqlx::query_as::<_, (bool,)>(
-                "SELECT EXISTS (SELECT 1 FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid)",
+            sqlx::query_as::<_, (String, Vec<u8>)>(
+                "SELECT snapshot_id::text, content_hash FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid FOR SHARE",
             )
             .bind(scope.tenant_id().to_string())
             .bind(object_id.to_string())
@@ -282,10 +293,12 @@ impl ObjectRepository {
         )
         .await
         .map_err(ObjectRepositoryError::Database)?
-        .map(|row| row.0)
-        .unwrap_or(false);
-        if !snapshot_exists {
-            return Err(ObjectRepositoryError::SnapshotNotFound);
+        .ok_or(ObjectRepositoryError::SnapshotNotFound)?;
+
+        if persisted_snapshot.0 != evidence.snapshot_id().to_string()
+            || persisted_snapshot.1.as_slice() != evidence.content_hash()
+        {
+            return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
         }
 
         let version_status = parse_version_status(&version_row.0)?;
@@ -388,6 +401,8 @@ impl ObjectRepository {
                 expected_current,
                 version_id,
                 object.state(),
+                evidence.snapshot_id(),
+                evidence.validator_version(),
             ),
         )
         .await
@@ -446,6 +461,8 @@ pub enum ObjectRepositoryError {
     VersionNotFound,
     /// A Draft version cannot be published without its immutable snapshot.
     SnapshotNotFound,
+    /// Trusted validation evidence does not match the requested persisted snapshot.
+    ValidationEvidenceMismatch,
     /// The persisted object state does not permit this operation.
     InvalidObjectState,
     /// The current published pointer differs from the expected value.
@@ -490,6 +507,9 @@ impl fmt::Display for ObjectRepositoryError {
             }
             Self::SnapshotNotFound => {
                 formatter.write_str("object version has no persisted snapshot")
+            }
+            Self::ValidationEvidenceMismatch => {
+                formatter.write_str("validation evidence does not match the persisted snapshot")
             }
             Self::InvalidObjectState => {
                 formatter.write_str("object state does not permit this operation")

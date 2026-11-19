@@ -3,6 +3,7 @@ mod common;
 use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::object::Object;
 use qembed_domain::object_version::ObjectVersion;
+use qembed_domain::object_validation::ObjectValidator;
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::SnapshotBuilder;
 use qembed_domain::test_support::scope_for_tenant;
@@ -24,8 +25,14 @@ async fn publication_rejects_a_legacy_version_without_a_snapshot() {
     .await
     .expect("test fixture should insert a legacy version-only row");
 
+    let unpersisted_snapshot = SnapshotBuilder::new(
+        SnapshotId::new(), scope.tenant_id(), object_id, version_id, 1,
+        br#"{"limits":{"max_tokens_per_invocation":4096}}"#.to_vec(),
+    ).build().expect("candidate snapshot should be canonical");
+    let evidence = ObjectValidator::validate(&unpersisted_snapshot)
+        .expect("candidate snapshot should pass bounded validation");
     let error = repository
-        .publish_version(&scope, object_id, version_id, None)
+        .publish_version(&scope, object_id, version_id, None, &evidence)
         .await
         .expect_err("a version without a snapshot must not be published");
     assert!(matches!(error, ObjectRepositoryError::SnapshotNotFound));
@@ -71,7 +78,7 @@ async fn create_draft_version(
     object_id: ObjectId,
     tenant_id: TenantId,
     number: u64,
-) -> ObjectVersionId {
+) -> (ObjectVersionId, qembed_domain::object_validation::ValidationEvidence) {
     let version_id = ObjectVersionId::new();
     let version = ObjectVersion::new(version_id, tenant_id, object_id, number)
         .expect("version number must be positive");
@@ -81,7 +88,7 @@ async fn create_draft_version(
         object_id,
         version_id,
         1,
-        format!(r#"{{"version":{number}}}"#).into_bytes(),
+        format!(r#"{{"limits":{{"max_tokens_per_invocation":4096}},"version":{number}}}"#).into_bytes(),
     )
     .build()
     .expect("snapshot should be valid canonical JSON");
@@ -96,17 +103,19 @@ async fn create_draft_version(
             snapshot_id: snapshot.id()
         }
     );
-    version_id
+    let evidence = ObjectValidator::validate(&snapshot)
+        .expect("snapshot should pass the bounded semantic validator");
+    (version_id, evidence)
 }
 
 #[tokio::test]
 async fn publication_and_replacement_update_version_and_object_atomically() {
     let (pool, repository, scope, object_id) = setup().await;
     let tenant_id = scope.tenant_id();
-    let first = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
+    let (first, first_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
 
     repository
-        .publish_version(&scope, object_id, first, None)
+        .publish_version(&scope, object_id, first, None, &first_evidence)
         .await
         .expect("first publication should activate the object");
 
@@ -131,9 +140,9 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
     .expect("first version should exist");
     assert_eq!(first_status, "published");
 
-    let second = create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
+    let (second, second_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
     repository
-        .publish_version(&scope, object_id, second, Some(first))
+        .publish_version(&scope, object_id, second, Some(first), &second_evidence)
         .await
         .expect("replacement should atomically supersede the previous version");
 
@@ -164,7 +173,7 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
     );
 
     let stale = repository
-        .publish_version(&scope, object_id, first, Some(first))
+        .publish_version(&scope, object_id, first, Some(first), &first_evidence)
         .await
         .expect_err("a stale expected pointer must not replace the current version");
     assert!(matches!(
@@ -179,7 +188,7 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
 async fn failed_object_pointer_update_rolls_back_both_version_changes() {
     let (pool, repository, scope, object_id) = setup().await;
     let tenant_id = scope.tenant_id();
-    let version_id = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
+    let (version_id, evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
 
     // Inject a failure at the final object-pointer update, after the version
     // row has been changed. The enclosing transaction must undo that change.
@@ -202,7 +211,7 @@ async fn failed_object_pointer_update_rolls_back_both_version_changes() {
         .expect("test trigger should be installed");
 
     let error = repository
-        .publish_version(&scope, object_id, version_id, None)
+        .publish_version(&scope, object_id, version_id, None, &evidence)
         .await
         .expect_err("the injected pointer update failure must abort publication");
     assert!(matches!(
@@ -249,12 +258,12 @@ async fn failed_object_pointer_update_rolls_back_both_version_changes() {
 async fn concurrent_first_publications_allow_exactly_one_winner() {
     let (pool, repository, scope, object_id) = setup().await;
     let tenant_id = scope.tenant_id();
-    let first = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
-    let second = create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
+    let (first, first_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 1).await;
+    let (second, second_evidence) = create_draft_version(&repository, &scope, object_id, tenant_id, 2).await;
 
     let (first_result, second_result) = tokio::join!(
-        repository.publish_version(&scope, object_id, first, None),
-        repository.publish_version(&scope, object_id, second, None),
+        repository.publish_version(&scope, object_id, first, None, &first_evidence),
+        repository.publish_version(&scope, object_id, second, None, &second_evidence),
     );
 
     assert_ne!(first_result.is_ok(), second_result.is_ok());
