@@ -612,6 +612,12 @@ mod lifecycle_tests {
             if state.invocation.tenant_id() != scope.tenant_id()
                 || state.invocation.version() != expected_version
                 || state.invocation.fencing_token() != expected_fencing_token
+                || !matches!(
+                    state.attempt,
+                    ProviderCallAttemptState::NotStarted
+                        | ProviderCallAttemptState::ConfirmedNotAccepted
+                        | ProviderCallAttemptState::CancelledBeforeSend
+                )
             {
                 return Ok(false);
             }
