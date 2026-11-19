@@ -343,8 +343,7 @@ where
                                     invocation.version(),
                                     invocation.fencing_token(),
                                     next,
-                                    response.content().to_owned(),
-                                    response.usage(),
+                                    response,
                                 )
                                 .await
                                 .map_err(InvocationWorkerError::Store)?;
@@ -764,8 +763,7 @@ mod lifecycle_tests {
             version: u64,
             token: FencingToken,
             next: Invocation,
-            content: String,
-            usage: Option<qembed_domain::chat::TokenUsage>,
+            response: qembed_domain::chat::ChatResponse,
         ) -> Result<bool, Self::Error> {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
@@ -777,8 +775,8 @@ mod lifecycle_tests {
             {
                 return Ok(false);
             }
-            state.output = Some(content);
-            state.usage = usage;
+            state.output = Some(response.content().to_owned());
+            state.usage = response.usage();
             state.attempt = ProviderCallAttemptState::ResponseReceived;
             state.invocation = next;
             Ok(true)
