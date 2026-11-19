@@ -127,16 +127,12 @@ pub fn map_invocation_query_error(_: &InvocationQueryError) -> ApiError {
 }
 
 /// Maps invocation persistence failures without exposing database or state
-/// diagnostics. A positively identified stale/invalid write request is a 409.
+/// diagnostics. The current Store error variant is too broad to distinguish a
+/// client conflict from an internal invariant failure, so every variant fails
+/// closed as internal_error until the Store contract provides narrower types.
 #[must_use]
-pub fn map_invocation_store_error(error: &InvocationStoreError) -> ApiError {
-    match error {
-        InvocationStoreError::InvalidRequestedState(_) => map_runtime_error(RuntimeError::Conflict),
-        InvocationStoreError::Database(_)
-        | InvocationStoreError::Settlement(_)
-        | InvocationStoreError::InvalidPersistedValue(_)
-        | InvocationStoreError::AmbiguousMessage(_) => map_runtime_error(RuntimeError::Internal),
-    }
+pub fn map_invocation_store_error(_: &InvocationStoreError) -> ApiError {
+    map_runtime_error(RuntimeError::Internal)
 }
 
 /// Converts an unclassified adapter/store failure to a safe generic response.
