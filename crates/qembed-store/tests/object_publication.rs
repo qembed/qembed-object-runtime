@@ -1,4 +1,3 @@
-
 mod common;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
