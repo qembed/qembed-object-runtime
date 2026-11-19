@@ -333,7 +333,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Owner API не управляет переходами `Validating`/`Published`; публикация требует успешного результата доверенного validator, привязанного к tenant/object/version/snapshot (и hash/ruleset version).
   - Snapshot JCS/integrity и semantic object validation — разные проверки; известный M0 invariant `limits.max_tokens_per_invocation` — положительный JSON integer.
   - Draft version + snapshot создаются одной Store-транзакцией; validation/network I/O выполняются вне неё; publish сохраняет expected-pointer CAS и атомарность Store.
-  - До endpoint implementation закрыть M0 semantic-rules review и решить конфликт snapshot uniqueness для нового version с идентичным content hash (см. документ).
+  - До endpoint implementation зафиксировать bounded semantic-rules baseline и закрыть оставшиеся specification gaps; identical-content version semantics уже утверждены в qembed-sql ADR RUST-044 (см. архитектурный документ).
   - Тесты: API integration на каждый endpoint; auth/tenant negative cases; DTO validation; validator identity binding; PostgreSQL rollback и stale-pointer race cases.
   - DoD: handler-ы только валидируют transport input и вызывают runtime use cases; Store публикует только с доверенным доказательством validation.
 
