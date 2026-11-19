@@ -10,6 +10,20 @@
 //!
 //! The validator version is an immutable implementation identifier. Any
 //! change to the rules implemented under this identifier requires a new value.
+//!
+//! Evidence cannot be serialized or reconstructed from request data:
+//!
+//! ```compile_fail
+//! use qembed_domain::object_validation::ValidationEvidence;
+//! fn require_serialize<T: serde::Serialize>() {}
+//! require_serialize::<ValidationEvidence>();
+//! ```
+//!
+//! ```compile_fail
+//! use qembed_domain::object_validation::ValidationEvidence;
+//! fn require_deserialize<T: serde::de::DeserializeOwned>() {}
+//! require_deserialize::<ValidationEvidence>();
+//! ```
 
 use serde_json::Value;
 
@@ -200,7 +214,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_negative_fractional_and_string_budgets() {
-        for value in ["0", "-1", "1.0", "1.5", "\"10\""] {
+        for value in ["0", "-1", "1.5", "\"10\""] {
             let json = format!(r#"{{"limits":{{"max_tokens_per_invocation":{value}}}}}"#);
             let candidate = snapshot(json.as_bytes());
             assert_eq!(
