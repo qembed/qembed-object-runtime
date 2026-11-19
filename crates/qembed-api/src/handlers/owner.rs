@@ -106,7 +106,19 @@ pub struct ObjectCreationResponse {
     pub state: &'static str,
 }
 
-async fn create_object(request: HttpRequest, state: web::Data<OwnerApiState>) -> HttpResponse {
+async fn create_object(
+    request: HttpRequest,
+    body: web::Bytes,
+    state: web::Data<OwnerApiState>,
+) -> HttpResponse {
+    if !body.is_empty() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "This endpoint does not accept a request body.",
+        );
+    }
+
     let (tenant_id, token) = match owner_credentials(&request) {
         Ok(credentials) => credentials,
         Err(response) => return response,
