@@ -208,9 +208,12 @@ fn parse_create_object_version_body(
     if request.schema_version <= 0 {
         return Err(CreateObjectVersionBodyError::Invalid);
     }
-    let schema_version = u32::try_from(request.schema_version).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
-    let config_json = serde_json::to_vec(&request.config).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
-    let canonical_config = canonicalize_json(&config_json).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    let schema_version =
+        u32::try_from(request.schema_version).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    let config_json =
+        serde_json::to_vec(&request.config).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    let canonical_config =
+        canonicalize_json(&config_json).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
     Ok((schema_version, canonical_config))
 }
 
@@ -393,7 +396,13 @@ mod tests {
             _: ObjectId,
             _: u32,
             _: Vec<u8>,
-        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>> + Send + '_>> {
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
             Box::pin(async { Err(OwnerApiBackendError::Internal) })
         }
 
@@ -431,8 +440,7 @@ mod tests {
                 .is_err()
         );
         assert!(
-            parse_create_object_version_body(br#"{"schema_version":1.0,"config":{}}"#)
-                .is_err()
+            parse_create_object_version_body(br#"{"schema_version":1.0,"config":{}}"#).is_err()
         );
     }
 
