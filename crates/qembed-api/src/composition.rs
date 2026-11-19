@@ -11,7 +11,9 @@ use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
     ids::{InvocationId, ObjectId, TenantId},
 };
-use qembed_runtime::{invocation_query::InvocationQueryService, object_creation::ObjectCreationService};
+use qembed_runtime::{
+    invocation_query::InvocationQueryService, object_creation::ObjectCreationService,
+};
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
     auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
@@ -61,9 +63,12 @@ impl PgOwnerApiBackend {
         owner_token: String,
     ) -> Result<qembed_domain::scope::Scope, OwnerApiBackendError> {
         let authenticator = OwnerAuthenticator::new(self.pool.clone());
-        authenticate_owner(&authenticator, OwnerCredentials::new(tenant_id, owner_token))
-            .await
-            .map_err(|error| match error {
+        authenticate_owner(
+            &authenticator,
+            OwnerCredentials::new(tenant_id, owner_token),
+        )
+        .await
+        .map_err(|error| match error {
                 OwnerAuthenticationError::Rejected(StoreAuthError::InvalidCredentials)
                 | OwnerAuthenticationError::NotOwner => OwnerApiBackendError::Unauthorized,
                 OwnerAuthenticationError::Rejected(StoreAuthError::Database(_))
