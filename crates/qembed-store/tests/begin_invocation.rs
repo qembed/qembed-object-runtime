@@ -113,7 +113,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
           INSERT INTO "{schema}".provider_call_attempts (tenant_id, object_id, invocation_id, state)
           VALUES (NEW.tenant_id, NEW.object_id, NEW.invocation_id, 'NotStarted');
           RETURN NEW;
-        END $provider_attempt$"#
+        END; $provider_attempt$"#
     );
     sqlx::query(&attempt_function)
         .execute(&admin_pool)
