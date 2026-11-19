@@ -162,6 +162,25 @@ impl InvocationWorkStore for PgExecutionStore {
                 "completion must transition to Completed",
             ));
         }
+        let mut ownership = begin_tenant_transaction(&self.pool, scope).await?;
+        let live = fetch_optional(
+            &mut ownership,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT id::text FROM object_invocations WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying' AND lease_owner IS NULL",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
+        )
+        .await?;
+        if live.is_none() {
+            ownership.rollback().await?;
+            return Ok(false);
+        }
+        ownership.commit().await?;
+
         let attempt = {
             let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
             let row = fetch_optional(
