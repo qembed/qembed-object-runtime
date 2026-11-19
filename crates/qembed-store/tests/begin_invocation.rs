@@ -108,12 +108,12 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
 
     let attempt_function = format!(
         r#"CREATE FUNCTION "{schema}".create_provider_call_attempt() RETURNS trigger
-        LANGUAGE plpgsql AS $
+        LANGUAGE plpgsql AS $provider_attempt$
         BEGIN
           INSERT INTO "{schema}".provider_call_attempts (tenant_id, object_id, invocation_id, state)
           VALUES (NEW.tenant_id, NEW.object_id, NEW.invocation_id, 'NotStarted');
           RETURN NEW;
-        END $"#
+        END $provider_attempt$"#
     );
     sqlx::query(&attempt_function)
         .execute(&admin_pool)
