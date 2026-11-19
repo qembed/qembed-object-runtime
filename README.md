@@ -20,6 +20,7 @@ an architecture decision.
 
 - Rust stable toolchain with the `rustfmt` and `clippy` components
 - Rust 1.85.0 (the workspace MSRV; needed to reproduce the MSRV CI job)
+- Cargo dependency resolution configured to prefer packages compatible with the workspace MSRV
 - Docker Engine and Docker Compose v2 for PostgreSQL integration tests
 - Python 3 for the crate-boundary check
 - SQLx CLI 0.8.6 for the SQLx metadata check (installation below)
