@@ -35,9 +35,9 @@
 1. Define each supported object-configuration schema version and its supported feature set from recoverable evidence or an explicitly approved new specification.
 2. Specify a Schema Registry entry for every supported `schema_version`, identifying its Schema Validator, checked fields/structures, per-version unknown-field/extension policy, and which constraints are confirmed versus `not_validated`.
 3. Define the v1 schema and its unknown-field/extension policy explicitly before claiming structural validation for `schema_version: 1`. A positive `schema_version` value (including `1`) identifies a requested version; it does not prove that the corresponding full schema or policy has been defined.
-3. Define tool/provider/permission/security-policy validation requirements before those features can be considered validated.
-4. Extend the immutable validator/ruleset versioning policy as additional rules are approved. The first bounded implementation uses the immutable code identifier `m0-r3-bounded-budget-v1` and binds evidence to tenant, object, version, snapshot, content hash, and validator version. Persistence/revalidation policy remains open if validation becomes asynchronous or evidence must survive process boundaries.
-5. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
+4. Define tool/provider/permission/security-policy validation requirements before those features can be considered validated.
+5. Extend the immutable validator/ruleset versioning policy as additional rules are approved. The first bounded implementation uses the immutable code identifier `m0-r3-bounded-budget-v1` and binds evidence to tenant, object, version, snapshot, content hash, and validator version. Persistence/revalidation policy remains open if validation becomes asynchronous or evidence must survive process boundaries.
+6. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
 
 ## Semantic validation coverage reporting
 
