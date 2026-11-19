@@ -8,8 +8,7 @@ use std::fmt;
 use std::time::Duration;
 
 use qembed_domain::chat::{
-    ChatContractError, ChatMessage, ChatRequest, ChatRole,
-    ProviderRequestContext,
+    ChatContractError, ChatMessage, ChatRequest, ChatRole, ProviderRequestContext,
 };
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::{Invocation, InvocationError, InvocationStatus};
