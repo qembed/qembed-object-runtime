@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use actix_web::{HttpRequest, HttpResponse, http::StatusCode, web};
 use qembed_domain::{
-    ids::{InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId},
+    ids::{InvocationId, ObjectId, TenantId},
     jcs::canonicalize_json,
 };
 
@@ -293,6 +293,11 @@ async fn inspect_invocation(
             "unauthorized",
             "Authentication is required.",
         ),
+        Err(OwnerApiBackendError::NotFound) => api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "The requested resource was not found.",
+        ),
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -318,6 +323,17 @@ mod tests {
             _: String,
         ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>>
         {
+            Box::pin(async { panic!("backend must not be called for invalid transport input") })
+        }
+
+        fn create_version(
+            &self,
+            _: TenantId,
+            _: String,
+            _: ObjectId,
+            _: u32,
+            _: Vec<u8>,
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>> + Send + '_>> {
             Box::pin(async { panic!("backend must not be called for invalid transport input") })
         }
 
@@ -348,6 +364,17 @@ mod tests {
         {
             let id = self.0;
             Box::pin(async move { Ok(id) })
+        }
+
+        fn create_version(
+            &self,
+            _: TenantId,
+            _: String,
+            _: ObjectId,
+            _: u32,
+            _: Vec<u8>,
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>> + Send + '_>> {
+            Box::pin(async { Err(OwnerApiBackendError::Internal) })
         }
 
         fn inspect(
