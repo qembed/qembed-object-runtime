@@ -63,7 +63,9 @@ pub async fn readiness(state: web::Data<HealthState>) -> HttpResponse {
     if state.probe.check().await == ReadinessStatus::Ready {
         HttpResponse::Ok().json(HealthBody { status: "ready" })
     } else {
-        HttpResponse::ServiceUnavailable().json(HealthBody { status: "not_ready" })
+        HttpResponse::ServiceUnavailable().json(HealthBody {
+            status: "not_ready",
+        })
     }
 }
 
