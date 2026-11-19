@@ -14,13 +14,11 @@ use qembed_domain::ports::{
     InvocationReadStore, InvocationWorkStore,
 };
 use qembed_domain::test_support::scope_for_tenant;
-use qembed_store::budget_settlement::{
-    UsageSettlementError, settle_invocation_usage,
-};
 use qembed_store::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, BudgetRejection,
     BudgetReservationError, begin_invocation,
 };
+use qembed_store::budget_settlement::{UsageSettlementError, settle_invocation_usage};
 use qembed_store::invocation_query::PgInvocationQueryStore;
 use qembed_store::invocation_worker::PgExecutionStore;
 use sqlx::PgPool;
@@ -1482,7 +1480,6 @@ async fn malformed_snapshot_budget_fails_closed_and_rolls_back_idempotency() {
     teardown(fixture).await;
 }
 
-
 #[tokio::test]
 async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
     let fixture = setup(None).await;
@@ -1520,21 +1517,26 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
     .fetch_one(&fixture.pool)
     .await
     .expect("settled reservation");
-    assert_eq!(reservation, ("Settled".to_owned(), i64::try_from(estimate).expect("estimate fits bigint"), Some(43)));
+    assert_eq!(
+        reservation,
+        (
+            "Settled".to_owned(),
+            i64::try_from(estimate).expect("estimate fits bigint"),
+            Some(43)
+        )
+    );
 
-    let object_counts: (i64, i64) = sqlx::query_as(
-        "SELECT consumed_tokens, reserved_tokens FROM usage_counters",
-    )
-    .fetch_one(&fixture.pool)
-    .await
-    .expect("object token counters");
+    let object_counts: (i64, i64) =
+        sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("object token counters");
     assert_eq!(object_counts, (43, 0));
-    let caller_counts: (i64, i64) = sqlx::query_as(
-        "SELECT consumed_tokens, reserved_tokens FROM caller_usage_counters",
-    )
-    .fetch_one(&fixture.pool)
-    .await
-    .expect("caller token counters");
+    let caller_counts: (i64, i64) =
+        sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM caller_usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("caller token counters");
     assert_eq!(caller_counts, (43, 0));
 
     // A retry with different in-memory input cannot rewrite an already committed settlement.
@@ -1573,7 +1575,9 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         other => panic!("expected Created, got {other:?}"),
     };
     let estimate = qembed_domain::budget::estimate_input_tokens(
-        command(&fixture, "settle-missing-usage").input_message.len(),
+        command(&fixture, "settle-missing-usage")
+            .input_message
+            .len(),
     )
     .expect("input estimate");
     let outcome = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
@@ -1581,13 +1585,12 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         .expect("missing usage must use the non-zero estimate");
     assert_eq!(outcome.actual_tokens(), estimate);
     assert!(outcome.is_degraded());
-    let reason: Option<String> = sqlx::query_scalar(
-        "SELECT degraded_reason FROM object_invocations WHERE id=$1::uuid",
-    )
-    .bind(invocation_id.to_string())
-    .fetch_one(&fixture.pool)
-    .await
-    .expect("degraded reason");
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT degraded_reason FROM object_invocations WHERE id=$1::uuid")
+            .bind(invocation_id.to_string())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("degraded reason");
     assert_eq!(reason.as_deref(), Some("provider_usage_missing"));
     let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
         .await
@@ -1607,15 +1610,17 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     context_loading
         .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
         .expect("Received -> ContextLoading");
-    assert!(store
-        .compare_and_set_invocation(
-            &fixture.scope,
-            received.version(),
-            FencingToken::INITIAL,
-            context_loading,
-        )
-        .await
-        .expect("persist ContextLoading"));
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                received.version(),
+                FencingToken::INITIAL,
+                context_loading,
+            )
+            .await
+            .expect("persist ContextLoading")
+    );
     let context_loading = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
@@ -1625,15 +1630,17 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     processing
         .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
         .expect("ContextLoading -> Processing");
-    assert!(store
-        .compare_and_set_invocation(
-            &fixture.scope,
-            context_loading.version(),
-            FencingToken::INITIAL,
-            processing,
-        )
-        .await
-        .expect("persist Processing"));
+    assert!(
+        store
+            .compare_and_set_invocation(
+                &fixture.scope,
+                context_loading.version(),
+                FencingToken::INITIAL,
+                processing,
+            )
+            .await
+            .expect("persist Processing")
+    );
     let processing = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
@@ -1643,16 +1650,18 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     verifying
         .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
         .expect("Processing -> Verifying");
-    assert!(store
-        .persist_assistant_output(
-            &fixture.scope,
-            processing.version(),
-            FencingToken::INITIAL,
-            verifying,
-            "degraded result".to_owned(),
-        )
-        .await
-        .expect("persist assistant output"));
+    assert!(
+        store
+            .persist_assistant_output(
+                &fixture.scope,
+                processing.version(),
+                FencingToken::INITIAL,
+                verifying,
+                "degraded result".to_owned(),
+            )
+            .await
+            .expect("persist assistant output")
+    );
     let verifying = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
@@ -1662,15 +1671,17 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     completed
         .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
         .expect("Verifying -> Completed");
-    assert!(store
-        .complete_invocation(
-            &fixture.scope,
-            verifying.version(),
-            FencingToken::INITIAL,
-            completed,
-        )
-        .await
-        .expect("complete degraded invocation"));
+    assert!(
+        store
+            .complete_invocation(
+                &fixture.scope,
+                verifying.version(),
+                FencingToken::INITIAL,
+                completed,
+            )
+            .await
+            .expect("complete degraded invocation")
+    );
     let status: String =
         sqlx::query_scalar("SELECT status FROM object_invocations WHERE id=$1::uuid")
             .bind(invocation_id.to_string())
@@ -1729,7 +1740,10 @@ async fn settlement_database_failure_rolls_back_both_counters_and_reservation() 
             .fetch_one(&fixture.pool)
             .await
             .expect("object counters after rollback");
-    assert_eq!(object_counts, (0, i64::try_from(estimate).expect("estimate fits bigint")));
+    assert_eq!(
+        object_counts,
+        (0, i64::try_from(estimate).expect("estimate fits bigint"))
+    );
     let caller_counts: (i64, i64) =
         sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM caller_usage_counters")
             .fetch_one(&fixture.pool)
