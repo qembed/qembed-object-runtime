@@ -1,12 +1,16 @@
 # RUST-044 — Owner API and trusted publication validation
 
-**Status:** accepted architectural constraints; implementation contract pending the M0 specification review and the schema questions listed below.
+**Status:** architecture baseline recorded; implementation contract is constrained by the surviving M0 artifacts and the explicit specification gaps in [M0_SPEC_GAPS.md](./M0_SPEC_GAPS.md).
 
 ## 1. Scope and source hierarchy
 
 RUST-044 is the M1a Owner API walking-skeleton slice: create object/version, publish, invoke, inspect invocation. The Owner API is a transport boundary, not a publication authority.
 
-The normative source currently available in machine-readable form is the M0 v2.3.3 r3 Finalization Addendum, together with ADR RT-039…RT-048 and acceptance T-01…T-64. The addendum says the original M0 v2.2 specification retains unchanged domain/API sections, but the consolidated PDF in the SQL repository is explicitly marked as not re-rendered after r1. The Markdown addendum takes precedence for the changes it covers. The original specification's complete object-configuration validation section still needs a direct text-level review before claiming that M0 contains no further validation rules.
+The original M0 v2.2 source specification is unavailable and must be treated as lost. It has not been reconstructed. No implementation or documentation may claim to have reviewed, recovered, or inferred requirements from that missing source.
+
+The verifiable normative baseline is limited to the surviving M0 v2.3.3 r3 Finalization Addendum, ADR RT-039…RT-048, acceptance T-01…T-64, and canonical SQL artifacts in qembed-sql. The consolidated PDF is marked r1 and was not re-rendered after r3; the Markdown addendum is authoritative for the changes it explicitly covers. These surviving artifacts do not establish that every original M0 v2.2 rule is present.
+
+Any requirement not established by the surviving artifacts is a specification gap. If the project later chooses a rule to fill such a gap, record it as a new, explicitly approved project decision/ADR—not as recovered M0 behaviour. See [M0_SPEC_GAPS.md](./M0_SPEC_GAPS.md).
 
 ## 2. Separate three different guarantees
 
@@ -29,18 +33,21 @@ JCS proves canonical representation and integrity. It does **not** prove that th
 
 A trusted Object Validator checks the content of one exact candidate. It must not treat successful JCS validation as a semantic pass.
 
-The M0 addendum explicitly requires every newly published snapshot to contain `limits.max_tokens_per_invocation` as a positive JSON integer. Missing, zero, negative, fractional, or string values make the snapshot invalid for invocation. This is a known semantic invariant and must be checked before publication.
+The surviving M0 Addendum §5 explicitly requires every newly published snapshot to contain `limits.max_tokens_per_invocation` as a positive JSON integer. Missing, zero, negative, fractional, or string values make the snapshot invalid for invocation. This is a confirmed semantic invariant and must be checked before publication.
 
-The reviewed addendum, ADRs and acceptance plan do not define a complete schema/rule set for tool declarations, provider configuration, permissions, or security policies. Do not invent those rules or report them as validated. Before implementing broader semantic checks, review the original M0 v2.2 object/configuration sections. If those sections do not specify the rules, record a separate M0 specification gap and keep the validator fail-closed for unsupported/unknown configuration rather than pretending to validate it.
+The surviving artifacts do not provide a complete semantic schema/rule set for tool declarations, provider configuration, permissions, or security policies. Do not invent those rules or report these areas as fully validated.
+
+**Fail-closed rule:** publication must not proceed when a required validation rule is unknown, unsupported, or not implemented for a configuration feature that the runtime is about to rely on. This does not authorize rejecting arbitrary JSON fields merely because they are unfamiliar; field/extension compatibility itself needs a documented schema rule. Until that rule exists, the validator may only claim the explicitly implemented and evidenced validation coverage. No "fully M0-valid" claim is permitted.
 
 ### 2.3 Publication authorization and Store atomicity
 
 - Owner API may request publication; it cannot call a state-transition path that independently moves an object to `Validating` or `Published`.
 - Only the trusted validation use case may start validation and produce a successful validation result.
-- The result is bound to the full identity tuple: tenant, object, object version, snapshot. It should additionally carry the snapshot content hash and validator/ruleset version so the evidence is tied to the exact immutable bytes and the rules used.
+- The result is bound to the full identity tuple: tenant, object, object version, snapshot. It additionally carries the snapshot content hash and immutable validator/ruleset version so evidence is tied to the exact bytes and rules used.
 - A result for another tenant, object, version, or snapshot is invalid. Missing, failed, stale, or mismatched evidence fails closed.
-- `publish_version()` remains one PostgreSQL transaction. It checks the trusted validation result and the expected current published-version pointer while holding the object row lock; then it supersedes the old version (if any), publishes the new version, updates the pointer, appends the event, and commits.
-- Validation evidence does not replace the expected-pointer CAS, row lock, state checks, tenant scope, or DB constraints. A stale pointer still rejects publication even when validation succeeded.
+- Validator/ruleset versions are immutable identifiers. Changing validation semantics requires a new version; evidence must never be reinterpreted under a newer ruleset.
+- `publish_version()` remains one PostgreSQL transaction. It checks the trusted validation result and expected current published-version pointer while holding the object row lock; then it supersedes the old version (if any), publishes the new version, updates the pointer, appends the event, and commits.
+- Validation evidence does not replace expected-pointer CAS, row lock, state checks, tenant scope, or DB constraints. A stale pointer still rejects publication even when validation succeeded.
 - Owner HTTP handlers call runtime use cases only. They do not receive a generic Store handle or invoke `begin_validation()` / `publish_version()` directly.
 
 The exact representation and durability of the validation result (opaque in-process capability versus persisted receipt) must be chosen with the validator execution model. In either form, callers cannot construct a successful result from request JSON, a client boolean, a tenant ID, or an untrusted DTO. If validation becomes asynchronous or can be resumed by another worker/process, the result must be persisted and verified by Store in the publication transaction.
@@ -57,7 +64,7 @@ No network or validator I/O belongs inside this transaction. Snapshot/JCS constr
 
 The canonical M0 SQL defines `UNIQUE (tenant_id, object_id, content_hash)` on `snapshots`, while each snapshot row also stores `object_version_id` and has a composite FK to that exact version. Therefore, two versions of the same object cannot each receive a distinct snapshot row with identical canonical bytes/hash.
 
-The M0 acceptance plan requires reuse of a snapshot for repeated invocations of the same configuration, but does not settle the separate case of creating a *new version* whose content is byte-identical to an earlier version. Do not silently work around this by attaching the earlier version's snapshot to a different version: that would violate the requested tenant/object/version/snapshot binding. Before implementing the Owner create-version contract, decide whether identical-content version creation is rejected/deduplicated at the version level or whether the canonical SQL contract is to be revised in a separate qembed-sql change. Rust must not independently change the physical schema.
+The M0 acceptance plan requires reuse of a snapshot for repeated invocations of the same configuration, but does not settle the separate case of creating a *new version* whose content is byte-identical to an earlier version. Do not silently work around this by attaching the earlier version's snapshot to a different version: that would violate the required tenant/object/version/snapshot binding. Before implementing the Owner create-version contract, decide whether identical-content version creation is rejected/deduplicated at the version level or whether the canonical SQL contract is to be revised in a separate qembed-sql change. Rust must not independently change the physical schema.
 
 ## 5. Required failure behaviour and tests
 
@@ -68,20 +75,22 @@ At minimum, tests must prove:
 - the known positive-integer budget invariant is enforced;
 - a validation result cannot be reused across tenant/object/version/snapshot identities;
 - a result for a different snapshot hash or validator/ruleset version is rejected;
+- validator/ruleset version changes do not retroactively alter the meaning of existing evidence;
 - Owner API cannot invoke validation state transitions or mint successful evidence;
 - failed snapshot insert rolls back draft-version insert, and failed version insert leaves no snapshot;
 - validation failure leaves the object unpublished and does not move the published pointer;
 - stale expected pointer rejects publication even with valid evidence;
 - successful replacement preserves the existing Store lock/CAS and atomic event/pointer/state semantics;
-- all paths retain tenant Scope/RLS isolation.
+- all paths retain tenant Scope/RLS isolation;
+- API errors do not reveal raw validator diagnostics, secrets, SQL details, or internal evidence.
 
-HTTP status/error mapping for semantic validation failures, evidence mismatch, and stale publication must be documented in `docs/ERROR_HANDLING.md` before handlers are finalized. Responses must not expose raw validator diagnostics, secrets, SQL details, or internal evidence.
+HTTP status/error mapping for semantic validation failures, evidence mismatch, and stale publication must be documented in `docs/ERROR_HANDLING.md` before handlers are finalized.
 
 ## 6. Implementation order
 
-1. Complete the original M0 v2.2 specification review and record the exact semantic validation rules and explicit non-goals.
+1. Treat the original M0 v2.2 specification as unavailable; use only the surviving artifacts as verified requirements and maintain the gap register.
 2. Resolve identical-content new-version semantics against canonical qembed-sql; if a schema change is needed, make it in qembed-sql first.
-3. Define the domain validator port and opaque success result, including identity/hash/ruleset binding and error taxonomy.
+3. Define the domain validator port and opaque success result, including identity/hash/immutable-ruleset binding and error taxonomy. Limit claims to implemented, evidenced rules.
 4. Add one Store transaction for draft-version + snapshot creation.
 5. Make publication require trusted validation evidence while preserving the existing expected-pointer CAS and transaction.
 6. Implement Owner HTTP DTOs/handlers as thin adapters over runtime use cases.
