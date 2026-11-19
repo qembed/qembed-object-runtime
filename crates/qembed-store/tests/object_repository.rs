@@ -69,18 +69,27 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
     .expect("version and snapshot should be queryable");
     assert_eq!(stored, (1, "draft".to_owned(), 1));
 
-    // A different payload with the same version number is rejected by the DB.
-    let duplicate_number = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
-        .expect("version number must be positive");
-    let duplicate_snapshot = snapshot(&duplicate_number, br#"{"version":2}"#);
-    let duplicate = repository
-        .create_draft_version_with_snapshot(&scope_a, &duplicate_number, &duplicate_snapshot)
-        .await
-        .expect_err("duplicate version numbers must be rejected");
+    // The repository allocates the next version number while holding the
+    // tenant-scoped object row lock; callers cannot choose or collide on it.
+    let second_version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
+        .expect("the caller-supplied placeholder number is positive");
+    let second_snapshot = snapshot(&second_version, br#"{"version":2}"#);
     assert!(matches!(
-        duplicate,
-        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+        repository
+            .create_draft_version_with_snapshot(&scope_a, &second_version, &second_snapshot)
+            .await
+            .expect("the repository should allocate version number 2"),
+        DraftCreation::Created { .. }
     ));
+    let allocated_numbers: Vec<i64> = sqlx::query_scalar(
+        "SELECT version_number FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid ORDER BY version_number",
+    )
+    .bind(tenant_a.to_string())
+    .bind(object.id().to_string())
+    .fetch_all(&pool)
+    .await
+    .expect("allocated version numbers should be queryable");
+    assert_eq!(allocated_numbers, vec![1, 2]);
 
     // The trusted scope, not caller-provided tenant data, determines ownership.
     let tenant_b = TenantId::new();
@@ -98,10 +107,7 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         .create_draft_version_with_snapshot(&scope_b, &foreign_version, &foreign_snapshot)
         .await
         .expect_err("cross-tenant object references must be rejected");
-    assert!(matches!(
-        foreign_error,
-        ObjectRepositoryError::Database(sqlx::Error::Database(_))
-    ));
+    assert!(matches!(foreign_error, ObjectRepositoryError::ObjectNotFound));
 
     // A failed atomic insert leaves no orphaned version.
     let missing_object_version =
@@ -113,10 +119,7 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         .create_draft_version_with_snapshot(&scope_a, &missing_object_version, &missing_snapshot)
         .await
         .expect_err("a version cannot be created without its parent object");
-    assert!(matches!(
-        rollback_error,
-        ObjectRepositoryError::Database(sqlx::Error::Database(_))
-    ));
+    assert!(matches!(rollback_error, ObjectRepositoryError::ObjectNotFound));
     let persisted: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM object_versions WHERE tenant_id = $1::uuid AND object_version_id = $2::uuid",
     )
@@ -154,6 +157,48 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         non_draft_version,
         ObjectRepositoryError::VersionMustBeDraft
     ));
+
+    
+    pool.close().await;
+}
+
+
+#[tokio::test]
+async fn concurrent_draft_creations_allocate_distinct_sequential_version_numbers() {
+    let pool = common::connect().await;
+    run_migrations(&pool).await.expect("migrations should run");
+    let repository = ObjectRepository::new(pool.clone());
+    let tenant_id = TenantId::new();
+    let scope = scope_for_tenant(tenant_id);
+    let object = Object::new(ObjectId::new(), tenant_id);
+    repository
+        .create_object(&scope, &object)
+        .await
+        .expect("object should be created");
+
+    let first = ObjectVersion::new(ObjectVersionId::new(), tenant_id, object.id(), 1)
+        .expect("placeholder version number is positive");
+    let first_snapshot = snapshot(&first, br#"{"payload":"first"}"#);
+    let second = ObjectVersion::new(ObjectVersionId::new(), tenant_id, object.id(), 1)
+        .expect("placeholder version number is positive");
+    let second_snapshot = snapshot(&second, br#"{"payload":"second"}"#);
+
+    let (first_result, second_result) = tokio::join!(
+        repository.create_draft_version_with_snapshot(&scope, &first, &first_snapshot),
+        repository.create_draft_version_with_snapshot(&scope, &second, &second_snapshot),
+    );
+    assert!(matches!(first_result, Ok(DraftCreation::Created { .. })));
+    assert!(matches!(second_result, Ok(DraftCreation::Created { .. })));
+
+    let numbers: Vec<i64> = sqlx::query_scalar(
+        "SELECT version_number FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid ORDER BY version_number",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object.id().to_string())
+    .fetch_all(&pool)
+    .await
+    .expect("version numbers should be queryable");
+    assert_eq!(numbers, vec![1, 2]);
 
     pool.close().await;
 }
