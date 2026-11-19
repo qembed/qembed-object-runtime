@@ -2,9 +2,9 @@
 
 use std::str::FromStr;
 
+use qembed_domain::chat::TokenUsage;
 use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
-use qembed_domain::chat::TokenUsage;
 use qembed_domain::invocation_lease::InvocationLeaseStore;
 use qembed_domain::provider_call_attempt::{ProviderCallAttempt, ProviderCallAttemptState};
 use qembed_domain::scope::Scope;
@@ -144,13 +144,22 @@ impl InvocationLeaseStore for PgExecutionStore {
             let usage = match (input, output) {
                 (None, None) => None,
                 (Some(input), Some(output)) => Some(TokenUsage::new(
-                    u32::try_from(input).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider input_tokens"))?,
-                    u32::try_from(output).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider output_tokens"))?,
+                    u32::try_from(input).map_err(|_| {
+                        InvocationStoreError::InvalidPersistedValue("provider input_tokens")
+                    })?,
+                    u32::try_from(output).map_err(|_| {
+                        InvocationStoreError::InvalidPersistedValue("provider output_tokens")
+                    })?,
                 )),
-                _ => return Err(InvocationStoreError::InvalidPersistedValue("provider usage pair")),
+                _ => {
+                    return Err(InvocationStoreError::InvalidPersistedValue(
+                        "provider usage pair",
+                    ));
+                }
             };
             Ok(ProviderCallAttempt::from_persisted(state, usage))
-        }).transpose()
+        })
+        .transpose()
     }
 
     async fn mark_provider_may_have_been_sent_owned(
@@ -214,8 +223,13 @@ impl InvocationLeaseStore for PgExecutionStore {
         usage: Option<TokenUsage>,
     ) -> Result<bool, Self::Error> {
         validate_next(scope, expected_version, expected_fencing_token, &next)?;
-        if next.status() != InvocationStatus::Verifying || content.trim().is_empty() || content.len() > 1_048_576 {
-            return Err(InvocationStoreError::InvalidRequestedState("provider response must be non-empty and transition Processing to Verifying"));
+        if next.status() != InvocationStatus::Verifying
+            || content.trim().is_empty()
+            || content.len() > 1_048_576
+        {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "provider response must be non-empty and transition Processing to Verifying",
+            ));
         }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let attempt = execute(
@@ -295,10 +309,16 @@ impl InvocationLeaseStore for PgExecutionStore {
         // Verifying is the recovery point after the provider response commit.
         // Settlement is replay-safe, so a crash between settlement and terminal
         // completion can resume here without another provider request.
-        let attempt = self.load_provider_call_attempt(scope, next.id()).await?
-            .ok_or(InvocationStoreError::InvalidRequestedState("provider call attempt is missing"))?;
+        let attempt = self
+            .load_provider_call_attempt(scope, next.id())
+            .await?
+            .ok_or(InvocationStoreError::InvalidRequestedState(
+                "provider call attempt is missing",
+            ))?;
         if attempt.state() != ProviderCallAttemptState::ResponseReceived {
-            return Err(InvocationStoreError::InvalidRequestedState("provider response is not durably recorded"));
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "provider response is not durably recorded",
+            ));
         }
         crate::budget_settlement::settle_invocation_usage(
             &self.pool,
@@ -307,7 +327,9 @@ impl InvocationLeaseStore for PgExecutionStore {
             attempt.usage(),
         )
         .await
-        .map_err(|_| InvocationStoreError::InvalidRequestedState("provider usage settlement failed"))?;
+        .map_err(|_| {
+            InvocationStoreError::InvalidRequestedState("provider usage settlement failed")
+        })?;
 
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
 
@@ -515,7 +537,9 @@ const fn status_name(status: InvocationStatus) -> &'static str {
     }
 }
 
-fn parse_provider_attempt_state(value: &str) -> Result<ProviderCallAttemptState, InvocationStoreError> {
+fn parse_provider_attempt_state(
+    value: &str,
+) -> Result<ProviderCallAttemptState, InvocationStoreError> {
     match value {
         "NotStarted" => Ok(ProviderCallAttemptState::NotStarted),
         "MayHaveBeenSent" => Ok(ProviderCallAttemptState::MayHaveBeenSent),
@@ -523,6 +547,8 @@ fn parse_provider_attempt_state(value: &str) -> Result<ProviderCallAttemptState,
         "ConfirmedNotAccepted" => Ok(ProviderCallAttemptState::ConfirmedNotAccepted),
         "OutcomeUnknown" => Ok(ProviderCallAttemptState::OutcomeUnknown),
         "CancelledBeforeSend" => Ok(ProviderCallAttemptState::CancelledBeforeSend),
-        _ => Err(InvocationStoreError::InvalidPersistedValue("provider attempt state")),
+        _ => Err(InvocationStoreError::InvalidPersistedValue(
+            "provider attempt state",
+        )),
     }
 }
