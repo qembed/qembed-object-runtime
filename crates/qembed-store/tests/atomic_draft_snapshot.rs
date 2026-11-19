@@ -9,7 +9,12 @@ use qembed_store::object_repository::{DraftCreation, ObjectRepository, ObjectRep
 use qembed_store::run_migrations;
 use sqlx::PgPool;
 
-async fn setup() -> (PgPool, ObjectRepository, qembed_domain::scope::Scope, ObjectId) {
+async fn setup() -> (
+    PgPool,
+    ObjectRepository,
+    qembed_domain::scope::Scope,
+    ObjectId,
+) {
     let pool = common::connect().await;
     run_migrations(&pool).await.expect("migrations should run");
     let tenant_id = TenantId::new();
@@ -97,12 +102,18 @@ async fn identical_content_reuses_existing_version_and_snapshot_without_new_rows
         .expect("identical bytes should be deduplicated");
 
     let (version_id, snapshot_id) = match first {
-        DraftCreation::Created { version_id, snapshot_id } => (version_id, snapshot_id),
+        DraftCreation::Created {
+            version_id,
+            snapshot_id,
+        } => (version_id, snapshot_id),
         other => panic!("first insertion should be new, got {other:?}"),
     };
     assert_eq!(
         second,
-        DraftCreation::IdenticalContent { version_id, snapshot_id }
+        DraftCreation::IdenticalContent {
+            version_id,
+            snapshot_id
+        }
     );
     let counts: (i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid), (SELECT count(*) FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid)",
@@ -225,6 +236,9 @@ async fn snapshot_must_match_the_supplied_version_and_tenant() {
         .create_draft_version_with_snapshot(&scope, &version, &wrong_snapshot)
         .await
         .expect_err("snapshot must point at the exact supplied version");
-    assert!(matches!(error, ObjectRepositoryError::SnapshotVersionMismatch));
+    assert!(matches!(
+        error,
+        ObjectRepositoryError::SnapshotVersionMismatch
+    ));
     pool.close().await;
 }
