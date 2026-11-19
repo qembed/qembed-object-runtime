@@ -109,58 +109,18 @@ impl InvocationLeaseStore for PgExecutionStore {
         next: Invocation,
         content: String,
     ) -> Result<bool, Self::Error> {
-        validate_next(scope, expected_version, expected_fencing_token, &next)?;
-        if next.status() != InvocationStatus::Verifying {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "assistant output must move Processing to Verifying",
-            ));
-        }
-        if content.trim().is_empty() || content.len() > 1_048_576 {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "assistant output is empty or too large",
-            ));
-        }
-
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
-        let inserted = execute(
-            &mut transaction,
-            sqlx::query(
-                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $7::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $8, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$1::uuid AND invocation.object_id=$2::uuid AND invocation.id=$3::uuid AND invocation.lease_owner=$4 AND invocation.lease_until > now() AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(owner)
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "fencing token")?)
-            .bind(MessageId::new().to_string())
-            .bind(content),
+        // Compatibility entry point: preserve the durable attempt protocol and
+        // explicitly treat unavailable usage as missing, never as zero.
+        self.persist_provider_response_owned(
+            scope,
+            owner,
+            expected_version,
+            expected_fencing_token,
+            next,
+            content,
+            None,
         )
-        .await?;
-        if inserted.rows_affected() != 1 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-
-        let transitioned = execute(
-            &mut transaction,
-            sqlx::query(
-                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until > now() AND version=$5 AND fencing_token=$6 AND status='Processing'",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(owner)
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
-        )
-        .await?;
-        if transitioned.rows_affected() != 1 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        transaction.commit().await?;
-        Ok(true)
+        .await
     }
 
     async fn load_provider_call_attempt(
