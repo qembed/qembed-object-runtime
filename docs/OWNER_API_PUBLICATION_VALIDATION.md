@@ -37,6 +37,10 @@ The surviving M0 Addendum §5 explicitly requires every newly published snapshot
 
 The surviving artifacts do not provide a complete semantic schema/rule set for tool declarations, provider configuration, permissions, or security policies. Do not invent those rules or report these areas as fully validated.
 
+**Bounded validator implementation v1:** the domain validator is versioned as `m0-r3-bounded-budget-v1`. It checks the confirmed `limits.max_tokens_per_invocation` invariant and issues non-serializable evidence bound to tenant, object, object version, snapshot, content hash, and validator version. It exposes the parsed limit for the existing u64-based runtime budget path. Values that are not representable as a positive u64 are rejected by the current implementation; this is a runtime representability boundary, not a claim that M0 defines a u64 maximum. JCS rejects noncanonical encodings before semantic validation. This bounded validator does not validate tool/provider/permission/security-policy semantics and must not be described as a complete object validator.
+
+At this stage the evidence type and validator are domain-only. The Store publication path has not yet been changed to require this evidence; that is the next integration boundary. The evidence is deliberately not serializable, so it cannot be supplied or restored from an Owner API DTO.
+
 **Fail-closed rule:** publication must not proceed when a required validation rule is unknown, unsupported, or not implemented for a configuration feature that the runtime is about to rely on. This does not authorize rejecting arbitrary JSON fields merely because they are unfamiliar; field/extension compatibility itself needs a documented schema rule. Until that rule exists, the validator may only claim the explicitly implemented and evidenced validation coverage. No "fully M0-valid" claim is permitted.
 
 ### 2.3 Publication authorization and Store atomicity
