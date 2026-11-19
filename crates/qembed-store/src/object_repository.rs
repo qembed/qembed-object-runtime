@@ -1,4 +1,15 @@
 //! Tenant-scoped persistence for Object aggregates and draft versions.
+//!
+//! Draft versions are created only together with their immutable snapshots.
+//!
+//! ```compile_fail
+//! use qembed_store::object_repository::ObjectRepository;
+//! use qembed_domain::object_version::ObjectVersion;
+//! use qembed_domain::scope::Scope;
+//! async fn bypass(repository: &ObjectRepository, scope: &Scope, version: &ObjectVersion) {
+//!     repository.create_draft_version(scope, version).await;
+//! }
+//! ```
 
 use std::fmt;
 
@@ -49,47 +60,6 @@ impl ObjectRepository {
             )
             .bind(scope.tenant_id().to_string())
             .bind(object.id().to_string()),
-        )
-        .await
-        .map_err(ObjectRepositoryError::Database)?;
-
-        transaction
-            .commit()
-            .await
-            .map_err(ObjectRepositoryError::Database)
-    }
-
-    /// Inserts a Draft version for an existing object in the same tenant.
-    ///
-    /// The composite foreign key ensures that the referenced object belongs
-    /// to this tenant; a version cannot attach to an object in another tenant.
-    pub async fn create_draft_version(
-        &self,
-        scope: &Scope,
-        version: &ObjectVersion,
-    ) -> Result<(), ObjectRepositoryError> {
-        if version.tenant_id() != scope.tenant_id() {
-            return Err(ObjectRepositoryError::TenantMismatch);
-        }
-        if version.status() != ObjectVersionStatus::Draft {
-            return Err(ObjectRepositoryError::VersionMustBeDraft);
-        }
-        let version_number = i64::try_from(version.version_number())
-            .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?;
-
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
-            .await
-            .map_err(ObjectRepositoryError::Database)?;
-
-        execute(
-            &mut transaction,
-            sqlx::query(
-                "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number, status) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'draft')",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(version.object_id().to_string())
-            .bind(version.id().to_string())
-            .bind(version_number),
         )
         .await
         .map_err(ObjectRepositoryError::Database)?;
@@ -301,6 +271,23 @@ impl ObjectRepository {
         .map_err(ObjectRepositoryError::Database)?
         .ok_or(ObjectRepositoryError::VersionNotFound)?;
 
+        let snapshot_exists = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (bool,)>(
+                "SELECT EXISTS (SELECT 1 FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid)",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
+            .bind(version_id.to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?
+        .map(|row| row.0)
+        .unwrap_or(false);
+        if !snapshot_exists {
+            return Err(ObjectRepositoryError::SnapshotNotFound);
+        }
+
         let version_status = parse_version_status(&version_row.0)?;
         let version_number = u64::try_from(version_row.1)
             .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?;
@@ -457,6 +444,8 @@ pub enum ObjectRepositoryError {
     DomainVersion(ObjectVersionError),
     /// The requested version does not belong to this object and tenant.
     VersionNotFound,
+    /// A Draft version cannot be published without its immutable snapshot.
+    SnapshotNotFound,
     /// The persisted object state does not permit this operation.
     InvalidObjectState,
     /// The current published pointer differs from the expected value.
@@ -498,6 +487,9 @@ impl fmt::Display for ObjectRepositoryError {
             }
             Self::VersionNotFound => {
                 formatter.write_str("version does not belong to this object and tenant")
+            }
+            Self::SnapshotNotFound => {
+                formatter.write_str("object version has no persisted snapshot")
             }
             Self::InvalidObjectState => {
                 formatter.write_str("object state does not permit this operation")

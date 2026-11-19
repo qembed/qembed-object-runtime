@@ -1,3 +1,32 @@
+#[tokio::test]
+async fn publication_rejects_a_legacy_version_without_a_snapshot() {
+    let (pool, repository, scope, object_id) = setup().await;
+    let version_id = ObjectVersionId::new();
+    sqlx::query(
+        "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'draft')",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("test fixture should insert a legacy version-only row");
+
+    let error = repository.publish_version(&scope, object_id, version_id, None).await
+        .expect_err("a version without a snapshot must not be published");
+    assert!(matches!(error, ObjectRepositoryError::SnapshotNotFound));
+
+    let state: (String, String) = sqlx::query_as(
+        "SELECT o.state, v.status FROM objects o JOIN object_versions v ON v.tenant_id = o.tenant_id AND v.object_id = o.object_id WHERE o.tenant_id = $1::uuid AND o.object_id = $2::uuid AND v.object_version_id = $3::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .fetch_one(&pool).await.expect("rejected rows should remain queryable");
+    assert_eq!(state, ("validating".to_owned(), "draft".to_owned()));
+    pool.close().await;
+}
+
 mod common;
 
 use qembed_domain::ids::{ObjectId, ObjectVersionId, TenantId};
@@ -43,10 +72,24 @@ async fn create_draft_version(
     let version_id = ObjectVersionId::new();
     let version = ObjectVersion::new(version_id, tenant_id, object_id, number)
         .expect("version number must be positive");
-    repository
-        .create_draft_version(scope, &version)
+    let snapshot = SnapshotBuilder::new(
+        SnapshotId::new(),
+        tenant_id,
+        object_id,
+        version_id,
+        1,
+        format!(r#"{{"version":{number}}}"#).into_bytes(),
+    )
+    .build()
+    .expect("snapshot should be valid canonical JSON");
+    let result = repository
+        .create_draft_version_with_snapshot(scope, &version, &snapshot)
         .await
-        .expect("draft version should be created");
+        .expect("Draft version and snapshot should be created atomically");
+    assert_eq!(
+        result,
+        DraftCreation::Created { version_id, snapshot_id: snapshot.id() }
+    );
     version_id
 }
 
