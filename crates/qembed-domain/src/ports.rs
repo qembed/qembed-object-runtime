@@ -116,8 +116,6 @@ pub trait InvocationWorkStore: ExecutionStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> impl Future<Output = Result<Option<String>, Self::Error>> + Send;
-
-
 }
 
 /// Read-only persistence boundary for the client-visible invocation projection.
