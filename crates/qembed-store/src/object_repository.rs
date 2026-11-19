@@ -469,11 +469,7 @@ impl ObjectRepository {
 impl ObjectCreationStore for ObjectRepository {
     type Error = ObjectRepositoryError;
 
-    async fn create_object(
-        &self,
-        scope: &Scope,
-        object: &Object,
-    ) -> Result<(), Self::Error> {
+    async fn create_object(&self, scope: &Scope, object: &Object) -> Result<(), Self::Error> {
         ObjectRepository::create_object(self, scope, object).await
     }
 }
