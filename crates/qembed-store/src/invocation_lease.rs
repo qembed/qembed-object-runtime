@@ -103,15 +103,17 @@ impl InvocationLeaseStore for PgExecutionStore {
     async fn load_provider_call_attempt(
         &self,
         scope: &Scope,
+        object_id: ObjectId,
         invocation_id: InvocationId,
     ) -> Result<Option<ProviderCallAttempt>, Self::Error> {
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, (String, Option<i64>, Option<i64>)>(
-                "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+                "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
             )
             .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
             .bind(invocation_id.to_string()),
         )
         .await?;
@@ -310,7 +312,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         // Settlement is replay-safe, so a crash between settlement and terminal
         // completion can resume here without another provider request.
         let attempt = self
-            .load_provider_call_attempt(scope, next.id())
+            .load_provider_call_attempt(scope, next.object_id(), next.id())
             .await?
             .ok_or(InvocationStoreError::InvalidRequestedState(
                 "provider call attempt is missing",
