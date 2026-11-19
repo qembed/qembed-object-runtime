@@ -135,8 +135,6 @@ impl InvocationWorkStore for PgExecutionStore {
     ) -> Result<Option<String>, Self::Error> {
         load_single_message(&self.pool, scope, invocation_id, "assistant").await
     }
-
-
 }
 
 async fn load_single_message(
