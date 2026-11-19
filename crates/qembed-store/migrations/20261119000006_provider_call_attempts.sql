@@ -56,6 +56,8 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, public
 AS $provider_attempt_guard$
 BEGIN
+    NEW.updated_at := now();
+
     IF (NEW.tenant_id, NEW.object_id, NEW.invocation_id)
        IS DISTINCT FROM (OLD.tenant_id, OLD.object_id, OLD.invocation_id) THEN
         RAISE EXCEPTION 'provider call attempt identity is immutable'
