@@ -39,7 +39,7 @@ The pool (`anonymous` or `authenticated`) is retained in `budget_reservations` a
 
 ## Reservation lifecycle and future stages
 
-At creation the reservation status is `Reserved`, its expiry is based on the configured `max_duration_ms`, and the estimated token amount is added to the reserved counters. Settlement, release, expiry reconciliation, and ambiguous provider outcomes are not implemented by RUST-041b; they are addressed by RUST-041c and RUST-041d. Until those stages land, do not interpret a reservation as final provider usage or release it merely because a caller timed out.
+At creation the reservation status is `Reserved`, its expiry is based on the configured `max_duration_ms`, and the estimated token amount is added to the reserved counters. Settlement is implemented by RUST-041c: normalized provider usage replaces the estimate atomically; missing or malformed usage retains the non-zero estimate and marks the invocation degraded. See [Provider usage settlement](PROVIDER_USAGE_SETTLEMENT.md). Release, expiry reconciliation, and ambiguous provider outcomes remain RUST-041d work. Do not release a reservation merely because a caller timed out.
 
 ## Schema boundary
 

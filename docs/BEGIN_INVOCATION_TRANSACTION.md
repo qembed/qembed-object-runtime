@@ -33,4 +33,4 @@ A matching idempotency replay commits the read/lock transaction and returns the 
 
 ## Locking and external side effects
 
-The delegation locks are held until commit, ordering invocation start against revocation/disablement. Object and knowledge-revision locks pin the published version and current revision against concurrent updates. The Store contains no provider calls and returns only after commit, so network latency never extends the database transaction.
+The delegation locks are held until commit, ordering invocation start against revocation/disablement. Object and knowledge-revision locks pin the published version and current revision against concurrent updates. The Store contains no provider calls and returns only after commit, so network latency never extends the database transaction. After the provider adapter returns, the worker settles normalized usage in a separate tenant-scoped transaction via [Provider usage settlement](PROVIDER_USAGE_SETTLEMENT.md); that transaction replaces the estimate and never holds locks across provider I/O.

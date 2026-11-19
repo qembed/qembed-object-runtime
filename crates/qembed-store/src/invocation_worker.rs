@@ -213,7 +213,7 @@ impl InvocationWorkStore for PgExecutionStore {
         let result = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE object_invocations SET status='Completed', finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying' AND lease_owner IS NULL AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
+                "UPDATE object_invocations SET status=CASE WHEN degraded_reason='provider_usage_missing' THEN 'CompletedDegraded' ELSE 'Completed' END, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying' AND lease_owner IS NULL AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
             )
             .bind(scope.tenant_id().to_string())
             .bind(next.object_id().to_string())
