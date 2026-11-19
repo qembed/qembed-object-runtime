@@ -20,6 +20,7 @@ an architecture decision.
 
 - Rust stable toolchain with the `rustfmt` and `clippy` components
 - Rust 1.85.0 (the workspace MSRV; needed to reproduce the MSRV CI job)
+- Cargo dependency resolution configured to prefer packages compatible with the workspace MSRV
 - Docker Engine and Docker Compose v2 for PostgreSQL integration tests
 - Python 3 for the crate-boundary check
 - SQLx CLI 0.8.6 for the SQLx metadata check (installation below)
@@ -155,3 +156,8 @@ public error codes and HTTP status mapping. See [Error handling contract](docs/E
 for classification rules, tenant-concealment behavior, sensitive-data boundaries,
 and the prohibition on treating HTTP errors as permission to retry ambiguous
 provider calls.
+
+
+## Health and readiness
+
+The API exposes process liveness and dependency readiness checks. Readiness verifies PostgreSQL connectivity and exact SQLx migration-history agreement without applying migrations. See [health checks](docs/HEALTH_CHECKS.md) for endpoint and response contracts.
