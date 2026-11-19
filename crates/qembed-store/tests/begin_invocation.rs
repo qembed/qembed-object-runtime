@@ -1222,6 +1222,98 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
 }
 
 #[tokio::test]
+async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "send-marker-after-expiry"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-expired-reservation";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("persist processing state")
+    );
+
+    sqlx::query(
+        "UPDATE budget_reservations SET status='Expired' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("simulate sweeper expiry");
+
+    let current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load invocation")
+        .expect("invocation exists");
+    assert!(
+        !store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                invocation_id,
+                owner,
+                current.version(),
+                current.fencing_token(),
+            )
+            .await
+            .expect("expired reservation is a normal marker miss")
+    );
+    let attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read attempt");
+    assert_eq!(attempt.0, "NotStarted");
+    teardown(fixture).await;
+}
+
+#[tokio::test]
 async fn provider_response_and_usage_are_durable_before_replay_safe_settlement() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
