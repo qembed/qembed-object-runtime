@@ -942,24 +942,31 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
-    async fn provider_failure_is_persisted_as_a_terminal_error_code() {
+    async fn ambiguous_provider_failure_keeps_invocation_and_reservation_unresolved() {
         let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
         let (worker, calls, _contexts) = worker(store.clone(), Err(ChatProviderError::Timeout));
 
-        let outcome = worker
-            .process(&scope, id)
-            .await
-            .expect("failure is persisted");
-        assert_eq!(
-            outcome,
-            InvocationWorkerOutcome::Failed {
-                invocation_id: id,
-                error_code: "provider_timeout",
-            }
-        );
+        let outcome = worker.process(&scope, id).await.expect("ambiguous outcome is recorded");
+        assert_eq!(outcome, InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id });
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         let state = store.0.lock().expect("fake store lock");
-        assert_eq!(state.invocation.status(), InvocationStatus::Failed);
-        assert_eq!(state.error_code, Some("provider_timeout"));
+        assert_eq!(state.invocation.status(), InvocationStatus::Processing);
+        assert_eq!(state.attempt, ProviderCallAttemptState::OutcomeUnknown);
+        assert_eq!(state.error_code, None);
+    }
+
+    #[tokio::test]
+    async fn restart_after_ambiguous_attempt_does_not_call_provider_again() {
+        let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
+        {
+            let mut state = store.0.lock().expect("fake store lock");
+            state.attempt = ProviderCallAttemptState::OutcomeUnknown;
+        }
+        let response = ChatResponse::new("must not be used", ChatFinishReason::Stop, None)
+            .expect("valid provider response");
+        let (worker, calls, _) = worker(store.clone(), Ok(response));
+        let outcome = worker.process(&scope, id).await.expect("worker does not resend");
+        assert_eq!(outcome, InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id });
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
