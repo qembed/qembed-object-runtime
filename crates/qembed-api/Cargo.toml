@@ -15,3 +15,4 @@ qembed-llm = { path = "../qembed-llm" }
 qembed-tools = { path = "../qembed-tools" }
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
