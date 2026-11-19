@@ -198,7 +198,8 @@ mod tests {
             &self,
             _: TenantId,
             _: String,
-        ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>> {
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>>
+        {
             Box::pin(async { panic!("backend must not be called for invalid transport input") })
         }
 
