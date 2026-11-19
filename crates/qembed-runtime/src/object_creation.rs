@@ -72,11 +72,10 @@ mod tests {
     async fn create_generates_a_draft_object_for_the_authenticated_tenant() {
         let tenant_id = TenantId::new();
         let scope = scope_for_tenant(tenant_id);
-        let store = RecordingStore::default();
-        let service = ObjectCreationService::new(&store);
+        let service = ObjectCreationService::new(RecordingStore::default());
 
         let object_id = service.create(&scope).await.expect("creation succeeds");
-        let objects = store.0.lock().expect("recording store lock");
+        let objects = service.store.0.lock().expect("recording store lock");
 
         assert_eq!(objects.len(), 1);
         assert_eq!(objects[0].id(), object_id);
