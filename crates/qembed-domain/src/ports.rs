@@ -99,11 +99,11 @@ pub trait ExecutionStore: Send + Sync {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-/// Durable persistence operations required by the minimal invocation worker.
+/// Durable message reads required by the invocation worker.
 ///
-/// The worker stores its provider response before entering Verifying. This
-/// makes a restart from Verifying independent of another provider request.
-/// Lease acquisition/reclaim is deliberately a separate RUST-038 concern.
+/// Lifecycle writes are intentionally not exposed here: provider response,
+/// attempt state, usage settlement, and terminal transitions must use the
+/// lease-fenced [`crate::invocation_lease::InvocationLeaseStore`] contract.
 pub trait InvocationWorkStore: ExecutionStore {
     fn load_user_input(
         &self,
