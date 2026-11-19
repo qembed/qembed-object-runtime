@@ -12,16 +12,23 @@ pub struct ProviderCallAttempt {
 impl ProviderCallAttempt {
     /// Reconstitutes a value read from the tenant-scoped store.
     #[must_use]
-    pub const fn from_persisted(state: ProviderCallAttemptState, usage: Option<TokenUsage>) -> Self {
+    pub const fn from_persisted(
+        state: ProviderCallAttemptState,
+        usage: Option<TokenUsage>,
+    ) -> Self {
         Self { state, usage }
     }
 
     #[must_use]
-    pub const fn state(self) -> ProviderCallAttemptState { self.state }
+    pub const fn state(self) -> ProviderCallAttemptState {
+        self.state
+    }
 
     /// None means unavailable; Some(TokenUsage::new(0, 0)) is explicit zero.
     #[must_use]
-    pub const fn usage(self) -> Option<TokenUsage> { self.usage }
+    pub const fn usage(self) -> Option<TokenUsage> {
+        self.usage
+    }
 }
 
 /// Database-backed state that decides whether a provider request may be sent
