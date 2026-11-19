@@ -286,17 +286,17 @@ pub async fn begin_invocation(
 
     // The published snapshot is the immutable upper bound. Missing, malformed,
     // fractional, zero or negative values fail closed before provider work.
-    let snapshot_limits = sqlx::query_scalar::<_, serde_json::Value>(
-        "SELECT json_projection->'limits' FROM snapshots WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND snapshot_id=$3::uuid",
+    let snapshot_projection = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT json_projection FROM snapshots WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND snapshot_id=$3::uuid",
     )
     .bind(scope.tenant_id().to_string())
     .bind(command.object_id.to_string())
     .bind(command.snapshot_id.to_string())
-    .fetch_optional(transaction.connection())
+    .fetch_one(transaction.connection())
     .await
     .map_err(BeginInvocationError::Database)?;
-    let snapshot_limit = snapshot_limits
-        .as_ref()
+    let snapshot_limit = snapshot_projection
+        .get("limits")
         .and_then(|limits| limits.get("max_tokens_per_invocation"))
         .and_then(serde_json::Value::as_u64)
         .filter(|limit| *limit > 0)
