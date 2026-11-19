@@ -297,12 +297,12 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         "new invocation has exactly one reservation"
     );
     let object_reserved: i64 =
-        sqlx::query_scalar("SELECT sum(reserved_tokens) FROM usage_counters")
+        sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
             .fetch_one(&fixture.pool)
             .await
             .expect("object reserved tokens");
     let caller_reserved: i64 =
-        sqlx::query_scalar("SELECT sum(reserved_tokens) FROM caller_usage_counters")
+        sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM caller_usage_counters")
             .fetch_one(&fixture.pool)
             .await
             .expect("caller reserved tokens");
