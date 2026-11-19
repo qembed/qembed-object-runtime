@@ -573,7 +573,10 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
 
     let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, context_loading.fencing_token())
+        .transition_to(
+            InvocationStatus::Processing,
+            context_loading.fencing_token(),
+        )
         .expect("ContextLoading -> Processing");
     assert!(
         store
