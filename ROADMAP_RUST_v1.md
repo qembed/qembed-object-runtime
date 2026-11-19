@@ -340,6 +340,8 @@ SQLX_OFFLINE=true cargo check --workspace
   - До endpoint implementation зафиксировать bounded semantic-rules baseline и закрыть оставшиеся specification gaps; identical-content version semantics уже утверждены в qembed-sql ADR RUST-044 (см. архитектурный документ).
   - Тесты: API integration на каждый endpoint; auth/tenant negative cases; DTO validation; validator identity binding; PostgreSQL rollback и stale-pointer race cases.
   - Semantic coverage tests: подтверждённый budget rule помечен как validated; каждая открытая specification gap явно помечена not_validated; report не объявляет полное покрытие и не меняет результат publication authorization.
+  - Одобренный HTTP authentication contract (2026-11-20): `Authorization: Bearer <owner-token>` + `X-Tenant-ID: <uuid>`. Tenant header — только недоверенный selector для credential lookup; `Scope` создаётся после успешной проверки persisted owner credential. Детали: [RUST-044 Owner API implementation](docs/RUST-044_OWNER_API_IMPLEMENTATION.md).
+  - Первый транспортный increment: `GET /owner/invocations/{invocation_id}` с owner authentication и tenant-scoped query; missing и cross-tenant ID дают одинаковый 404. Create object/version, publish, invoke и PostgreSQL API integration tests остаются обязательными до завершения RUST-044.
   - DoD: handler-ы только валидируют transport input и вызывают runtime use cases; Store публикует только с доверенным доказательством validation.
 
 - [ ] **RUST-045 (M)** Добавить полный walking-skeleton end-to-end test.
