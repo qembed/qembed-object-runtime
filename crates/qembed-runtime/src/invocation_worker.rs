@@ -481,6 +481,7 @@ mod lifecycle_tests {
     use qembed_domain::ids::{CallerId, ObjectId, SnapshotId, TenantId};
     use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint};
     use qembed_domain::invocation_lease::InvocationLeaseStore;
+    use qembed_domain::provider_call_attempt::{ProviderCallAttempt, ProviderCallAttemptState};
     use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
     use qembed_domain::test_support::scope_for_tenant;
 
@@ -492,6 +493,8 @@ mod lifecycle_tests {
         output: Option<String>,
         error_code: Option<&'static str>,
         lease_owner: Option<String>,
+        attempt: ProviderCallAttemptState,
+        usage: Option<qembed_domain::chat::TokenUsage>,
     }
 
     #[derive(Clone)]
@@ -700,6 +703,68 @@ mod lifecycle_tests {
                 .await
         }
 
+        async fn load_provider_call_attempt(
+            &self,
+            scope: &Scope,
+            invocation_id: InvocationId,
+        ) -> Result<Option<ProviderCallAttempt>, Self::Error> {
+            let state = self.0.lock().expect("fake store lock");
+            Ok((state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.id() == invocation_id)
+                .then(|| ProviderCallAttempt::from_persisted(state.attempt, state.usage)))
+        }
+
+        async fn mark_provider_may_have_been_sent_owned(
+            &self, scope: &Scope, invocation_id: InvocationId, owner: &str,
+            version: u64, token: FencingToken,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.id() != invocation_id
+                || state.invocation.version() != version
+                || state.invocation.fencing_token() != token
+                || state.lease_owner.as_deref() != Some(owner)
+                || state.attempt != ProviderCallAttemptState::NotStarted
+            { return Ok(false); }
+            state.attempt = ProviderCallAttemptState::MayHaveBeenSent;
+            Ok(true)
+        }
+
+        async fn mark_provider_outcome_unknown_owned(
+            &self, scope: &Scope, invocation_id: InvocationId, owner: &str,
+            version: u64, token: FencingToken,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.id() != invocation_id
+                || state.invocation.version() != version
+                || state.invocation.fencing_token() != token
+                || state.lease_owner.as_deref() != Some(owner)
+                || state.attempt != ProviderCallAttemptState::MayHaveBeenSent
+            { return Ok(false); }
+            state.attempt = ProviderCallAttemptState::OutcomeUnknown;
+            Ok(true)
+        }
+
+        async fn persist_provider_response_owned(
+            &self, scope: &Scope, owner: &str, version: u64, token: FencingToken,
+            next: Invocation, content: String, usage: Option<qembed_domain::chat::TokenUsage>,
+        ) -> Result<bool, Self::Error> {
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != version
+                || state.invocation.fencing_token() != token
+                || state.lease_owner.as_deref() != Some(owner)
+                || state.attempt != ProviderCallAttemptState::MayHaveBeenSent
+                || state.invocation.status() != InvocationStatus::Processing
+            { return Ok(false); }
+            state.output = Some(content);
+            state.usage = usage;
+            state.attempt = ProviderCallAttemptState::ResponseReceived;
+            state.invocation = next;
+            Ok(true)
+        }
+
         async fn complete_invocation_owned(
             &self,
             scope: &Scope,
@@ -796,6 +861,8 @@ mod lifecycle_tests {
             output: output.map(str::to_owned),
             error_code: None,
             lease_owner: None,
+            attempt: ProviderCallAttemptState::NotStarted,
+            usage: None,
         })));
         (scope, invocation_id, store)
     }
