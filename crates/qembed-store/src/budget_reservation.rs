@@ -108,9 +108,9 @@ pub(crate) async fn reserve_invocation_budget(
         i64::try_from(estimate).map_err(|_| BudgetReservationError::ArithmeticOverflow)?;
 
     let usage_date: String = sqlx::query_scalar("SELECT (now() AT TIME ZONE 'UTC')::date::text")
-    .fetch_one(transaction.connection())
-    .await
-    .map_err(BudgetReservationError::Database)?;
+        .fetch_one(transaction.connection())
+        .await
+        .map_err(BudgetReservationError::Database)?;
 
     // Sum both pool partitions. The object budget lock prevents another
     // reservation path from changing either row until this transaction ends.
