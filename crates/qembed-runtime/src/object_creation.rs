@@ -1,6 +1,6 @@
 //! Owner use case for creating a new Draft object.
 
-use qembed_domain::ids::{ObjectId};
+use qembed_domain::ids::ObjectId;
 use qembed_domain::object::Object;
 use qembed_domain::ports::ObjectCreationStore;
 use qembed_domain::scope::Scope;
@@ -63,7 +63,10 @@ mod tests {
             _: &Scope,
             object: &Object,
         ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-            self.0.lock().expect("recording store lock").push(object.clone());
+            self.0
+                .lock()
+                .expect("recording store lock")
+                .push(object.clone());
             ready(Ok(()))
         }
     }
