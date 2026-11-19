@@ -693,18 +693,12 @@ mod lifecycle_tests {
             next: Invocation,
             content: String,
         ) -> Result<bool, Self::Error> {
-            if self
-                .0
-                .lock()
-                .expect("fake store lock")
-                .lease_owner
-                .as_deref()
-                != Some(owner)
-            {
-                return Ok(false);
-            }
-            self.persist_assistant_output(scope, version, token, next, content)
-                .await
+            let response = ChatResponse::new(content, ChatFinishReason::Stop, None)
+                .expect("legacy fake response should satisfy the response contract");
+            self.persist_provider_response_owned(
+                scope, owner, version, token, next, response,
+            )
+            .await
         }
 
         async fn load_provider_call_attempt(
