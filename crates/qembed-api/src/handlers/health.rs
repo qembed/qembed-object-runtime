@@ -104,8 +104,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
-            to_bytes(response.into_body()).await.unwrap(),
-            r#"{"status":"ok"}"#
+            to_bytes(response.into_body()).await.unwrap().as_ref(),
+            br#"{"status":"ok"}"#
         );
     }
 
@@ -127,8 +127,8 @@ mod tests {
         .await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
-            to_bytes(response.into_body()).await.unwrap(),
-            r#"{"status":"ready"}"#
+            to_bytes(response.into_body()).await.unwrap().as_ref(),
+            br#"{"status":"ready"}"#
         );
     }
 
@@ -157,7 +157,7 @@ mod tests {
         .await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         let body = to_bytes(response.into_body()).await.unwrap();
-        assert_eq!(body, r#"{"status":"not_ready"}"#);
+        assert_eq!(body.as_ref(), br#"{"status":"not_ready"}"#);
         let body = String::from_utf8(body.to_vec()).unwrap().to_lowercase();
         for forbidden in ["postgres", "sqlx", "checksum", "password", "database_url"] {
             assert!(!body.contains(forbidden));
