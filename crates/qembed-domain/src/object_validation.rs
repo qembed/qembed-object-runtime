@@ -392,7 +392,7 @@ mod tests {
             .collect();
         assert_eq!(
             gap_ids,
-            [
+            vec![
                 "GAP-044-01",
                 "GAP-044-02",
                 "GAP-044-03",
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn rejects_zero_negative_fractional_and_string_budgets() {
-        for value in ["0", "-1", "1.5", ""10""] {
+        for value in ["0", "-1", "1.5", "\"10\""] {
             let json = format!(r#"{{"limits":{{"max_tokens_per_invocation":{value}}}}}"#);
             let candidate = snapshot(json.as_bytes());
             assert_eq!(

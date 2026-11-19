@@ -38,16 +38,6 @@
 4. Extend the immutable validator/ruleset versioning policy as additional rules are approved. The first bounded implementation uses the immutable code identifier `m0-r3-bounded-budget-v1` and binds evidence to tenant, object, version, snapshot, content hash, and validator version. Persistence/revalidation policy remains open if validation becomes asynchronous or evidence must survive process boundaries.
 5. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
 
-## Semantic validation coverage reporting
-
-**Approved implementation increment (2026-11-19):** the domain validator exposes an explicit, version-bound coverage report alongside its opaque validation evidence. The report identifies the confirmed invocation-budget invariant as validated and maps the still-open semantic areas to GAP-044-01…05 as not validated.
-
-- `not_validated` means the validator does not have an established rule set for that area. It does not mean arbitrary fields in that area are automatically invalid.
-- The report is informational and is not a publication capability. Publication continues to require the separate opaque evidence and Store-side identity/hash verification.
-- A runtime path must fail closed before relying on a feature whose required semantics are not validated. This is not permission to blanket-reject unknown JSON fields.
-- The coverage report does not resolve any specification gap or define new tool/provider/permission/security-policy semantics.
-- Adding or changing semantic rules requires an explicitly approved source/decision and a new immutable validator version. Existing evidence is never reinterpreted under new rules.
-
 ## Accepted new project decisions
 
 - **RUST-044 identical-content version semantics (2026-11-19):** exact canonical-byte equality within the same tenant/object returns the existing version/snapshot as `identical_content`; hash match with byte mismatch is an integrity error; different bytes create version+snapshot atomically. This is a new approved project contract, not recovered M0 behavior. See the [canonical qembed-sql ADR](https://github.com/qembed/qembed-sql/blob/master/ADR_RUST-044_Identical_Content_Version_Deduplication.md).
