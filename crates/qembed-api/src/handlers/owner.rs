@@ -226,7 +226,8 @@ mod tests {
             &self,
             _: TenantId,
             _: String,
-        ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>> {
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>>
+        {
             let id = self.0;
             Box::pin(async move { Ok(id) })
         }
