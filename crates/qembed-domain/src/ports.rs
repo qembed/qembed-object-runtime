@@ -117,34 +117,7 @@ pub trait InvocationWorkStore: ExecutionStore {
         invocation_id: InvocationId,
     ) -> impl Future<Output = Result<Option<String>, Self::Error>> + Send;
 
-    /// Atomically persist the assistant response and transition Processing → Verifying.
-    fn persist_assistant_output(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        content: String,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Transition Verifying → Completed after the response is already durable.
-    fn complete_invocation(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
-
-    /// Persist a terminal failure and its stable, non-sensitive error code.
-    fn fail_invocation(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        error_code: &'static str,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
 /// Read-only persistence boundary for the client-visible invocation projection.
