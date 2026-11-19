@@ -187,7 +187,8 @@ pub async fn settle_invocation_usage(
             .await
             .map_err(UsageSettlementError::Database)?;
         return Ok(SettlementOutcome {
-            actual_tokens: u64::try_from(actual_tokens).map_err(|_| UsageSettlementError::InvalidPersistedUsage)?,
+            actual_tokens: u64::try_from(actual_tokens)
+                .map_err(|_| UsageSettlementError::InvalidPersistedUsage)?,
             degraded,
             replayed: true,
         });
