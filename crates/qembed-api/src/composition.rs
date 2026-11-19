@@ -20,7 +20,9 @@ use qembed_store::{
 use sqlx::PgPool;
 
 use crate::handlers::{
-    health::{HealthState, ReadinessProbe, ReadinessStatus, configure_health_routes as configure_routes},
+    health::{
+        HealthState, ReadinessProbe, ReadinessStatus, configure_health_routes as configure_routes,
+    },
     invocation::{InvocationResponse, get_invocation},
     owner::{OwnerApiBackend, OwnerApiBackendError, configure_owner_routes as configure_owner},
 };
@@ -32,7 +34,9 @@ impl ReadinessProbe for StoreReadinessProbe {
         Box::pin(async move {
             match self.0.check().await {
                 Ok(()) => ReadinessStatus::Ready,
-                Err(PgReadinessFailure::DatabaseUnavailable) => ReadinessStatus::DatabaseUnavailable,
+                Err(PgReadinessFailure::DatabaseUnavailable) => {
+                    ReadinessStatus::DatabaseUnavailable
+                }
                 Err(PgReadinessFailure::MigrationMismatch) => ReadinessStatus::MigrationMismatch,
             }
         })
@@ -55,16 +59,31 @@ impl OwnerApiBackend for PgOwnerApiBackend {
         tenant_id: TenantId,
         owner_token: String,
         invocation_id: InvocationId,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<InvocationResponse>, OwnerApiBackendError>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<InvocationResponse>, OwnerApiBackendError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let authenticator = OwnerAuthenticator::new(self.pool.clone());
-            let scope = match authenticate_owner(&authenticator, OwnerCredentials::new(tenant_id, owner_token)).await {
+            let scope = match authenticate_owner(
+                &authenticator,
+                OwnerCredentials::new(tenant_id, owner_token),
+            )
+            .await
+            {
                 Ok(scope) => scope,
                 Err(OwnerAuthenticationError::Rejected(StoreAuthError::InvalidCredentials))
-                | Err(OwnerAuthenticationError::NotOwner) => return Err(OwnerApiBackendError::Unauthorized),
+                | Err(OwnerAuthenticationError::NotOwner) => {
+                    return Err(OwnerApiBackendError::Unauthorized);
+                }
                 Err(OwnerAuthenticationError::Rejected(StoreAuthError::Database(_)))
                 | Err(OwnerAuthenticationError::InvalidPrincipal(_))
-                | Err(OwnerAuthenticationError::InvalidScope(_)) => return Err(OwnerApiBackendError::Internal),
+                | Err(OwnerAuthenticationError::InvalidScope(_)) => {
+                    return Err(OwnerApiBackendError::Internal);
+                }
             };
 
             let query = InvocationQueryService::new(PgInvocationQueryStore::new(self.pool.clone()));
