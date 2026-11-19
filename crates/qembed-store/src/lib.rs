@@ -18,6 +18,7 @@ pub mod invocation_cancellation;
 mod invocation_lease;
 pub mod invocation_query;
 pub mod invocation_worker;
+pub mod readiness;
 pub use cas::{CasError, execute_cas};
 mod event_outbox;
 pub mod object_repository;
