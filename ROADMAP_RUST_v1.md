@@ -329,8 +329,13 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: readiness проверяет обязательные зависимости.
 
 - [ ] **RUST-044 (M)** Собрать Owner API: create object/version, publish, invoke, inspect invocation.
-  - Тесты: API integration на каждый endpoint; auth/tenant negative cases; DTO validation.
-  - DoD: handler-ы только валидируют transport input и вызывают runtime use cases.
+  - Архитектурный контракт: [Owner API and trusted publication validation](docs/OWNER_API_PUBLICATION_VALIDATION.md).
+  - Owner API не управляет переходами `Validating`/`Published`; публикация требует успешного результата доверенного validator, привязанного к tenant/object/version/snapshot (и hash/ruleset version).
+  - Snapshot JCS/integrity и semantic object validation — разные проверки; известный M0 invariant `limits.max_tokens_per_invocation` — положительный JSON integer.
+  - Draft version + snapshot создаются одной Store-транзакцией; validation/network I/O выполняются вне неё; publish сохраняет expected-pointer CAS и атомарность Store.
+  - До endpoint implementation зафиксировать bounded semantic-rules baseline и закрыть оставшиеся specification gaps; identical-content version semantics уже утверждены в qembed-sql ADR RUST-044 (см. архитектурный документ).
+  - Тесты: API integration на каждый endpoint; auth/tenant negative cases; DTO validation; validator identity binding; PostgreSQL rollback и stale-pointer race cases.
+  - DoD: handler-ы только валидируют transport input и вызывают runtime use cases; Store публикует только с доверенным доказательством validation.
 
 - [ ] **RUST-045 (M)** Добавить полный walking-skeleton end-to-end test.
   - Тесты: create → publish → invoke → retrieve result; duplicate idempotency key; process restart; cross-tenant denied.
