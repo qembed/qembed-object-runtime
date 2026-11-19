@@ -19,10 +19,10 @@ lives in qembed_runtime::error and qembed_api::errors.
 A known semantic failure should be classified before reaching the generic
 fallback. The current begin-invocation mapper recognizes concealed not-found,
 idempotency conflict, invalid request, inactive object/current-snapshot conflict,
-and explicit budget rejection. Invocation query corruption and unknown Store
-failures map to internal_error (500), not to a guessed client error. The
-invocation Store mapper treats an explicitly rejected state write as conflict;
-malformed persisted data and ambiguous messages remain internal errors.
+and explicit budget rejection. Invocation query corruption and all current
+invocation Store errors map to internal_error (500), because the broad
+InvalidRequestedState variant does not yet distinguish a client conflict from
+an internal invariant failure. Unknown Store failures also fail closed.
 
 ## Public mapping
 
