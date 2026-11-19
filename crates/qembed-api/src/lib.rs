@@ -4,4 +4,5 @@
 //! kept separate and may depend only on domain contracts and runtime services.
 
 pub mod composition;
+pub mod errors;
 pub mod handlers;
