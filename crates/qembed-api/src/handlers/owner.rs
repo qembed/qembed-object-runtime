@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use actix_web::{HttpRequest, HttpResponse, http::StatusCode, web};
-use qembed_domain::ids::{InvocationId, TenantId};
+use qembed_domain::ids::{InvocationId, ObjectId, TenantId};
 
 use crate::handlers::invocation::InvocationResponse;
 
@@ -20,6 +20,12 @@ pub enum OwnerApiBackendError {
 
 /// Application capability supplied by the composition root.
 pub trait OwnerApiBackend: Send + Sync {
+    fn create_object(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+    ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>>;
+
     fn inspect(
         &self,
         tenant_id: TenantId,
@@ -55,10 +61,73 @@ pub fn configure_owner_routes(
 ) {
     config
         .app_data(web::Data::new(OwnerApiState::new(backend)))
+        .route("/owner/objects", web::post().to(create_object))
         .route(
             "/owner/invocations/{invocation_id}",
             web::get().to(inspect_invocation),
         );
+}
+
+fn owner_credentials(request: &HttpRequest) -> Result<(TenantId, String), HttpResponse> {
+    let tenant_id = request
+        .headers()
+        .get("X-Tenant-ID")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<TenantId>().ok())
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The tenant header is invalid.",
+            )
+        })?;
+
+    let token = request
+        .headers()
+        .get(actix_web::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| !value.is_empty() && !value.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "Authentication is required.",
+            )
+        })?;
+
+    Ok((tenant_id, token))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ObjectCreationResponse {
+    pub object_id: String,
+    pub state: &'static str,
+}
+
+async fn create_object(request: HttpRequest, state: web::Data<OwnerApiState>) -> HttpResponse {
+    let (tenant_id, token) = match owner_credentials(&request) {
+        Ok(credentials) => credentials,
+        Err(response) => return response,
+    };
+
+    match state.backend.create_object(tenant_id, token).await {
+        Ok(object_id) => HttpResponse::Created().json(ObjectCreationResponse {
+            object_id: object_id.to_string(),
+            state: "draft",
+        }),
+        Err(OwnerApiBackendError::Unauthorized) => api_error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Authentication is required.",
+        ),
+        Err(OwnerApiBackendError::Internal) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "An unexpected internal error occurred.",
+        ),
+    }
 }
 
 async fn inspect_invocation(
@@ -66,37 +135,9 @@ async fn inspect_invocation(
     path: web::Path<String>,
     state: web::Data<OwnerApiState>,
 ) -> HttpResponse {
-    let tenant_id = match request
-        .headers()
-        .get("X-Tenant-ID")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<TenantId>().ok())
-    {
-        Some(id) => id,
-        None => {
-            return api_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                "The tenant header is invalid.",
-            );
-        }
-    };
-
-    let token = match request
-        .headers()
-        .get(actix_web::http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .filter(|value| !value.is_empty() && !value.trim().is_empty())
-    {
-        Some(token) => token.to_owned(),
-        None => {
-            return api_error(
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "Authentication is required.",
-            );
-        }
+    let (tenant_id, token) = match owner_credentials(&request) {
+        Ok(credentials) => credentials,
+        Err(response) => return response,
     };
 
     let invocation_id = match path.into_inner().parse::<InvocationId>() {
@@ -141,6 +182,14 @@ mod tests {
 
     struct NeverCalled;
     impl OwnerApiBackend for NeverCalled {
+        fn create_object(
+            &self,
+            _: TenantId,
+            _: String,
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>> {
+            Box::pin(async { panic!("backend must not be called for invalid transport input") })
+        }
+
         fn inspect(
             &self,
             _: TenantId,
