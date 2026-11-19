@@ -5,6 +5,13 @@
 //! into this response type.
 
 use qembed_runtime::error::RuntimeError;
+use qembed_store::begin_invocation::{
+    BeginInvocationError, BudgetReservationError,
+};
+use qembed_store::caller::CallerResolutionError;
+use qembed_store::idempotency::IdempotencyReservationError;
+use qembed_store::invocation_query::InvocationQueryError;
+use qembed_store::invocation_worker::InvocationStoreError;
 use serde::Serialize;
 
 /// Public error body. Both fields are stable client-facing contract values.
@@ -82,6 +89,60 @@ pub const fn map_runtime_error(error: RuntimeError) -> ApiError {
     }
 }
 
+/// Maps the current begin-invocation Store contract to safe public semantics.
+///
+/// Only positively identified domain outcomes become client errors. Database,
+/// malformed persisted data, and inconsistent configuration fail closed.
+#[must_use]
+pub fn map_begin_invocation_error(error: &BeginInvocationError) -> ApiError {
+    let runtime_error = match error {
+        BeginInvocationError::CallerResolution(CallerResolutionError::NotDelegated)
+        | BeginInvocationError::ObjectNotFound
+        | BeginInvocationError::SnapshotNotFound
+        | BeginInvocationError::KnowledgeRevisionNotFound => RuntimeError::NotFound,
+        BeginInvocationError::Idempotency(IdempotencyReservationError::PayloadMismatch) => {
+            RuntimeError::Conflict
+        }
+        BeginInvocationError::Idempotency(IdempotencyReservationError::ExpiryOutOfRange)
+        | BeginInvocationError::InvalidInputMessage
+        | BeginInvocationError::InvalidMessageExpiry => RuntimeError::InvalidRequest,
+        BeginInvocationError::Budget(BudgetReservationError::Rejected(_)) => {
+            RuntimeError::BudgetExceeded
+        }
+        BeginInvocationError::ObjectNotActive
+        | BeginInvocationError::SnapshotIsNotCurrentPublishedVersion => RuntimeError::Conflict,
+        BeginInvocationError::CallerResolution(_)
+        | BeginInvocationError::Idempotency(_)
+        | BeginInvocationError::Budget(_)
+        | BeginInvocationError::SnapshotBudgetInvalid
+        | BeginInvocationError::KnowledgeRevisionOutOfRange
+        | BeginInvocationError::Database(_) => RuntimeError::Internal,
+    };
+    map_runtime_error(runtime_error)
+}
+
+/// Query errors indicate a persistence or persisted-data failure. A missing or
+/// cross-tenant invocation is represented by Ok(None), not by this error type.
+#[must_use]
+pub fn map_invocation_query_error(_: &InvocationQueryError) -> ApiError {
+    map_runtime_error(RuntimeError::Internal)
+}
+
+/// Maps invocation persistence failures without exposing database or state
+/// diagnostics. A positively identified stale/invalid write request is a 409.
+#[must_use]
+pub fn map_invocation_store_error(error: &InvocationStoreError) -> ApiError {
+    match error {
+        InvocationStoreError::InvalidRequestedState(_) => {
+            map_runtime_error(RuntimeError::Conflict)
+        }
+        InvocationStoreError::Database(_)
+        | InvocationStoreError::Settlement(_)
+        | InvocationStoreError::InvalidPersistedValue(_)
+        | InvocationStoreError::AmbiguousMessage(_) => map_runtime_error(RuntimeError::Internal),
+    }
+}
+
 /// Converts an unclassified adapter/store failure to a safe generic response.
 ///
 /// This is a final fail-closed fallback. Known semantic failures should be
@@ -95,6 +156,7 @@ pub const fn map_unclassified_error<E: std::error::Error + ?Sized>(_: &E) -> Api
 mod tests {
     use super::*;
     use qembed_domain::chat::{ChatContractError, ChatProviderError};
+    use qembed_store::begin_invocation::{BudgetRejection, BeginInvocationError};
 
     #[test]
     fn every_runtime_category_has_a_stable_status_and_code() {
@@ -133,6 +195,10 @@ mod tests {
         let invalid = map_runtime_error(RuntimeError::from(ChatContractError::EmptyMessages));
         assert_eq!(invalid.body().code, "invalid_request");
 
+        let provider_response =
+            map_runtime_error(RuntimeError::from(ChatContractError::EmptyResponse));
+        assert_eq!(provider_response.body().code, "provider_error");
+
         let provider = map_runtime_error(RuntimeError::from(ChatProviderError::Other));
         assert_eq!(provider.status(), 502);
         assert_eq!(provider.body().code, "provider_error");
@@ -140,6 +206,50 @@ mod tests {
             provider.body().message,
             "The upstream provider could not complete the request."
         );
+    }
+
+    #[test]
+    fn begin_invocation_semantic_failures_map_without_exposing_store_details() {
+        let cases = [
+            (
+                BeginInvocationError::ObjectNotFound,
+                404,
+                "not_found",
+            ),
+            (
+                BeginInvocationError::Idempotency(IdempotencyReservationError::PayloadMismatch),
+                409,
+                "conflict",
+            ),
+            (
+                BeginInvocationError::Budget(BudgetReservationError::Rejected(
+                    BudgetRejection::InvocationLimit,
+                )),
+                429,
+                "budget_exceeded",
+            ),
+            (
+                BeginInvocationError::ObjectNotActive,
+                409,
+                "conflict",
+            ),
+            (
+                BeginInvocationError::InvalidInputMessage,
+                400,
+                "invalid_request",
+            ),
+            (
+                BeginInvocationError::SnapshotBudgetInvalid,
+                500,
+                "internal_error",
+            ),
+        ];
+
+        for (store_error, expected_status, expected_code) in cases {
+            let mapped = map_begin_invocation_error(&store_error);
+            assert_eq!(mapped.status(), expected_status);
+            assert_eq!(mapped.body().code, expected_code);
+        }
     }
 
     #[test]
