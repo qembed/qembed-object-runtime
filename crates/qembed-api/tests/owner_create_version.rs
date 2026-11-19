@@ -55,7 +55,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri("/owner/objects")
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {token}"),
+            ))
             .to_request(),
     )
     .await;
@@ -76,7 +79,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {token}"),
+            ))
             .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"schema_version":1,"config":{"limits":{},"unvalidated":true}}"#)
             .to_request(),
@@ -114,7 +120,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {token}"),
+            ))
             .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"config":{"unvalidated":true,"limits":{}},"schema_version":1}"#)
             .to_request(),
@@ -132,7 +141,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {token}"),
+            ))
             .set_payload(r#"{"schema_version":1,"config":{"x":1,"x":2}}"#)
             .to_request(),
     )
@@ -144,7 +156,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {other_token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {other_token}"),
+            ))
             .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"schema_version":1,"config":{}}"#)
             .to_request(),
@@ -157,7 +172,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {token}"),
+            ))
             .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"schema_version":1,"config":{}}"#)
             .to_request(),
