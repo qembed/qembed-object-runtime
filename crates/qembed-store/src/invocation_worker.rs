@@ -207,19 +207,24 @@ impl InvocationWorkStore for PgExecutionStore {
         let usage = match (attempt.1, attempt.2) {
             (None, None) => None,
             (Some(input), Some(output)) => Some(qembed_domain::chat::TokenUsage::new(
-                u32::try_from(input).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider input_tokens"))?,
-                u32::try_from(output).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider output_tokens"))?,
+                u32::try_from(input).map_err(|_| {
+                    InvocationStoreError::InvalidPersistedValue("provider input_tokens")
+                })?,
+                u32::try_from(output).map_err(|_| {
+                    InvocationStoreError::InvalidPersistedValue("provider output_tokens")
+                })?,
             )),
-            _ => return Err(InvocationStoreError::InvalidPersistedValue("provider usage pair")),
+            _ => {
+                return Err(InvocationStoreError::InvalidPersistedValue(
+                    "provider usage pair",
+                ));
+            }
         };
-        crate::budget_settlement::settle_invocation_usage(
-            &self.pool,
-            scope,
-            next.id(),
-            usage,
-        )
-        .await
-        .map_err(|_| InvocationStoreError::InvalidRequestedState("provider usage settlement failed"))?;
+        crate::budget_settlement::settle_invocation_usage(&self.pool, scope, next.id(), usage)
+            .await
+            .map_err(|_| {
+                InvocationStoreError::InvalidRequestedState("provider usage settlement failed")
+            })?;
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let result = execute(
             &mut transaction,
