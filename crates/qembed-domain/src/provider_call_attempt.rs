@@ -75,6 +75,25 @@ mod tests {
     use super::ProviderCallAttemptState;
 
     #[test]
+    fn missing_usage_is_distinct_from_explicit_zero_usage() {
+        use crate::chat::TokenUsage;
+        use super::{ProviderCallAttempt, ProviderCallAttemptState};
+
+        let missing = ProviderCallAttempt::from_persisted(
+            ProviderCallAttemptState::ResponseReceived,
+            None,
+        );
+        let explicit_zero = ProviderCallAttempt::from_persisted(
+            ProviderCallAttemptState::ResponseReceived,
+            Some(TokenUsage::new(0, 0)),
+        );
+
+        assert_eq!(missing.usage(), None);
+        assert_eq!(explicit_zero.usage(), Some(TokenUsage::new(0, 0)));
+        assert_ne!(missing, explicit_zero);
+    }
+
+    #[test]
     fn only_proven_pre_send_or_non_acceptance_states_allow_expiry() {
         for state in [
             ProviderCallAttemptState::NotStarted,
