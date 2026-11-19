@@ -1557,6 +1557,26 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
             .await
             .expect("object counters after replay");
     assert_eq!(after_replay, (43, 0));
+
+    sqlx::query("UPDATE object_budgets SET daily_token_limit=$2 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string())
+        .bind(i64::try_from(estimate).expect("estimate fits bigint"))
+        .execute(&fixture.pool)
+        .await
+        .expect("set daily cap to original estimate");
+    let next = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "after-settlement-overage"),
+    )
+    .await
+    .expect_err("reported overage must reduce remaining daily capacity");
+    assert!(matches!(
+        next,
+        BeginInvocationError::Budget(BudgetReservationError::Rejected(
+            BudgetRejection::ObjectDailyLimit
+        ))
+    ));
     teardown(fixture).await;
 }
 
