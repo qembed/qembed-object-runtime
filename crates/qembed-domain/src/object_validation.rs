@@ -63,7 +63,7 @@ impl ObjectValidator {
 
         // The runtime's token-budget arithmetic is u64-based. as_u64 accepts
         // JSON integer numbers in that representable range and rejects strings,
-        // floats (including 1.0), negatives, and out-of-range values.
+        // fractional numbers, negatives, and out-of-range values.
         let max_tokens_per_invocation = value
             .as_u64()
             .filter(|limit| *limit > 0)
@@ -86,6 +86,7 @@ impl ObjectValidator {
 /// Fields are private and this type intentionally does not implement
 /// Serialize/Deserialize. Store adapters must still verify the identity tuple
 /// and content hash against persisted rows in the publication transaction.
+#[must_use = "validation evidence must be checked by the publication Store"]
 #[derive(Debug, PartialEq, Eq)]
 pub struct ValidationEvidence {
     tenant_id: TenantId,
