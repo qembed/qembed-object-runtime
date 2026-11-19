@@ -39,7 +39,13 @@ The surviving artifacts do not provide a complete semantic schema/rule set for t
 
 **Bounded validator implementation v1:** the domain validator is versioned as `m0-r3-bounded-budget-v1`. It checks the confirmed `limits.max_tokens_per_invocation` invariant and issues non-serializable evidence bound to tenant, object, object version, snapshot, content hash, and validator version. It exposes the parsed limit for the existing u64-based runtime budget path. Values that are not representable as a positive u64 are rejected by the current implementation; this is a runtime representability boundary, not a claim that M0 defines a u64 maximum. JCS rejects noncanonical encodings before semantic validation. This bounded validator does not validate tool/provider/permission/security-policy semantics and must not be described as a complete object validator.
 
-At this stage the evidence type and validator are domain-only. The Store publication path has not yet been changed to require this evidence; that is the next integration boundary. The evidence is deliberately not serializable, so it cannot be supplied or restored from an Owner API DTO.
+The evidence type and validator are domain contracts. The Store publication path now requires this evidence and verifies its tenant/object/version/snapshot/hash/validator-version binding against persisted rows inside the publication transaction. The evidence is deliberately not serializable, so it cannot be supplied or restored from an Owner API DTO.
+
+**Approved coverage-report increment (2026-11-19):** `ObjectValidator::validate_with_report()` returns a `ValidationOutcome` containing the same opaque evidence plus a `ValidationReport`. The report is an informational description of the validator's actual coverage; it is not itself evidence, an authorization capability, or a publication decision. The existing `validate()` method remains available and returns only the evidence for existing callers.
+
+The report marks the positive-integer invocation-budget invariant as `validated`. It marks the unresolved areas in GAP-044-01…05 as `not_validated`: complete object schema, tool declarations, provider configuration, permissions, security policies, and unknown-field/extension compatibility. These statuses mean that no verified rule set is currently implemented for those areas; they do not automatically reject arbitrary JSON fields. A runtime feature must not be used unless its required semantics have been validated by an explicitly approved rule set.
+
+The report is tied to the immutable validator version. This increment changes reporting only, not the semantic rule set, so `m0-r3-bounded-budget-v1` remains unchanged. Any future change to semantic rules requires a new validator version and must not reinterpret previously issued evidence. See [SEMANTIC_VALIDATION_COVERAGE.md](./SEMANTIC_VALIDATION_COVERAGE.md).
 
 **Fail-closed rule:** publication must not proceed when a required validation rule is unknown, unsupported, or not implemented for a configuration feature that the runtime is about to rely on. This does not authorize rejecting arbitrary JSON fields merely because they are unfamiliar; field/extension compatibility itself needs a documented schema rule. Until that rule exists, the validator may only claim the explicitly implemented and evidenced validation coverage. No "fully M0-valid" claim is permitted.
 
@@ -87,6 +93,8 @@ At minimum, tests must prove:
 - invalid/noncanonical JSON never reaches persistence;
 - valid JCS but semantically invalid snapshot cannot obtain publication authorization;
 - the known positive-integer budget invariant is enforced;
+- the validation coverage report lists the exact implemented rule and every currently documented semantic gap;
+- coverage reporting cannot be mistaken for a successful validation rule or publication authorization;
 - a validation result cannot be reused across tenant/object/version/snapshot identities;
 - a result for a different snapshot hash or validator/ruleset version is rejected;
 - validator/ruleset version changes do not retroactively alter the meaning of existing evidence;
