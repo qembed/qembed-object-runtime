@@ -59,6 +59,49 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         content: String,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
+    /// Load the durable provider-call state using the trusted tenant scope.
+    fn load_provider_call_attempt(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> impl Future<
+        Output = Result<Option<crate::provider_call_attempt::ProviderCallAttempt>, Self::Error>,
+    > + Send;
+
+    /// Commit the conservative pre-send marker under the current live lease.
+    /// A false result means the caller must not contact the provider.
+    fn mark_provider_may_have_been_sent_owned(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
+    /// Persist an ambiguous provider outcome without releasing its reservation.
+    fn mark_provider_outcome_unknown_owned(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
+    /// Atomically persist assistant output, normalized usage, ResponseReceived,
+    /// and Processing → Verifying under the live lease.
+    fn persist_provider_response_owned(
+        &self,
+        scope: &Scope,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+        next: Invocation,
+        content: String,
+        usage: Option<crate::chat::TokenUsage>,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
     /// Complete Verifying → Completed and release the lease atomically.
     fn complete_invocation_owned(
         &self,
