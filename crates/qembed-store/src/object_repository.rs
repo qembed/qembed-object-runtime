@@ -17,6 +17,7 @@ use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
+use qembed_domain::ports::ObjectCreationStore;
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
@@ -462,6 +463,14 @@ impl ObjectRepository {
             .commit()
             .await
             .map_err(ObjectRepositoryError::Database)
+    }
+}
+
+impl ObjectCreationStore for ObjectRepository {
+    type Error = ObjectRepositoryError;
+
+    async fn create_object(&self, scope: &Scope, object: &Object) -> Result<(), Self::Error> {
+        ObjectRepository::create_object(self, scope, object).await
     }
 }
 

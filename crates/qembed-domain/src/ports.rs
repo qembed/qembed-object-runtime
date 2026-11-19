@@ -118,6 +118,20 @@ pub trait InvocationWorkStore: ExecutionStore {
     ) -> impl Future<Output = Result<Option<String>, Self::Error>> + Send;
 }
 
+/// Persistence boundary for creating a new tenant-owned Draft object.
+///
+/// Implementations must persist only within the supplied authenticated Scope
+/// and reject an Object whose tenant does not match that Scope.
+pub trait ObjectCreationStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn create_object(
+        &self,
+        scope: &Scope,
+        object: &crate::object::Object,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
 /// Read-only persistence boundary for the client-visible invocation projection.
 /// Implementations must use the trusted Scope and return None for both a missing
 /// invocation and an invocation belonging to another tenant.
