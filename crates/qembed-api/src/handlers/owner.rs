@@ -422,8 +422,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn create_version_body_rejects_duplicate_keys_and_invalid_schema_versions() {
+    #[actix_web::test]
+    async fn create_version_body_rejects_duplicate_keys_and_invalid_schema_versions() {
         assert!(
             parse_create_object_version_body(br#"{"schema_version":1,"config":{"a":1,"a":2}}"#)
                 .is_err()
@@ -444,8 +444,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_version_body_accepts_semantically_incomplete_json_and_canonicalizes_it() {
+    #[actix_web::test]
+    async fn create_version_body_accepts_semantically_incomplete_json_and_canonicalizes_it() {
         let (schema_version, canonical) = parse_create_object_version_body(
             br#"{"config":{"unvalidated":true,"limits":{}},"schema_version":1}"#,
         )
