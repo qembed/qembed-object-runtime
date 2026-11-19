@@ -100,31 +100,6 @@ impl InvocationLeaseStore for PgExecutionStore {
         Ok(result.rows_affected() == 1)
     }
 
-    async fn persist_assistant_output_owned(
-        &self,
-        scope: &Scope,
-        owner: &str,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        content: String,
-    ) -> Result<bool, Self::Error> {
-        // Compatibility entry point: preserve the durable attempt protocol and
-        // explicitly treat unavailable usage as missing, never as zero.
-        let response = ChatResponse::new(content, ChatFinishReason::Stop, None).map_err(|_| {
-            InvocationStoreError::InvalidRequestedState("assistant output is invalid")
-        })?;
-        self.persist_provider_response_owned(
-            scope,
-            owner,
-            expected_version,
-            expected_fencing_token,
-            next,
-            response,
-        )
-        .await
-    }
-
     async fn load_provider_call_attempt(
         &self,
         scope: &Scope,
