@@ -113,7 +113,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     assert_eq!(persisted.0, 1);
     assert_eq!(persisted.1, "draft");
     assert_eq!(persisted.2, 1);
-    assert_eq!(persisted.3.as_slice(), br#"{"limits":{},"unvalidated":true}"#);
+    assert_eq!(
+        persisted.3.as_slice(),
+        br#"{"limits":{},"unvalidated":true}"#
+    );
 
     let duplicate = test::call_service(
         &app,
