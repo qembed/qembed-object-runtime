@@ -69,12 +69,12 @@ impl PgOwnerApiBackend {
         )
         .await
         .map_err(|error| match error {
-                OwnerAuthenticationError::Rejected(StoreAuthError::InvalidCredentials)
-                | OwnerAuthenticationError::NotOwner => OwnerApiBackendError::Unauthorized,
-                OwnerAuthenticationError::Rejected(StoreAuthError::Database(_))
-                | OwnerAuthenticationError::InvalidPrincipal(_)
-                | OwnerAuthenticationError::InvalidScope(_) => OwnerApiBackendError::Internal,
-            })
+            OwnerAuthenticationError::Rejected(StoreAuthError::InvalidCredentials)
+            | OwnerAuthenticationError::NotOwner => OwnerApiBackendError::Unauthorized,
+            OwnerAuthenticationError::Rejected(StoreAuthError::Database(_))
+            | OwnerAuthenticationError::InvalidPrincipal(_)
+            | OwnerAuthenticationError::InvalidScope(_) => OwnerApiBackendError::Internal,
+        })
     }
 }
 
