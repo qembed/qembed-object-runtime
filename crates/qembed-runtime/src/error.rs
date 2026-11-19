@@ -52,9 +52,7 @@ impl From<ChatProviderError> for RuntimeError {
             ChatProviderError::RateLimited { retry_after_ms } => {
                 Self::RateLimited { retry_after_ms }
             }
-            ChatProviderError::MalformedOutput | ChatProviderError::Other => {
-                Self::ProviderFailure
-            }
+            ChatProviderError::MalformedOutput | ChatProviderError::Other => Self::ProviderFailure,
         }
     }
 }
