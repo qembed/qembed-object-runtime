@@ -1393,21 +1393,20 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
         successes, 1,
         "exactly one independent session may consume the final budget"
     );
-    let rejected = match (&first, &second) {
+    let rejected = matches!(
+        (&first, &second),
         (
             Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(
                 BudgetRejection::ObjectDailyLimit,
             ))),
             _,
-        )
-        | (
+        ) | (
             _,
             Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(
                 BudgetRejection::ObjectDailyLimit,
             ))),
-        ) => true,
-        _ => false,
-    };
+        )
+    );
     assert!(
         rejected,
         "the losing session must observe the committed reservation"
