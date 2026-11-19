@@ -122,8 +122,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     .await;
     assert_eq!(duplicate.status(), StatusCode::OK);
     let duplicate_json: serde_json::Value =
-        serde_json::from_slice(&test::read_body(duplicate).await)
-            .expect("dedup response is JSON");
+        serde_json::from_slice(&test::read_body(duplicate).await).expect("dedup response is JSON");
     assert_eq!(duplicate_json["outcome"], "identical_content");
     assert_eq!(duplicate_json["object_version_id"], version_id);
     assert_eq!(duplicate_json["snapshot_id"], snapshot_id);
