@@ -486,12 +486,20 @@ impl ObjectVersionCreationStore for ObjectRepository {
         ObjectRepository::create_draft_version_with_snapshot(self, scope, version, snapshot)
             .await
             .map(|creation| match creation {
-                DraftCreation::Created { version_id, snapshot_id } => {
-                    DraftVersionCreation::Created { version_id, snapshot_id }
-                }
-                DraftCreation::IdenticalContent { version_id, snapshot_id } => {
-                    DraftVersionCreation::IdenticalContent { version_id, snapshot_id }
-                }
+                DraftCreation::Created {
+                    version_id,
+                    snapshot_id,
+                } => DraftVersionCreation::Created {
+                    version_id,
+                    snapshot_id,
+                },
+                DraftCreation::IdenticalContent {
+                    version_id,
+                    snapshot_id,
+                } => DraftVersionCreation::IdenticalContent {
+                    version_id,
+                    snapshot_id,
+                },
             })
     }
 }
