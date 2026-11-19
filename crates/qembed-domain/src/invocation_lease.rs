@@ -90,7 +90,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         response: crate::chat::ChatResponse,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Complete Verifying → Completed and release the lease atomically.
+    /// Settle durable provider usage, complete Verifying → Completed, and release the lease.
     fn complete_invocation_owned(
         &self,
         scope: &Scope,
@@ -100,7 +100,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         next: Invocation,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Persist a stable provider failure and release the lease atomically.
+    /// Persist a stable failure only when the durable attempt proves the provider did not accept the call.
     fn fail_invocation_owned(
         &self,
         scope: &Scope,
