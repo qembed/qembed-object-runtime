@@ -692,17 +692,36 @@ mod lifecycle_tests {
             token: FencingToken,
             next: Invocation,
         ) -> Result<bool, Self::Error> {
-            if self
-                .0
-                .lock()
-                .expect("fake store lock")
-                .lease_owner
-                .as_deref()
-                != Some(owner)
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != version
+                || state.invocation.fencing_token() != token
+                || state.lease_owner.as_deref() != Some(owner)
+                || state.attempt != ProviderCallAttemptState::ResponseReceived
+                || state.invocation.status() != InvocationStatus::Verifying
+                || next.status() != InvocationStatus::Completed
             {
                 return Ok(false);
             }
-            self.complete_invocation(scope, version, token, next).await
+            let next = if state.usage.is_none() {
+                Invocation::from_persisted(
+                    next.id(),
+                    next.tenant_id(),
+                    next.object_id(),
+                    next.caller_id(),
+                    next.snapshot_id(),
+                    InvocationCheckpoint::new(
+                        InvocationStatus::CompletedDegraded,
+                        next.version(),
+                        next.fencing_token(),
+                    ),
+                )
+            } else {
+                next
+            };
+            state.invocation = next;
+            state.lease_owner = None;
+            Ok(true)
         }
 
         async fn fail_invocation_owned(
@@ -714,18 +733,25 @@ mod lifecycle_tests {
             next: Invocation,
             error_code: &'static str,
         ) -> Result<bool, Self::Error> {
-            if self
-                .0
-                .lock()
-                .expect("fake store lock")
-                .lease_owner
-                .as_deref()
-                != Some(owner)
+            let mut state = self.0.lock().expect("fake store lock");
+            if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.version() != version
+                || state.invocation.fencing_token() != token
+                || state.lease_owner.as_deref() != Some(owner)
+                || !matches!(
+                    state.attempt,
+                    ProviderCallAttemptState::NotStarted
+                        | ProviderCallAttemptState::ConfirmedNotAccepted
+                        | ProviderCallAttemptState::CancelledBeforeSend
+                )
+                || next.status() != InvocationStatus::Failed
             {
                 return Ok(false);
             }
-            self.fail_invocation(scope, version, token, next, error_code)
-                .await
+            state.error_code = Some(error_code);
+            state.invocation = next;
+            state.lease_owner = None;
+            Ok(true)
         }
     }
 
