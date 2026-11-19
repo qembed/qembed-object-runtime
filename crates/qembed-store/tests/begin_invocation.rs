@@ -79,7 +79,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".budget_reservations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), usage_date DATE NOT NULL, reserved_tokens BIGINT NOT NULL CHECK (reserved_tokens >= 0), reserved_cost_micros BIGINT NOT NULL CHECK (reserved_cost_micros >= 0), actual_tokens BIGINT CHECK (actual_tokens >= 0), actual_cost_micros BIGINT CHECK (actual_cost_micros >= 0), status TEXT NOT NULL CHECK (status IN ('Reserved','Settled','Released','Expired')), expires_at TIMESTAMPTZ NOT NULL, UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, invocation_id, pool) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, id, pool) DEFERRABLE INITIALLY DEFERRED)"
         ),
         format!(
-            "CREATE INDEX \"{schema}\".idx_resv_sweep ON \"{schema}\".budget_reservations (expires_at) WHERE status='Reserved'"
+            "CREATE INDEX idx_resv_sweep ON \"{schema}\".budget_reservations (expires_at) WHERE status='Reserved'"
         ),
         format!(
             "CREATE TABLE \"{schema}\".interaction_messages (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, invocation_id UUID NOT NULL, role TEXT NOT NULL CHECK (role IN ('user','assistant','tool')), content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id))"
