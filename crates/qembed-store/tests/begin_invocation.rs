@@ -287,6 +287,16 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         other => panic!("expected Created, got {other:?}"),
     };
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let reservation_count: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool).await.expect("reservation count");
+    assert_eq!(reservation_count, 1, "new invocation has exactly one reservation");
+    let object_reserved: i64 = sqlx::query_scalar("SELECT sum(reserved_tokens) FROM usage_counters")
+        .fetch_one(&fixture.pool).await.expect("object reserved tokens");
+    let caller_reserved: i64 = sqlx::query_scalar("SELECT sum(reserved_tokens) FROM caller_usage_counters")
+        .fetch_one(&fixture.pool).await.expect("caller reserved tokens");
+    assert!(object_reserved > 0);
+    assert_eq!(caller_reserved, object_reserved);
+
 
     let persisted = sqlx::query_as::<_, (String, String, i64, String)>(
         "SELECT caller_id::text, snapshot_id::text, knowledge_revision, pool FROM object_invocations WHERE id=$1::uuid"
@@ -1199,5 +1209,114 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     assert_eq!(row.0, "Failed");
     assert_eq!(row.1, None, "terminal failure is not marked cancelled");
 
+    teardown(fixture).await;
+}
+
+
+#[tokio::test]
+async fn object_daily_limit_is_aggregate_across_pools_and_ignores_anonymous_share() {
+    let fixture = setup(None).await;
+    let estimate = qembed_domain::budget::estimate_input_tokens(
+        command(&fixture, "daily-auth").input_message.len(),
+    ).expect("input estimate");
+    sqlx::query("UPDATE object_budgets SET daily_token_limit=$2, anonymous_share_pct=0 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).bind(i64::try_from(estimate).expect("estimate fits bigint"))
+        .execute(&fixture.pool).await.expect("aggregate daily limit should be configured");
+
+    let first = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "daily-auth"))
+        .await.expect("authenticated reservation should fit the aggregate daily limit");
+    assert!(matches!(first, BeginInvocationOutcome::Created { .. }));
+
+    let mut anonymous = command(&fixture, "daily-anon");
+    anonymous.invocation_pool = InvocationPool::Anonymous;
+    let error = begin_invocation(&fixture.pool, &fixture.scope, anonymous)
+        .await.expect_err("anonymous pool must share the aggregate object ceiling");
+    assert!(matches!(error, BeginInvocationError::Budget(BudgetReservationError::Rejected(
+        BudgetRejection::ObjectDailyLimit
+    ))));
+    let pool_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_counters")
+        .fetch_one(&fixture.pool).await.expect("pool counter rows");
+    assert_eq!(pool_rows, 1, "only the first pool has a committed reservation");
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn caller_daily_limit_rejects_and_rolls_back_all_begin_rows() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE object_budgets SET per_caller_daily_token_limit=1 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).execute(&fixture.pool).await
+        .expect("caller daily limit should be configured");
+    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "caller-limit"))
+        .await.expect_err("caller limit must reject a non-zero estimate");
+    assert!(matches!(error, BeginInvocationError::Budget(BudgetReservationError::Rejected(
+        BudgetRejection::CallerDailyLimit
+    ))));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool).await.expect("reservation count");
+    assert_eq!(reservations, 0);
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn concurrent_invocation_limit_counts_active_reservations() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE object_budgets SET max_concurrent_invocations=1 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).execute(&fixture.pool).await
+        .expect("concurrency limit should be configured");
+    let first = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "concurrent-1"))
+        .await.expect("first invocation should reserve the only slot");
+    assert!(matches!(first, BeginInvocationOutcome::Created { .. }));
+    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "concurrent-2"))
+        .await.expect_err("second active invocation must be rejected");
+    assert!(matches!(error, BeginInvocationError::Budget(BudgetReservationError::Rejected(
+        BudgetRejection::ConcurrentInvocationLimit
+    ))));
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
+    let fixture = setup(None).await;
+    let estimate = qembed_domain::budget::estimate_input_tokens(
+        command(&fixture, "race-a").input_message.len(),
+    ).expect("input estimate");
+    sqlx::query("UPDATE object_budgets SET daily_token_limit=$2 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).bind(i64::try_from(estimate).expect("estimate fits bigint"))
+        .execute(&fixture.pool).await.expect("daily budget should be configured");
+
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let schema = fixture.schema.clone();
+    let second_pool = PgPoolOptions::new().max_connections(1).after_connect(move |connection, _| {
+        let schema = schema.clone();
+        Box::pin(async move {
+            sqlx::query(&format!("SET search_path TO \\"{schema}\\""))
+                .execute(connection).await?;
+            Ok(())
+        })
+    }).connect(&database_url).await.expect("second independent pool");
+
+    let first_command = command(&fixture, "race-a");
+    let second_command = command(&fixture, "race-b");
+    let (first, second) = tokio::join!(
+        begin_invocation(&fixture.pool, &fixture.scope, first_command),
+        begin_invocation(&second_pool, &fixture.scope, second_command),
+    );
+    second_pool.close().await;
+
+    let successes = usize::from(matches!(first, Ok(BeginInvocationOutcome::Created { .. })))
+        + usize::from(matches!(second, Ok(BeginInvocationOutcome::Created { .. })));
+    assert_eq!(successes, 1, "exactly one independent session may consume the final budget");
+    let rejected = match (first, second) {
+        (Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit))), _)
+        | (_, Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit)))) => true,
+        _ => false,
+    };
+    assert!(rejected, "the losing session must observe the committed reservation");
+    let reserved: i64 = sqlx::query_scalar("SELECT sum(reserved_tokens) FROM usage_counters")
+        .fetch_one(&fixture.pool).await.expect("reserved token sum");
+    assert_eq!(reserved, i64::try_from(estimate).expect("estimate fits bigint"));
     teardown(fixture).await;
 }
