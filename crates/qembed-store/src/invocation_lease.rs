@@ -306,6 +306,28 @@ impl InvocationLeaseStore for PgExecutionStore {
             ));
         }
 
+        // Verify ownership before settlement. Settlement is replay-safe, but a
+        // stale worker must not initiate accounting writes after losing its lease.
+        let mut ownership = begin_tenant_transaction(&self.pool, scope).await?;
+        let live = fetch_optional(
+            &mut ownership,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT id::text FROM object_invocations WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until > now() AND version=$5 AND fencing_token=$6 AND status='Verifying'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        if live.is_none() {
+            ownership.rollback().await?;
+            return Ok(false);
+        }
+        ownership.commit().await?;
+
         // Verifying is the recovery point after the provider response commit.
         // Settlement is replay-safe, so a crash between settlement and terminal
         // completion can resume here without another provider request.
