@@ -138,62 +138,15 @@ impl InvocationWorkStore for PgExecutionStore {
 
     async fn persist_assistant_output(
         &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        content: String,
+        _scope: &Scope,
+        _expected_version: u64,
+        _expected_fencing_token: FencingToken,
+        _next: Invocation,
+        _content: String,
     ) -> Result<bool, Self::Error> {
-        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
-        if next.status() != InvocationStatus::Verifying {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "assistant output must move Processing to Verifying",
-            ));
-        }
-        if content.trim().is_empty() || content.len() > 1_048_576 {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "assistant output is empty or too large",
-            ));
-        }
-
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
-        let inserted = execute(
-            &mut transaction,
-            sqlx::query(
-                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $1::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $7, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$2::uuid AND invocation.object_id=$3::uuid AND invocation.id=$4::uuid AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND invocation.lease_owner IS NULL AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
-            )
-            .bind(MessageId::new().to_string())
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?)
-            .bind(content),
-        )
-        .await?;
-        if inserted.rows_affected() != 1 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-
-        let transitioned = execute(
-            &mut transaction,
-            sqlx::query(
-                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Processing' AND lease_owner IS NULL",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
-        )
-        .await?;
-        if transitioned.rows_affected() != 1 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        transaction.commit().await?;
-        Ok(true)
+        Err(InvocationStoreError::InvalidRequestedState(
+            "assistant output requires the lease-fenced provider attempt protocol",
+        ))
     }
 
     async fn complete_invocation(
@@ -209,6 +162,46 @@ impl InvocationWorkStore for PgExecutionStore {
                 "completion must transition to Completed",
             ));
         }
+        let attempt = {
+            let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+            let row = fetch_optional(
+                &mut transaction,
+                sqlx::query_as::<_, (String, Option<i64>, Option<i64>)>(
+                    "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+                )
+                .bind(scope.tenant_id().to_string())
+                .bind(next.object_id().to_string())
+                .bind(next.id().to_string()),
+            )
+            .await?;
+            transaction.commit().await?;
+            row
+        }
+        .ok_or(InvocationStoreError::InvalidRequestedState(
+            "provider call attempt is missing",
+        ))?;
+        let state = parse_provider_attempt_state(&attempt.0)?;
+        if state != "ResponseReceived" {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "provider response is not durably recorded",
+            ));
+        }
+        let usage = match (attempt.1, attempt.2) {
+            (None, None) => None,
+            (Some(input), Some(output)) => Some(qembed_domain::chat::TokenUsage::new(
+                u32::try_from(input).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider input_tokens"))?,
+                u32::try_from(output).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider output_tokens"))?,
+            )),
+            _ => return Err(InvocationStoreError::InvalidPersistedValue("provider usage pair")),
+        };
+        crate::budget_settlement::settle_invocation_usage(
+            &self.pool,
+            scope,
+            next.id(),
+            usage,
+        )
+        .await
+        .map_err(|_| InvocationStoreError::InvalidRequestedState("provider usage settlement failed"))?;
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let result = execute(
             &mut transaction,
@@ -250,6 +243,31 @@ impl InvocationWorkStore for PgExecutionStore {
             ));
         }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let attempt = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string()),
+        )
+        .await?;
+        let Some((attempt_state,)) = attempt else {
+            transaction.rollback().await?;
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "provider call attempt is missing; failure fails closed",
+            ));
+        };
+        if !matches!(
+            attempt_state.as_str(),
+            "NotStarted" | "ConfirmedNotAccepted" | "CancelledBeforeSend"
+        ) {
+            transaction.rollback().await?;
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "cannot fail invocation after provider may have accepted the call",
+            ));
+        }
         let result = execute(
             &mut transaction,
             sqlx::query(
