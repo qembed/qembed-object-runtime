@@ -2006,62 +2006,42 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
             .len(),
     )
     .expect("input estimate");
-    let outcome = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
-        .await
-        .expect("missing usage must use the non-zero estimate");
-    assert_eq!(outcome.actual_tokens(), estimate);
-    assert!(outcome.is_degraded());
-    let reason: Option<String> =
-        sqlx::query_scalar("SELECT degraded_reason FROM object_invocations WHERE id=$1::uuid")
-            .bind(invocation_id.to_string())
-            .fetch_one(&fixture.pool)
-            .await
-            .expect("degraded reason");
-    assert_eq!(reason.as_deref(), Some("provider_usage_missing"));
-    let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
-        .await
-        .expect("degraded settlement replay");
-    assert!(replay.is_degraded());
-    assert!(replay.is_replay());
-    assert_eq!(replay.actual_tokens(), estimate);
 
-    // The normal completion API preserves the degraded outcome in the durable state.
     let store = PgExecutionStore::new(fixture.pool.clone());
-    let received = store
-        .load_invocation(&fixture.scope, invocation_id)
+    let owner = "worker-missing-usage";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load received invocation")
-        .expect("invocation exists");
-    let mut context_loading = received.clone();
+        .expect("claim invocation")
+        .expect("invocation is claimable");
+    let mut context_loading = claimed.clone();
     context_loading
-        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
         .expect("Received -> ContextLoading");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                received.version(),
-                FencingToken::INITIAL,
-                context_loading,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                context_loading.clone(),
             )
             .await
             .expect("persist ContextLoading")
     );
-    let context_loading = store
-        .load_invocation(&fixture.scope, invocation_id)
-        .await
-        .expect("reload ContextLoading")
-        .expect("invocation exists");
+
     let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Processing, context_loading.fencing_token())
         .expect("ContextLoading -> Processing");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
+                owner,
                 context_loading.version(),
-                FencingToken::INITIAL,
+                context_loading.fencing_token(),
                 processing,
             )
             .await
@@ -2072,22 +2052,41 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         .await
         .expect("reload Processing")
         .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
     let mut verifying = processing.clone();
     verifying
-        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
         .expect("Processing -> Verifying");
     assert!(
         store
-            .persist_assistant_output(
+            .persist_provider_response_owned(
                 &fixture.scope,
+                owner,
                 processing.version(),
-                FencingToken::INITIAL,
+                processing.fencing_token(),
                 verifying,
-                "degraded result".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "degraded result",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    None,
+                )
+                .expect("valid response without usage"),
             )
             .await
-            .expect("persist assistant output")
+            .expect("persist response with unavailable usage")
     );
+
     let verifying = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
@@ -2095,19 +2094,35 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         .expect("invocation exists");
     let mut completed = verifying.clone();
     completed
-        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
         .expect("Verifying -> Completed");
     assert!(
         store
-            .complete_invocation(
+            .complete_invocation_owned(
                 &fixture.scope,
+                owner,
                 verifying.version(),
-                FencingToken::INITIAL,
+                verifying.fencing_token(),
                 completed,
             )
             .await
-            .expect("complete degraded invocation")
+            .expect("settle degraded usage and complete")
     );
+
+    let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
+        .await
+        .expect("degraded settlement replay");
+    assert_eq!(replay.actual_tokens(), estimate);
+    assert!(replay.is_degraded());
+    assert!(replay.is_replay());
+
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT degraded_reason FROM object_invocations WHERE id=$1::uuid")
+            .bind(invocation_id.to_string())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("degraded reason");
+    assert_eq!(reason.as_deref(), Some("provider_usage_missing"));
     let status: String =
         sqlx::query_scalar("SELECT status FROM object_invocations WHERE id=$1::uuid")
             .bind(invocation_id.to_string())
