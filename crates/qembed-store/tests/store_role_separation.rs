@@ -203,13 +203,12 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .execute(&mut *tx)
     .await
     .expect("runtime should commit the pre-send marker");
-    let foreign_attempts: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM provider_call_attempts WHERE tenant_id=$1",
-    )
-    .bind(tenant_b)
-    .fetch_one(&mut *tx)
-    .await
-    .expect("RLS should hide another tenant's provider attempts");
+    let foreign_attempts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM provider_call_attempts WHERE tenant_id=$1")
+            .bind(tenant_b)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("RLS should hide another tenant's provider attempts");
     assert_eq!(foreign_attempts, 0);
     sqlx::query("SAVEPOINT provider_attempt_guard")
         .execute(&mut *tx)
