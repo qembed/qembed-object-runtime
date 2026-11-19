@@ -331,6 +331,24 @@ impl InvocationLeaseStore for PgExecutionStore {
                 "completion must transition to Completed",
             ));
         }
+
+        // Verifying is the recovery point after the provider response commit.
+        // Settlement is replay-safe, so a crash between settlement and terminal
+        // completion can resume here without another provider request.
+        let attempt = self.load_provider_call_attempt(scope, next.id()).await?
+            .ok_or(InvocationStoreError::InvalidRequestedState("provider call attempt is missing"))?;
+        if attempt.state() != ProviderCallAttemptState::ResponseReceived {
+            return Err(InvocationStoreError::InvalidRequestedState("provider response is not durably recorded"));
+        }
+        crate::budget_settlement::settle_invocation_usage(
+            &self.pool,
+            scope,
+            next.id(),
+            attempt.usage(),
+        )
+        .await
+        .map_err(|_| InvocationStoreError::InvalidRequestedState("provider usage settlement failed"))?;
+
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
 
         // The canonical SQL trigger permits release of an expired lease on a
