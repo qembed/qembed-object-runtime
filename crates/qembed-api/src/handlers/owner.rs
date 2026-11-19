@@ -51,7 +51,13 @@ pub trait OwnerApiBackend: Send + Sync {
         object_id: ObjectId,
         schema_version: u32,
         canonical_json: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>> + Send + '_>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>>
+                + Send
+                + '_,
+        >,
+    >;
 
     fn inspect(
         &self,
@@ -340,7 +346,13 @@ mod tests {
             _: ObjectId,
             _: u32,
             _: Vec<u8>,
-        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>> + Send + '_>> {
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
             Box::pin(async { panic!("backend must not be called for invalid transport input") })
         }
 
@@ -402,25 +414,29 @@ mod tests {
 
     #[test]
     fn create_version_body_rejects_duplicate_keys_and_invalid_schema_versions() {
-        assert!(parse_create_object_version_body(
-            br#"{"schema_version":1,"config":{"a":1,"a":2}}"#
-        ).is_err());
-        assert!(parse_create_object_version_body(
-            br#"{"schema_version":0,"config":{}}"#
-        ).is_err());
-        assert!(parse_create_object_version_body(
-            br#"{"schema_version":1,"schema_version":2,"config":{}}"#
-        ).is_err());
-        assert!(parse_create_object_version_body(
-            br#"{"schema_version":2147483648,"config":{}}"#
-        ).is_err());
+        assert!(
+            parse_create_object_version_body(br#"{"schema_version":1,"config":{"a":1,"a":2}}"#)
+                .is_err()
+        );
+        assert!(parse_create_object_version_body(br#"{"schema_version":0,"config":{}}"#).is_err());
+        assert!(
+            parse_create_object_version_body(
+                br#"{"schema_version":1,"schema_version":2,"config":{}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            parse_create_object_version_body(br#"{"schema_version":2147483648,"config":{}}"#)
+                .is_err()
+        );
     }
 
     #[test]
     fn create_version_body_accepts_semantically_incomplete_json_and_canonicalizes_it() {
         let (schema_version, canonical) = parse_create_object_version_body(
-            br#"{"config":{"unvalidated":true,"limits":{}},"schema_version":1}"#
-        ).expect("well-formed JSON draft is accepted");
+            br#"{"config":{"unvalidated":true,"limits":{}},"schema_version":1}"#,
+        )
+        .expect("well-formed JSON draft is accepted");
         assert_eq!(schema_version, 1);
         assert_eq!(canonical, br#"{"limits":{},"unvalidated":true}"#);
     }
