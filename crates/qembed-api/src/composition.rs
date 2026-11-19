@@ -13,8 +13,7 @@ use qembed_domain::{
     ports::DraftVersionCreation,
 };
 use qembed_runtime::{
-    invocation_query::InvocationQueryService,
-    object_creation::ObjectCreationService,
+    invocation_query::InvocationQueryService, object_creation::ObjectCreationService,
     object_version_creation::ObjectVersionCreationService,
 };
 use qembed_store::{
@@ -138,9 +137,11 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     object_version_id: version_id.to_string(),
                     snapshot_id: snapshot_id.to_string(),
                 }),
-                Err(qembed_runtime::object_version_creation::ObjectVersionCreationError::Store(
-                    qembed_store::object_repository::ObjectRepositoryError::ObjectNotFound,
-                )) => Err(OwnerApiBackendError::NotFound),
+                Err(
+                    qembed_runtime::object_version_creation::ObjectVersionCreationError::Store(
+                        qembed_store::object_repository::ObjectRepositoryError::ObjectNotFound,
+                    ),
+                ) => Err(OwnerApiBackendError::NotFound),
                 Err(_) => Err(OwnerApiBackendError::Internal),
             }
         })
