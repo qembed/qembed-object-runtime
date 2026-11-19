@@ -68,10 +68,11 @@ CREATE TABLE caller_usage_counters (
     reserved_tokens BIGINT NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0),
     PRIMARY KEY (tenant_id, object_id, caller_id, usage_date),
     FOREIGN KEY (tenant_id, object_id)
-        REFERENCES objects (tenant_id, object_id),
-    FOREIGN KEY (tenant_id, caller_id)
-        REFERENCES callers (tenant_id, id) ON DELETE CASCADE
+        REFERENCES objects (tenant_id, object_id)
 );
+
+-- The canonical qembed-sql schema additionally links caller_id to callers;
+-- that table is not yet part of this partial runtime migration chain.
 
 -- Runtime access remains tenant-scoped. The database row lock on object_budgets
 -- is the serialization point for object-wide daily and concurrency limits.
