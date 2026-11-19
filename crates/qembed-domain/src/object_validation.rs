@@ -382,7 +382,10 @@ mod tests {
         assert_eq!(outcome.evidence().max_tokens_per_invocation(), 4096);
         assert!(outcome.evidence().matches_snapshot(&snapshot));
 
-        assert_eq!(report.coverage()[0].area(), ValidationArea::InvocationBudget);
+        assert_eq!(
+            report.coverage()[0].area(),
+            ValidationArea::InvocationBudget
+        );
         assert_eq!(report.coverage()[0].status(), CoverageStatus::Validated);
         assert_eq!(report.coverage()[0].rule_or_gap_id(), "M0-R3-ADDENDUM-5");
 
@@ -401,9 +404,11 @@ mod tests {
                 "GAP-044-05",
             ]
         );
-        assert!(report.coverage()[1..]
-            .iter()
-            .all(|entry| entry.status() == CoverageStatus::NotValidatedSpecificationGap));
+        assert!(
+            report.coverage()[1..]
+                .iter()
+                .all(|entry| entry.status() == CoverageStatus::NotValidatedSpecificationGap)
+        );
     }
 
     #[test]
