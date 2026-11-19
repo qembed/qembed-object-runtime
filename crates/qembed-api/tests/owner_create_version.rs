@@ -77,7 +77,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     let first = test::call_service(
         &app,
         test::TestRequest::post()
-            .uri(format!("/owner/objects/{object_id}/versions"))
+            .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
             .insert_header((
                 actix_web::http::header::AUTHORIZATION,
@@ -121,7 +121,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     let duplicate = test::call_service(
         &app,
         test::TestRequest::post()
-            .uri(format!("/owner/objects/{object_id}/versions"))
+            .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
             .insert_header((
                 actix_web::http::header::AUTHORIZATION,
@@ -142,7 +142,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     let malformed = test::call_service(
         &app,
         test::TestRequest::post()
-            .uri(format!("/owner/objects/{object_id}/versions"))
+            .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
             .insert_header((
                 actix_web::http::header::AUTHORIZATION,
@@ -157,7 +157,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     let cross_tenant = test::call_service(
         &app,
         test::TestRequest::post()
-            .uri(format!("/owner/objects/{object_id}/versions"))
+            .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
             .insert_header((
                 actix_web::http::header::AUTHORIZATION,
@@ -173,7 +173,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     let mismatch = test::call_service(
         &app,
         test::TestRequest::post()
-            .uri(format!("/owner/objects/{object_id}/versions"))
+            .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
             .insert_header((
                 actix_web::http::header::AUTHORIZATION,
