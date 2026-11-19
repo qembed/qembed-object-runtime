@@ -28,18 +28,17 @@
 | GAP-044-03 | Provider configuration semantics and compatibility rules are not fully established | Provider selection/capability assumptions could be wrong | No inferred provider schema; require explicit contract before relying on fields |
 | GAP-044-04 | Permissions/security-policy configuration semantics are not fully established | Publication must not imply that authorization/security policy was validated | Keep authorization enforcement independent; do not mint validation success for unimplemented required checks |
 | GAP-044-05 | Unknown-field/extension compatibility policy is not established | Blanket rejection could be incompatible; blanket acceptance could hide unsupported semantics | Do not reject arbitrary unknown fields by default or treat them as understood; define compatibility policy in a versioned schema decision |
-| GAP-044-06 | Semantics for creating a distinct version with byte-identical content are not explicitly specified | `UNIQUE (tenant_id, object_id, content_hash)` plus version-bound FK prevents separate identical snapshot rows; T-30 only requires invocation-level reuse and does not require a new version | Preferred proposal: exact-byte version-level deduplication with explicit `identical_content` outcome; pending confirmation in [qembed-sql issue #16](https://github.com/qembed/qembed-sql/issues/16). No silent alias or Rust-side schema workaround |
+| GAP-044-06 | Semantics for creating a distinct version with byte-identical content were not specified by surviving M0 artifacts | `UNIQUE (tenant_id, object_id, content_hash)` plus version-bound FK prevents separate identical snapshot rows; T-30 only requires invocation-level reuse and does not require a new version | **Resolved by new approved RUST-044 contract (2026-11-19):** exact-byte version-level deduplication returns `identical_content` with existing version/snapshot IDs; same hash with different bytes fails closed; different bytes create version+snapshot atomically. See [qembed-sql ADR RUST-044](https://github.com/qembed/qembed-sql/blob/master/ADR_RUST-044_Identical_Content_Version_Deduplication.md). No DDL change |
 
 ## Required decisions before claiming full RUST-044 publication validation
 
 1. Define the versioned object-configuration schema and supported feature set from recoverable evidence or an explicitly approved new specification.
 2. Define unknown-field and extension compatibility semantics.
 3. Define tool/provider/permission/security-policy validation requirements before those features can be considered validated.
-4. Resolve identical-content new-version semantics with qembed-sql owners.
 5. Approve an immutable validator/ruleset versioning policy. Evidence must bind tenant, object, version, snapshot, content hash, and ruleset version.
 6. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
 
-## Decision hygiene
+## Accepted new project decisions\n\n- **RUST-044 identical-content version semantics (2026-11-19):** exact canonical-byte equality within the same tenant/object returns the existing version/snapshot as `identical_content`; hash match with byte mismatch is an integrity error; different bytes create version+snapshot atomically. This is a new approved project contract, not recovered M0 behavior. See the [canonical qembed-sql ADR](https://github.com/qembed/qembed-sql/blob/master/ADR_RUST-044_Identical_Content_Version_Deduplication.md).\n\n## Decision hygiene
 
 For every newly approved rule, record:
 - decision ID and date;
