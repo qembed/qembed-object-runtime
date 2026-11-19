@@ -14,6 +14,7 @@ use qembed_domain::chat::{
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::{Invocation, InvocationError, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
+use qembed_domain::provider_call_attempt::ProviderCallAttemptState;
 use qembed_domain::ports::ChatProvider;
 use qembed_domain::scope::Scope;
 
@@ -67,6 +68,7 @@ pub enum InvocationWorkerOutcome {
         invocation_id: InvocationId,
         error_code: &'static str,
     },
+    OutcomeUnknown { invocation_id: InvocationId },
     AlreadyTerminal {
         invocation_id: InvocationId,
         status: InvocationStatus,
@@ -226,6 +228,28 @@ where
                         .await?;
                 }
                 InvocationStatus::Processing => {
+                    let attempt = self.store.load_provider_call_attempt(scope, invocation_id)
+                        .await.map_err(InvocationWorkerError::Store)?
+                        .ok_or(InvocationWorkerError::Conflict)?;
+                    match attempt.state() {
+                        ProviderCallAttemptState::ResponseReceived => {
+                            return Err(InvocationWorkerError::Conflict);
+                        }
+                        ProviderCallAttemptState::MayHaveBeenSent | ProviderCallAttemptState::OutcomeUnknown => {
+                            if attempt.state() == ProviderCallAttemptState::MayHaveBeenSent {
+                                let marked = self.store.mark_provider_outcome_unknown_owned(
+                                    scope, invocation_id, &self.config.worker_id,
+                                    invocation.version(), invocation.fencing_token(),
+                                ).await.map_err(InvocationWorkerError::Store)?;
+                                if !marked { return Err(InvocationWorkerError::Conflict); }
+                            }
+                            return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
+                        }
+                        ProviderCallAttemptState::ConfirmedNotAccepted | ProviderCallAttemptState::CancelledBeforeSend => {
+                            return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
+                        }
+                        ProviderCallAttemptState::NotStarted => {}
+                    }
                     let input = self
                         .store
                         .load_user_input(scope, invocation_id)
@@ -244,6 +268,12 @@ where
                     if self.provider.capabilities(&self.config.model_key).is_none() {
                         return Err(InvocationWorkerError::ProviderRouteNotConfigured);
                     }
+
+                    let may_send = self.store.mark_provider_may_have_been_sent_owned(
+                        scope, invocation_id, &self.config.worker_id,
+                        invocation.version(), invocation.fencing_token(),
+                    ).await.map_err(InvocationWorkerError::Store)?;
+                    if !may_send { return Err(InvocationWorkerError::Conflict); }
 
                     let provider_context = ProviderRequestContext::for_invocation(invocation_id);
                     let provider_future = self
@@ -282,13 +312,14 @@ where
                             .map_err(InvocationWorkerError::InvalidTransition)?;
                             let persisted = self
                                 .store
-                                .persist_assistant_output_owned(
+                                .persist_provider_response_owned(
                                     scope,
                                     &self.config.worker_id,
                                     invocation.version(),
                                     invocation.fencing_token(),
                                     next,
                                     response.content().to_owned(),
+                                    response.usage(),
                                 )
                                 .await
                                 .map_err(InvocationWorkerError::Store)?;
@@ -296,33 +327,16 @@ where
                                 return Err(InvocationWorkerError::Conflict);
                             }
                         }
-                        Err(error) => {
-                            let code = provider_error_code(error);
-                            let mut next = invocation.clone();
-                            next.transition_to(
-                                InvocationStatus::Failed,
-                                invocation.fencing_token(),
-                            )
-                            .map_err(InvocationWorkerError::InvalidTransition)?;
-                            let persisted = self
-                                .store
-                                .fail_invocation_owned(
-                                    scope,
-                                    &self.config.worker_id,
-                                    invocation.version(),
-                                    invocation.fencing_token(),
-                                    next,
-                                    code,
-                                )
-                                .await
-                                .map_err(InvocationWorkerError::Store)?;
-                            if !persisted {
-                                return Err(InvocationWorkerError::Conflict);
-                            }
-                            return Ok(InvocationWorkerOutcome::Failed {
+                        Err(_error) => {
+                            let persisted = self.store.mark_provider_outcome_unknown_owned(
+                                scope,
                                 invocation_id,
-                                error_code: code,
-                            });
+                                &self.config.worker_id,
+                                invocation.version(),
+                                invocation.fencing_token(),
+                            ).await.map_err(InvocationWorkerError::Store)?;
+                            if !persisted { return Err(InvocationWorkerError::Conflict); }
+                            return Ok(InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
                         }
                     }
                 }
