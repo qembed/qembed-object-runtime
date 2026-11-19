@@ -37,15 +37,15 @@ Provider-reported usage is authoritative and may differ from the estimate in eit
 
 The invocation's effective per-invocation ceiling is enforced before dispatch through the output allowance. Settlement does not fabricate a lower usage value if a provider reports more than the allowed amount; such discrepancies remain visible in accounting for operational handling.
 
+The worker enters `Verifying` only in the same transaction that persists the assistant message, `ResponseReceived`, and normalized usage. Completion performs settlement from that durable record. If the process crashes after response persistence or after settlement, a later worker replays settlement idempotently and completes without another provider call.
+
 ## Completion semantics
 
 If provider usage was unavailable, settlement persists `degraded_reason='provider_usage_missing'`. The existing completion write then transitions the invocation to `CompletedDegraded` rather than `Completed`. Valid normalized usage leaves the normal `Completed` path unchanged.
 
 ## Explicitly out of scope
 
-- Releasing reservations for pre-provider failures.
-- Reconciliation after timeout, process crash, cancellation, or ambiguous provider outcome.
 - Cost settlement and `actual_cost_micros`.
-- Automatically retrying provider requests.
+- Automatically retrying ambiguous provider requests; this requires a verified provider-specific deduplication guarantee.
 
-These are not safe to infer from a missing response and are handled by RUST-041d or a separately specified cost contract.
+A generic timeout, cancellation, process crash, or transport error is not evidence that the provider did not accept the request. RUST-041d retains the reservation in `OutcomeUnknown`; it never treats missing response data as zero usage or as proof of non-acceptance.
