@@ -1412,10 +1412,11 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
         rejected,
         "the losing session must observe the committed reservation"
     );
-    let reserved: i64 = sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
-        .fetch_one(&fixture.pool)
-        .await
-        .expect("reserved token sum");
+    let reserved: i64 =
+        sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("reserved token sum");
     assert_eq!(
         reserved,
         i64::try_from(estimate).expect("estimate fits bigint")
