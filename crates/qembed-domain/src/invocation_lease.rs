@@ -48,17 +48,6 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         next: Invocation,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Persist assistant output and Processing → Verifying under one live lease.
-    fn persist_assistant_output_owned(
-        &self,
-        scope: &Scope,
-        owner: &str,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        content: String,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
-
     /// Load the durable provider-call state using the trusted tenant scope.
     fn load_provider_call_attempt(
         &self,
