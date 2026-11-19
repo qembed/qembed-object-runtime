@@ -12,7 +12,7 @@ use qembed_domain::scope::Scope;
 use serde::Serialize;
 use sqlx::PgPool;
 
-use crate::budget_reservation::reserve_invocation_budget;
+use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
 pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
 use crate::idempotency::{
@@ -306,12 +306,14 @@ pub async fn begin_invocation(
     reserve_invocation_budget(
         &mut transaction,
         scope,
-        command.object_id,
-        caller.caller_id(),
-        invocation_id,
-        command.invocation_pool,
-        snapshot_limit,
-        estimate,
+        BudgetReservationRequest {
+            object_id: command.object_id,
+            caller_id: caller.caller_id(),
+            invocation_id,
+            pool: command.invocation_pool,
+            snapshot_limit,
+            estimate,
+        },
     )
     .await?;
 
