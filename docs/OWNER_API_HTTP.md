@@ -42,4 +42,4 @@ Request:
 
 ## Scope
 
-This is the first Owner API transport increment, not completion of RUST-044. Create object/version, publish, invoke, and full PostgreSQL API integration coverage remain outstanding. It does not start RUST-045.
+This is a bounded Owner API transport increment, not completion of RUST-044. Publish, invoke, and the remaining end-to-end acceptance coverage are still outstanding. It does not start RUST-045.
