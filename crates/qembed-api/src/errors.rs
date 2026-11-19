@@ -98,8 +98,7 @@ pub fn map_begin_invocation_error(error: &BeginInvocationError) -> ApiError {
     let runtime_error = match error {
         BeginInvocationError::CallerResolution(CallerResolutionError::NotDelegated)
         | BeginInvocationError::ObjectNotFound
-        | BeginInvocationError::SnapshotNotFound
-        | BeginInvocationError::KnowledgeRevisionNotFound => RuntimeError::NotFound,
+        | BeginInvocationError::SnapshotNotFound => RuntimeError::NotFound,
         BeginInvocationError::Idempotency(IdempotencyReservationError::PayloadMismatch) => {
             RuntimeError::Conflict
         }
@@ -115,6 +114,7 @@ pub fn map_begin_invocation_error(error: &BeginInvocationError) -> ApiError {
         | BeginInvocationError::Idempotency(_)
         | BeginInvocationError::Budget(_)
         | BeginInvocationError::SnapshotBudgetInvalid
+        | BeginInvocationError::KnowledgeRevisionNotFound
         | BeginInvocationError::KnowledgeRevisionOutOfRange
         | BeginInvocationError::Database(_) => RuntimeError::Internal,
     };
@@ -250,6 +250,27 @@ mod tests {
             assert_eq!(mapped.status(), expected_status);
             assert_eq!(mapped.body().code, expected_code);
         }
+    }
+
+    #[test]
+    fn query_and_invocation_store_failures_use_safe_fallbacks() {
+        let query = map_invocation_query_error(&InvocationQueryError::InvalidPersistedValue(
+            "status",
+        ));
+        assert_eq!(query.status(), 500);
+        assert_eq!(query.body().code, "internal_error");
+
+        let rejected_write = map_invocation_store_error(
+            &InvocationStoreError::InvalidRequestedState("private state detail"),
+        );
+        assert_eq!(rejected_write.status(), 409);
+        assert_eq!(rejected_write.body().code, "conflict");
+
+        let malformed_store = map_invocation_store_error(
+            &InvocationStoreError::AmbiguousMessage("assistant"),
+        );
+        assert_eq!(malformed_store.status(), 500);
+        assert_eq!(malformed_store.body().code, "internal_error");
     }
 
     #[test]
