@@ -162,7 +162,7 @@ pub async fn settle_invocation_usage(
     if status == "Settled" {
         let actual_tokens = actual_tokens.ok_or(UsageSettlementError::InvalidPersistedUsage)?;
         let degraded: bool = sqlx::query_scalar(
-            "SELECT degraded_reason='provider_usage_missing' FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+            "SELECT COALESCE(degraded_reason='provider_usage_missing', false) FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
         )
         .bind(scope.tenant_id().to_string())
         .bind(invocation_id.to_string())
