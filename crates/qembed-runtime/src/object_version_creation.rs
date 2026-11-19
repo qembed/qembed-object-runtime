@@ -113,7 +113,10 @@ mod tests {
             .expect("canonical draft creation succeeds");
 
         let (version_id, snapshot_id) = match result {
-            DraftVersionCreation::Created { version_id, snapshot_id } => (version_id, snapshot_id),
+            DraftVersionCreation::Created {
+                version_id,
+                snapshot_id,
+            } => (version_id, snapshot_id),
             other => panic!("recording store should report creation, got {other:?}"),
         };
         assert_eq!(version_id.to_string().len(), 36);
@@ -126,8 +129,12 @@ mod tests {
         let service = ObjectVersionCreationService::new(RecordingStore);
 
         assert!(matches!(
-            service.create(&scope, ObjectId::new(), 1, br#"{ "x":1}"#.to_vec()).await,
-            Err(ObjectVersionCreationError::InvalidSnapshot(SnapshotError::Jcs(_)))
+            service
+                .create(&scope, ObjectId::new(), 1, br#"{ "x":1}"#.to_vec())
+                .await,
+            Err(ObjectVersionCreationError::InvalidSnapshot(
+                SnapshotError::Jcs(_)
+            ))
         ));
     }
 }
