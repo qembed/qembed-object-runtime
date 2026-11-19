@@ -2,10 +2,10 @@
 
 use std::fmt;
 
+use qembed_domain::budget::settle_token_usage;
 use qembed_domain::chat::TokenUsage;
 use qembed_domain::ids::InvocationId;
 use qembed_domain::scope::Scope;
-use qembed_domain::budget::settle_token_usage;
 use sqlx::PgPool;
 
 use crate::{begin_tenant_transaction, execute, fetch_optional};
@@ -50,12 +50,25 @@ impl fmt::Display for UsageSettlementError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound => formatter.write_str("invocation or budget reservation was not found"),
-            Self::MissingBudgetConfiguration => formatter.write_str("object budget configuration is missing"),
-            Self::MissingAccountingRow => formatter.write_str("token usage accounting row is missing or inconsistent"),
-            Self::InvalidReservationState => formatter.write_str("budget reservation is not eligible for settlement"),
-            Self::InvalidPersistedUsage => formatter.write_str("settled reservation has invalid persisted usage"),
-            Self::ArithmeticOverflow => formatter.write_str("provider token usage exceeds the supported accounting range"),
-            Self::Database(error) => write!(formatter, "provider usage settlement database error: {error}"),
+            Self::MissingBudgetConfiguration => {
+                formatter.write_str("object budget configuration is missing")
+            }
+            Self::MissingAccountingRow => {
+                formatter.write_str("token usage accounting row is missing or inconsistent")
+            }
+            Self::InvalidReservationState => {
+                formatter.write_str("budget reservation is not eligible for settlement")
+            }
+            Self::InvalidPersistedUsage => {
+                formatter.write_str("settled reservation has invalid persisted usage")
+            }
+            Self::ArithmeticOverflow => {
+                formatter.write_str("provider token usage exceeds the supported accounting range")
+            }
+            Self::Database(error) => write!(
+                formatter,
+                "provider usage settlement database error: {error}"
+            ),
         }
     }
 }
@@ -169,7 +182,10 @@ pub async fn settle_invocation_usage(
         .fetch_one(transaction.connection())
         .await
         .map_err(UsageSettlementError::Database)?;
-        transaction.commit().await.map_err(UsageSettlementError::Database)?;
+        transaction
+            .commit()
+            .await
+            .map_err(UsageSettlementError::Database)?;
         return Ok(SettlementOutcome {
             actual_tokens: u64::try_from(actual_tokens).map_err(|_| UsageSettlementError::InvalidPersistedUsage)?,
             degraded,
@@ -180,8 +196,8 @@ pub async fn settle_invocation_usage(
         return Err(UsageSettlementError::InvalidReservationState);
     }
 
-    let reserved_u64 = u64::try_from(reserved_tokens)
-        .map_err(|_| UsageSettlementError::InvalidPersistedUsage)?;
+    let reserved_u64 =
+        u64::try_from(reserved_tokens).map_err(|_| UsageSettlementError::InvalidPersistedUsage)?;
     if object_reserved < reserved_tokens || caller_reserved < reserved_tokens {
         return Err(UsageSettlementError::MissingAccountingRow);
     }
@@ -254,7 +270,10 @@ pub async fn settle_invocation_usage(
         .map_err(UsageSettlementError::Database)?;
     }
 
-    transaction.commit().await.map_err(UsageSettlementError::Database)?;
+    transaction
+        .commit()
+        .await
+        .map_err(UsageSettlementError::Database)?;
     Ok(SettlementOutcome {
         actual_tokens: settlement.actual_tokens(),
         degraded: settlement.is_degraded(),
