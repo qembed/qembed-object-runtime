@@ -18,7 +18,7 @@ use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
-use qembed_domain::snapshot::Snapshot;
+use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
 
 use crate::event_outbox::{ObjectEvent, append_object_event};
@@ -93,8 +93,6 @@ impl ObjectRepository {
         {
             return Err(ObjectRepositoryError::SnapshotVersionMismatch);
         }
-        let version_number = i64::try_from(version.version_number())
-            .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?;
         let schema_version = i32::try_from(snapshot.schema_version())
             .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
 
@@ -102,14 +100,65 @@ impl ObjectRepository {
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
+        // Serialize version-number allocation per tenant-owned object. The lock
+        // is held until commit/rollback, so concurrent creators cannot observe
+        // the same MAX(version_number).
+        fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT object_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(version.object_id().to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?
+        .ok_or(ObjectRepositoryError::ObjectNotFound)?;
+
+        let current_max = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (i64,)>(
+                "SELECT COALESCE(MAX(version_number), 0) FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(version.object_id().to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?
+        .ok_or(ObjectRepositoryError::ObjectNotFound)?
+        .0;
+
+        let version_number = current_max
+            .checked_add(1)
+            .ok_or(ObjectRepositoryError::VersionNumberOutOfRange)?;
+        let assigned_version = ObjectVersion::new(
+            version.id(),
+            scope.tenant_id(),
+            version.object_id(),
+            u64::try_from(version_number)
+                .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?,
+        )?;
+
+        // Rebind the immutable snapshot to the same server-allocated version
+        // identity. Its canonical bytes and content hash remain unchanged.
+        let assigned_snapshot = Snapshot::new(
+            snapshot.id(),
+            scope.tenant_id(),
+            snapshot.object_id(),
+            assigned_version.id(),
+            snapshot.schema_version(),
+            snapshot.canonical_json().to_vec(),
+        )
+        .map_err(ObjectRepositoryError::InvalidSnapshot)?;
+
         execute(
             &mut transaction,
             sqlx::query(
                 "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number, status) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'draft')",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(version.object_id().to_string())
-            .bind(version.id().to_string())
+            .bind(assigned_version.object_id().to_string())
+            .bind(assigned_version.id().to_string())
             .bind(version_number),
         )
         .await
@@ -121,12 +170,12 @@ impl ObjectRepository {
                 "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, convert_from($6, 'UTF8')::jsonb) ON CONFLICT (tenant_id, object_id, content_hash) DO NOTHING RETURNING snapshot_id::text",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(snapshot.id().to_string())
-            .bind(snapshot.object_id().to_string())
-            .bind(snapshot.object_version_id().to_string())
+            .bind(assigned_snapshot.id().to_string())
+            .bind(assigned_snapshot.object_id().to_string())
+            .bind(assigned_snapshot.object_version_id().to_string())
             .bind(schema_version)
-            .bind(snapshot.canonical_json())
-            .bind(snapshot.content_hash().to_vec()),
+            .bind(assigned_snapshot.canonical_json())
+            .bind(assigned_snapshot.content_hash().to_vec()),
         )
         .await
         .map_err(ObjectRepositoryError::Database)?;
@@ -137,8 +186,8 @@ impl ObjectRepository {
                 .await
                 .map_err(ObjectRepositoryError::Database)?;
             return Ok(DraftCreation::Created {
-                version_id: version.id(),
-                snapshot_id: snapshot.id(),
+                version_id: assigned_version.id(),
+                snapshot_id: assigned_snapshot.id(),
             });
         }
 
@@ -148,14 +197,14 @@ impl ObjectRepository {
                 "SELECT object_version_id::text, snapshot_id::text, canonical_json FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND content_hash = $3 FOR SHARE",
             )
             .bind(scope.tenant_id().to_string())
-            .bind(snapshot.object_id().to_string())
-            .bind(snapshot.content_hash().to_vec()),
+            .bind(assigned_snapshot.object_id().to_string())
+            .bind(assigned_snapshot.content_hash().to_vec()),
         )
         .await
         .map_err(ObjectRepositoryError::Database)?
         .ok_or(ObjectRepositoryError::DeduplicationRowMissing)?;
 
-        if existing.2.as_slice() != snapshot.canonical_json() {
+        if existing.2.as_slice() != assigned_snapshot.canonical_json() {
             return Err(ObjectRepositoryError::ContentHashCollision);
         }
 
@@ -446,6 +495,8 @@ pub enum ObjectRepositoryError {
     SnapshotVersionMismatch,
     /// Snapshot schema version does not fit PostgreSQL INTEGER.
     InvalidSchemaVersion,
+    /// The supplied canonical snapshot could not be rebound to its allocated version.
+    InvalidSnapshot(SnapshotError),
     /// A persisted identifier could not be parsed.
     InvalidIdentifier,
     /// A content-hash conflict had no corresponding snapshot row.
@@ -490,6 +541,9 @@ impl fmt::Display for ObjectRepositoryError {
             }
             Self::InvalidSchemaVersion => {
                 formatter.write_str("snapshot schema version exceeds PostgreSQL INTEGER")
+            }
+            Self::InvalidSnapshot(error) => {
+                write!(formatter, "snapshot construction failed: {error:?}")
             }
             Self::InvalidIdentifier => formatter.write_str("persisted identifier is invalid"),
             Self::DeduplicationRowMissing => {
