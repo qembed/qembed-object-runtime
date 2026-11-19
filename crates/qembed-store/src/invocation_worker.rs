@@ -26,6 +26,7 @@ impl PgExecutionStore {
 #[derive(Debug)]
 pub enum InvocationStoreError {
     Database(sqlx::Error),
+    Settlement(crate::budget_settlement::UsageSettlementError),
     InvalidPersistedValue(&'static str),
     InvalidRequestedState(&'static str),
     AmbiguousMessage(&'static str),
@@ -35,6 +36,7 @@ impl fmt::Display for InvocationStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
+            Self::Settlement(error) => write!(formatter, "invocation usage settlement failed: {error}"),
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted invocation has invalid {field}")
             }
@@ -52,6 +54,7 @@ impl std::error::Error for InvocationStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
+            Self::Settlement(error) => Some(error),
             _ => None,
         }
     }
