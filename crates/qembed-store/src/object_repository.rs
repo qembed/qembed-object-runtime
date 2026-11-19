@@ -2,10 +2,11 @@
 
 use std::fmt;
 
-use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId};
+use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
+use qembed_domain::snapshot::Snapshot;
 use sqlx::PgPool;
 
 use crate::event_outbox::{ObjectEvent, append_object_event};
@@ -97,6 +98,112 @@ impl ObjectRepository {
             .commit()
             .await
             .map_err(ObjectRepositoryError::Database)
+    }
+
+    /// Atomically creates a Draft version and its immutable snapshot.
+    ///
+    /// Content is deduplicated within the same tenant and object. A matching
+    /// SHA-256 is only a lookup key: the exact canonical bytes are compared
+    /// before an existing version/snapshot pair may be reused.
+    pub async fn create_draft_version_with_snapshot(
+        &self,
+        scope: &Scope,
+        version: &ObjectVersion,
+        snapshot: &Snapshot,
+    ) -> Result<DraftCreation, ObjectRepositoryError> {
+        if version.tenant_id() != scope.tenant_id()
+            || snapshot.tenant_id() != scope.tenant_id()
+        {
+            return Err(ObjectRepositoryError::TenantMismatch);
+        }
+        if version.status() != ObjectVersionStatus::Draft {
+            return Err(ObjectRepositoryError::VersionMustBeDraft);
+        }
+        if snapshot.object_id() != version.object_id()
+            || snapshot.object_version_id() != version.id()
+        {
+            return Err(ObjectRepositoryError::SnapshotVersionMismatch);
+        }
+        let version_number = i64::try_from(version.version_number())
+            .map_err(|_| ObjectRepositoryError::VersionNumberOutOfRange)?;
+        let schema_version = i32::try_from(snapshot.schema_version())
+            .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
+
+        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        execute(
+            &mut transaction,
+            sqlx::query(
+                "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number, status) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'draft')",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(version.object_id().to_string())
+            .bind(version.id().to_string())
+            .bind(version_number),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
+
+        let inserted = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String,)>(
+                "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, convert_from($6, 'UTF8')::jsonb) ON CONFLICT (tenant_id, object_id, content_hash) DO NOTHING RETURNING snapshot_id::text",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(snapshot.id().to_string())
+            .bind(snapshot.object_id().to_string())
+            .bind(snapshot.object_version_id().to_string())
+            .bind(schema_version)
+            .bind(snapshot.canonical_json())
+            .bind(snapshot.content_hash().to_vec()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
+
+        if inserted.is_some() {
+            transaction
+                .commit()
+                .await
+                .map_err(ObjectRepositoryError::Database)?;
+            return Ok(DraftCreation::Created {
+                version_id: version.id(),
+                snapshot_id: snapshot.id(),
+            });
+        }
+
+        let existing = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String, String, Vec<u8>)>(
+                "SELECT object_version_id::text, snapshot_id::text, canonical_json FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND content_hash = $3 FOR SHARE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(snapshot.object_id().to_string())
+            .bind(snapshot.content_hash().to_vec()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?
+        .ok_or(ObjectRepositoryError::DeduplicationRowMissing)?;
+
+        if existing.2.as_slice() != snapshot.canonical_json() {
+            return Err(ObjectRepositoryError::ContentHashCollision);
+        }
+
+        let existing_version_id = existing.0.parse()
+            .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+        let existing_snapshot_id = existing.1.parse()
+            .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+
+        transaction
+            .rollback()
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        Ok(DraftCreation::IdenticalContent {
+            version_id: existing_version_id,
+            snapshot_id: existing_snapshot_id,
+        })
     }
 
     /// Moves a Draft object into Validating before external validation begins.
@@ -304,6 +411,21 @@ impl ObjectRepository {
     }
 }
 
+/// Result of atomically creating a Draft version and its snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DraftCreation {
+    /// New version and snapshot rows were committed together.
+    Created {
+        version_id: ObjectVersionId,
+        snapshot_id: SnapshotId,
+    },
+    /// Exact canonical bytes already exist; no new rows were committed.
+    IdenticalContent {
+        version_id: ObjectVersionId,
+        snapshot_id: SnapshotId,
+    },
+}
+
 /// Validation or persistence failure while creating an Object or Draft version.
 #[derive(Debug)]
 pub enum ObjectRepositoryError {
@@ -315,6 +437,16 @@ pub enum ObjectRepositoryError {
     VersionMustBeDraft,
     /// The domain's unsigned version number does not fit PostgreSQL BIGINT.
     VersionNumberOutOfRange,
+    /// Snapshot identity does not refer to the supplied Draft version.
+    SnapshotVersionMismatch,
+    /// Snapshot schema version does not fit PostgreSQL INTEGER.
+    InvalidSchemaVersion,
+    /// A persisted identifier could not be parsed.
+    InvalidIdentifier,
+    /// A content-hash conflict had no corresponding snapshot row.
+    DeduplicationRowMissing,
+    /// Equal SHA-256 values were found for different canonical byte sequences.
+    ContentHashCollision,
     /// The requested object does not exist in this tenant.
     ObjectNotFound,
     /// A persisted object lifecycle state is unknown or violates domain invariants.
@@ -343,6 +475,19 @@ impl fmt::Display for ObjectRepositoryError {
             Self::VersionMustBeDraft => formatter.write_str("new object version must be Draft"),
             Self::VersionNumberOutOfRange => {
                 formatter.write_str("object version number exceeds PostgreSQL BIGINT")
+            }
+            Self::SnapshotVersionMismatch => {
+                formatter.write_str("snapshot does not belong to the supplied Draft version")
+            }
+            Self::InvalidSchemaVersion => {
+                formatter.write_str("snapshot schema version exceeds PostgreSQL INTEGER")
+            }
+            Self::InvalidIdentifier => formatter.write_str("persisted identifier is invalid"),
+            Self::DeduplicationRowMissing => {
+                formatter.write_str("snapshot content conflict has no matching row")
+            }
+            Self::ContentHashCollision => {
+                formatter.write_str("SHA-256 collision detected for different canonical bytes")
             }
             Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
             Self::DomainObject(error) => write!(formatter, "object lifecycle error: {error:?}"),
