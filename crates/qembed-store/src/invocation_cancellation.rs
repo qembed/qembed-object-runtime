@@ -30,6 +30,29 @@ impl InvocationCancellationStore for PgExecutionStore {
             .bind(invocation_id.to_string()),
         )
         .await?;
+        let current = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String, i64)>(
+                "SELECT status, fencing_token FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(invocation_id.to_string()),
+        )
+        .await?;
+        let Some((current_status, _)) = current else {
+            transaction.commit().await?;
+            return Ok(InvocationCancellationOutcome::NotFound);
+        };
+        let current_status = parse_status(&current_status)?;
+        if current_status == InvocationStatus::Cancelled {
+            transaction.commit().await?;
+            return Ok(InvocationCancellationOutcome::Cancelled { newly_cancelled: false });
+        }
+        if current_status.is_terminal() {
+            transaction.commit().await?;
+            return Ok(InvocationCancellationOutcome::AlreadyTerminal(current_status));
+        }
+
         let Some((attempt_state,)) = attempt else {
             transaction.rollback().await?;
             return Err(InvocationStoreError::InvalidRequestedState(
