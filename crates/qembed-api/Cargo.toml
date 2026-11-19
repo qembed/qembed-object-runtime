@@ -16,3 +16,6 @@ qembed-tools = { path = "../qembed-tools" }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
