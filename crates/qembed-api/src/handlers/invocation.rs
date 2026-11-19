@@ -2,8 +2,11 @@
 
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::InvocationStatus;
-use qembed_domain::ports::InvocationReadStore;
+use qembed_domain::ports::{
+    InvocationCancellationOutcome, InvocationCancellationStore, InvocationReadStore,
+};
 use qembed_domain::scope::Scope;
+use qembed_runtime::invocation_cancellation::InvocationCancellationService;
 use qembed_runtime::invocation_query::InvocationQueryService;
 use serde::Serialize;
 
@@ -33,6 +36,44 @@ pub struct InvocationResponse {
     pub degraded: bool,
 }
 
+/// Result of an invocation cancellation request.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CancelInvocationResponse {
+    pub invocation_id: String,
+    pub status: InvocationApiStatus,
+    /// True only when this request changed a nonterminal invocation to Cancelled.
+    pub cancellation_applied: bool,
+}
+
+/// POST /invocations/{id}/cancel application handler. Missing and cross-tenant
+/// IDs return None; a different terminal state is returned unchanged.
+pub async fn cancel_invocation<S: InvocationCancellationStore>(
+    service: &InvocationCancellationService<S>,
+    scope: &Scope,
+    invocation_id: InvocationId,
+) -> Result<Option<CancelInvocationResponse>, S::Error> {
+    let outcome = service.cancel(scope, invocation_id).await?;
+    Ok(cancellation_response(invocation_id, outcome))
+}
+
+fn cancellation_response(
+    invocation_id: InvocationId,
+    outcome: InvocationCancellationOutcome,
+) -> Option<CancelInvocationResponse> {
+    let (status, cancellation_applied) = match outcome {
+        InvocationCancellationOutcome::Cancelled { newly_cancelled } => {
+            (InvocationApiStatus::Cancelled, newly_cancelled)
+        }
+        InvocationCancellationOutcome::AlreadyTerminal(status) => (api_status(status), false),
+        InvocationCancellationOutcome::NotFound => return None,
+    };
+    Some(CancelInvocationResponse {
+        invocation_id: invocation_id.to_string(),
+        status,
+        cancellation_applied,
+    })
+}
+
 /// GET /invocations/{id} application handler. HTTP routing/status-code wiring
 /// is added with the API transport skeleton; this function owns the safe view.
 pub async fn get_invocation<S: InvocationReadStore>(
@@ -44,19 +85,7 @@ pub async fn get_invocation<S: InvocationReadStore>(
         return Ok(None);
     };
 
-    let (status, degraded) = match view.status() {
-        InvocationStatus::Received => (InvocationApiStatus::Queued, false),
-        InvocationStatus::ContextLoading
-        | InvocationStatus::Processing
-        | InvocationStatus::ExecutingTool
-        | InvocationStatus::Verifying
-        | InvocationStatus::WaitingForInput
-        | InvocationStatus::WaitingForApproval => (InvocationApiStatus::Running, false),
-        InvocationStatus::Completed => (InvocationApiStatus::Succeeded, false),
-        InvocationStatus::CompletedDegraded => (InvocationApiStatus::Succeeded, true),
-        InvocationStatus::Failed => (InvocationApiStatus::Failed, false),
-        InvocationStatus::Cancelled => (InvocationApiStatus::Cancelled, false),
-    };
+    let (status, degraded) = api_status_with_degraded(view.status());
 
     Ok(Some(InvocationResponse {
         invocation_id: view.id().to_string(),
@@ -69,9 +98,63 @@ pub async fn get_invocation<S: InvocationReadStore>(
     }))
 }
 
+fn api_status(status: InvocationStatus) -> InvocationApiStatus {
+    api_status_with_degraded(status).0
+}
+
+fn api_status_with_degraded(status: InvocationStatus) -> (InvocationApiStatus, bool) {
+    match status {
+        InvocationStatus::Received => (InvocationApiStatus::Queued, false),
+        InvocationStatus::ContextLoading
+        | InvocationStatus::Processing
+        | InvocationStatus::ExecutingTool
+        | InvocationStatus::Verifying
+        | InvocationStatus::WaitingForInput
+        | InvocationStatus::WaitingForApproval => (InvocationApiStatus::Running, false),
+        InvocationStatus::Completed => (InvocationApiStatus::Succeeded, false),
+        InvocationStatus::CompletedDegraded => (InvocationApiStatus::Succeeded, true),
+        InvocationStatus::Failed => (InvocationApiStatus::Failed, false),
+        InvocationStatus::Cancelled => (InvocationApiStatus::Cancelled, false),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_response_distinguishes_applied_repeated_and_terminal_requests() {
+        let id = InvocationId::new();
+
+        let applied = cancellation_response(
+            id,
+            InvocationCancellationOutcome::Cancelled {
+                newly_cancelled: true,
+            },
+        )
+        .expect("new cancellation has a response");
+        assert_eq!(applied.status, InvocationApiStatus::Cancelled);
+        assert!(applied.cancellation_applied);
+
+        let repeated = cancellation_response(
+            id,
+            InvocationCancellationOutcome::Cancelled {
+                newly_cancelled: false,
+            },
+        )
+        .expect("repeated cancellation has a response");
+        assert_eq!(repeated.status, InvocationApiStatus::Cancelled);
+        assert!(!repeated.cancellation_applied);
+
+        let terminal = cancellation_response(
+            id,
+            InvocationCancellationOutcome::AlreadyTerminal(InvocationStatus::Failed),
+        )
+        .expect("terminal invocation has a response");
+        assert_eq!(terminal.status, InvocationApiStatus::Failed);
+        assert!(!terminal.cancellation_applied);
+
+        assert!(cancellation_response(id, InvocationCancellationOutcome::NotFound).is_none());
+    }
 
     #[test]
     fn response_serialization_exposes_only_the_client_contract() {

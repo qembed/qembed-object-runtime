@@ -12,6 +12,7 @@ pub mod begin_invocation;
 pub mod caller;
 mod cas;
 pub mod idempotency;
+pub mod invocation_cancellation;
 mod invocation_lease;
 pub mod invocation_query;
 pub mod invocation_worker;

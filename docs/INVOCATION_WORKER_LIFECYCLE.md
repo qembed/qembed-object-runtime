@@ -23,6 +23,18 @@ Each transition reloads the persisted Invocation and uses the domain state machi
 
 The assistant message inherits the user message's retention deadline. Raw provider errors, SDK details, and credentials are not stored in `error_code`.
 
+## Cancellation
+
+RUST-040 adds a tenant-scoped cancellation operation. A nonterminal invocation
+is durably moved to `Cancelled`; the transaction records
+`cancel_requested_at` and `finished_at`, advances the version and fencing
+token, and releases the worker lease. A stale worker can no longer heartbeat,
+persist an assistant response, or complete the invocation.
+
+Cancellation cannot roll back a provider request or other external side effect
+that has already been accepted. The provider call may still finish; its result
+is discarded because the cancelled invocation no longer accepts worker writes.
+
 ## Restart behavior and limits
 
 A process restart at `Received` or `ContextLoading` resumes from the last committed state. A restart at `Verifying` loads the persisted assistant output and performs only the terminal transition. A restart after `Completed` returns the durable assistant output.
@@ -52,4 +64,4 @@ a second provider execution/cost.
 
 `qembed-domain::InvocationWorkStore` describes durable input/output and terminal transitions. `qembed-store::PgExecutionStore` implements it using tenant-scoped PostgreSQL transactions. `qembed-runtime::InvocationWorker` coordinates the domain ports and `ChatProvider`; it contains no SQLx or provider SDK types.
 
-The worker does not yet dispatch the outbox, expose HTTP endpoints, execute tools, settle budgets, or implement cancellation. Those remain later roadmap tasks.
+The worker does not yet dispatch the outbox, expose HTTP endpoints, execute tools, or settle budgets. Those remain later roadmap tasks.
