@@ -31,7 +31,7 @@ use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
 
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{begin_tenant_transaction, fetch_optional};
 
 /// Retrieves immutable snapshots. Creation is owned by ObjectRepository.
 #[derive(Clone, Debug)]

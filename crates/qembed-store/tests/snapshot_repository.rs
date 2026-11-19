@@ -211,7 +211,6 @@ async fn repository_rejects_persisted_hash_mismatch() {
 #[tokio::test]
 async fn database_rejects_a_mismatched_jsonb_projection() {
     let fixture = setup().await;
-    let repository = SnapshotRepository::new(fixture.pool.clone());
     let seed = persist_pair(&fixture, 1, br#"{"seed":true}"#).await;
     let snapshot_id = SnapshotId::new();
     let bytes = br#"{"source":"canonical"}"#;
