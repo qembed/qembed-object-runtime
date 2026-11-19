@@ -68,13 +68,13 @@ impl PgReadinessProbe {
     }
 }
 
-fn migration_state_matches(
-    expected: &[(i64, Vec<u8>)],
-    applied: &[(i64, Vec<u8>, bool)],
-) -> bool {
+fn migration_state_matches(expected: &[(i64, Vec<u8>)], applied: &[(i64, Vec<u8>, bool)]) -> bool {
     expected.len() == applied.len()
         && expected.iter().zip(applied).all(
-            |((expected_version, expected_checksum), (applied_version, applied_checksum, success))| {
+            |(
+                (expected_version, expected_checksum),
+                (applied_version, applied_checksum, success),
+            )| {
                 success
                     && expected_version == applied_version
                     && expected_checksum == applied_checksum
