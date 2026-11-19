@@ -8,7 +8,7 @@ RUST-044 is the M1a Owner API walking-skeleton slice: create object/version, pub
 
 The original M0 v2.2 source specification is unavailable and must be treated as lost. It has not been reconstructed. No implementation or documentation may claim to have reviewed, recovered, or inferred requirements from that missing source.
 
-The verifiable normative baseline is limited to the surviving M0 v2.3.3 r3 Finalization Addendum, ADR RT-039…RT-048, acceptance T-01…T-64, and canonical SQL artifacts in qembed-sql. The consolidated PDF is marked r1 and was not re-rendered after r3; the Markdown addendum is authoritative for the changes it explicitly covers. These surviving artifacts do not establish that every original M0 v2.2 rule is present.
+The verifiable normative baseline is limited to the surviving M0 v2.3.3 r3 Finalization Addendum, ADR RT-039…RT-048, acceptance T-01…T-64, and canonical SQL artifacts in qembed-sql. This explicitly supersedes the RUST-044 roadmap bullet that asks for a future text-level review of the original M0 v2.2 semantic rules: that source is lost, so the review cannot be completed. The roadmap gate is now the bounded surviving-artifact baseline plus the open decisions in `M0_SPEC_GAPS.md`. The consolidated PDF is marked r1 and was not re-rendered after r3; the Markdown addendum is authoritative for the changes it explicitly covers. These surviving artifacts do not establish that every original M0 v2.2 rule is present.
 
 Any requirement not established by the surviving artifacts is a specification gap. If the project later chooses a rule to fill such a gap, record it as a new, explicitly approved project decision/ADR—not as recovered M0 behaviour. See [M0_SPEC_GAPS.md](./M0_SPEC_GAPS.md).
 
