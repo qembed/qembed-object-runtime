@@ -35,10 +35,14 @@
 1. Define the versioned object-configuration schema and supported feature set from recoverable evidence or an explicitly approved new specification.
 2. Define unknown-field and extension compatibility semantics.
 3. Define tool/provider/permission/security-policy validation requirements before those features can be considered validated.
-5. Approve an immutable validator/ruleset versioning policy. Evidence must bind tenant, object, version, snapshot, content hash, and ruleset version.
-6. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
+4. Approve an immutable validator/ruleset versioning policy. Evidence must bind tenant, object, version, snapshot, content hash, and ruleset version.
+5. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
 
-## Accepted new project decisions\n\n- **RUST-044 identical-content version semantics (2026-11-19):** exact canonical-byte equality within the same tenant/object returns the existing version/snapshot as `identical_content`; hash match with byte mismatch is an integrity error; different bytes create version+snapshot atomically. This is a new approved project contract, not recovered M0 behavior. See the [canonical qembed-sql ADR](https://github.com/qembed/qembed-sql/blob/master/ADR_RUST-044_Identical_Content_Version_Deduplication.md).\n\n## Decision hygiene
+## Accepted new project decisions
+
+- **RUST-044 identical-content version semantics (2026-11-19):** exact canonical-byte equality within the same tenant/object returns the existing version/snapshot as `identical_content`; hash match with byte mismatch is an integrity error; different bytes create version+snapshot atomically. This is a new approved project contract, not recovered M0 behavior. See the [canonical qembed-sql ADR](https://github.com/qembed/qembed-sql/blob/master/ADR_RUST-044_Identical_Content_Version_Deduplication.md).
+
+## Decision hygiene
 
 For every newly approved rule, record:
 - decision ID and date;
