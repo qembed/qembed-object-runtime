@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use qembed_domain::chat::TokenUsage;
+use qembed_domain::chat::{ChatFinishReason, ChatResponse, TokenUsage};
 use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
@@ -111,14 +111,15 @@ impl InvocationLeaseStore for PgExecutionStore {
     ) -> Result<bool, Self::Error> {
         // Compatibility entry point: preserve the durable attempt protocol and
         // explicitly treat unavailable usage as missing, never as zero.
+        let response = ChatResponse::new(content, ChatFinishReason::Stop, None)
+            .map_err(|_| InvocationStoreError::InvalidRequestedState("assistant output is invalid"))?;
         self.persist_provider_response_owned(
             scope,
             owner,
             expected_version,
             expected_fencing_token,
             next,
-            content,
-            None,
+            response,
         )
         .await
     }
@@ -219,10 +220,11 @@ impl InvocationLeaseStore for PgExecutionStore {
         expected_version: u64,
         expected_fencing_token: FencingToken,
         next: Invocation,
-        content: String,
-        usage: Option<TokenUsage>,
+        response: ChatResponse,
     ) -> Result<bool, Self::Error> {
         validate_next(scope, expected_version, expected_fencing_token, &next)?;
+        let content = response.content().to_owned();
+        let usage = response.usage();
         if next.status() != InvocationStatus::Verifying
             || content.trim().is_empty()
             || content.len() > 1_048_576
