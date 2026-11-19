@@ -22,3 +22,11 @@ The snapshot migration stores the exact canonical JSON byte sequence in
 bytes and checked by a database trigger. Snapshot rows reject UPDATE and
 DELETE; the repository verifies the stored digest again when reconstructing a
 domain Snapshot. JSONB is never used to recreate canonical bytes.
+
+
+The RUST-041b migration adds token-budget accounting tables and tenant RLS policies.
+The canonical qembed-sql schema also declares cross-table foreign keys from
+`budget_reservations` to `object_invocations` and from `caller_usage_counters` to
+`callers`. Those two parent tables are not yet introduced by this partial Rust
+migration chain, so their foreign keys remain owned by the canonical schema and
+must be added to this chain when the corresponding parent-table migrations land.

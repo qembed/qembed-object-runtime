@@ -3,6 +3,7 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use qembed_domain::budget::estimate_input_tokens;
 use qembed_domain::caller::{CallerKind, InvocationPool};
 use qembed_domain::ids::{
     CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TraceId,
@@ -11,6 +12,8 @@ use qembed_domain::scope::Scope;
 use serde::Serialize;
 use sqlx::PgPool;
 
+pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
+use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
 use crate::idempotency::{
     IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
@@ -61,6 +64,8 @@ pub enum BeginInvocationOutcome {
 pub enum BeginInvocationError {
     CallerResolution(CallerResolutionError),
     Idempotency(IdempotencyReservationError),
+    Budget(BudgetReservationError),
+    SnapshotBudgetInvalid,
     ObjectNotFound,
     ObjectNotActive,
     SnapshotNotFound,
@@ -78,6 +83,10 @@ impl fmt::Display for BeginInvocationError {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
             Self::Idempotency(error) => {
                 write!(formatter, "idempotency reservation failed: {error}")
+            }
+            Self::Budget(error) => write!(formatter, "{error}"),
+            Self::SnapshotBudgetInvalid => {
+                formatter.write_str("snapshot token budget is missing or invalid")
             }
             Self::ObjectNotFound => formatter.write_str("object does not exist in this tenant"),
             Self::ObjectNotActive => formatter.write_str("object is not active for invocation"),
@@ -105,6 +114,7 @@ impl std::error::Error for BeginInvocationError {
         match self {
             Self::CallerResolution(error) => Some(error),
             Self::Idempotency(error) => Some(error),
+            Self::Budget(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
@@ -114,6 +124,12 @@ impl std::error::Error for BeginInvocationError {
 impl From<CallerResolutionError> for BeginInvocationError {
     fn from(error: CallerResolutionError) -> Self {
         Self::CallerResolution(error)
+    }
+}
+
+impl From<BudgetReservationError> for BeginInvocationError {
+    fn from(error: BudgetReservationError) -> Self {
+        Self::Budget(error)
     }
 }
 
@@ -267,6 +283,39 @@ pub async fn begin_invocation(
     .ok_or(BeginInvocationError::KnowledgeRevisionNotFound)?;
     let knowledge_revision =
         u64::try_from(revision.0).map_err(|_| BeginInvocationError::KnowledgeRevisionOutOfRange)?;
+
+    // The published snapshot is the immutable upper bound. Missing, malformed,
+    // fractional, zero or negative values fail closed before provider work.
+    let snapshot_projection = sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT json_projection FROM snapshots WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND snapshot_id=$3::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(command.object_id.to_string())
+    .bind(command.snapshot_id.to_string())
+    .fetch_one(transaction.connection())
+    .await
+    .map_err(BeginInvocationError::Database)?;
+    let snapshot_limit = snapshot_projection
+        .get("limits")
+        .and_then(|limits| limits.get("max_tokens_per_invocation"))
+        .and_then(serde_json::Value::as_u64)
+        .filter(|limit| *limit > 0)
+        .ok_or(BeginInvocationError::SnapshotBudgetInvalid)?;
+    let estimate = estimate_input_tokens(command.input_message.len())
+        .map_err(|_| BeginInvocationError::SnapshotBudgetInvalid)?;
+    reserve_invocation_budget(
+        &mut transaction,
+        scope,
+        BudgetReservationRequest {
+            object_id: command.object_id,
+            caller_id: caller.caller_id(),
+            invocation_id,
+            pool: command.invocation_pool,
+            snapshot_limit,
+            estimate,
+        },
+    )
+    .await?;
 
     execute(
         &mut transaction,

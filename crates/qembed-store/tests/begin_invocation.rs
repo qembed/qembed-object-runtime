@@ -14,7 +14,8 @@ use qembed_domain::ports::{
 };
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
-    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
+    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, BudgetRejection,
+    BudgetReservationError, begin_invocation,
 };
 use qembed_store::invocation_query::PgInvocationQueryStore;
 use qembed_store::invocation_worker::PgExecutionStore;
@@ -64,6 +65,21 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         ),
         format!(
             "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL CHECK (status IN ('Received','ContextLoading','Processing','ExecutingTool','Verifying','WaitingForInput','WaitingForApproval','Completed','CompletedDegraded','Failed','Cancelled')), error_code TEXT, degraded_reason TEXT, trace_id UUID NOT NULL, cancel_requested_at TIMESTAMPTZ, lease_owner TEXT, lease_until TIMESTAMPTZ, heartbeat_at TIMESTAMPTZ, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), CHECK ((status IN ('Completed','CompletedDegraded','Failed','Cancelled')) = (finished_at IS NOT NULL)), CHECK (status <> 'Failed' OR error_code IS NOT NULL), CHECK (status <> 'CompletedDegraded' OR degraded_reason IS NOT NULL), CHECK ((lease_owner IS NULL) = (lease_until IS NULL)), CHECK (finished_at IS NULL OR lease_owner IS NULL), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
+        ),
+        format!(
+            "CREATE TABLE \"{schema}\".object_budgets (tenant_id UUID NOT NULL, object_id UUID NOT NULL, daily_token_limit BIGINT NOT NULL CHECK (daily_token_limit >= 0), daily_cost_limit_micros BIGINT NOT NULL CHECK (daily_cost_limit_micros >= 0), anonymous_share_pct SMALLINT NOT NULL DEFAULT 50 CHECK (anonymous_share_pct BETWEEN 0 AND 100), per_caller_daily_token_limit BIGINT NOT NULL CHECK (per_caller_daily_token_limit >= 0), max_concurrent_invocations INTEGER NOT NULL CHECK (max_concurrent_invocations > 0), max_llm_calls INTEGER NOT NULL CHECK (max_llm_calls > 0), max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls >= 0), max_tokens_per_invocation BIGINT NOT NULL CHECK (max_tokens_per_invocation > 0), max_duration_ms INTEGER NOT NULL CHECK (max_duration_ms > 0), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (tenant_id, object_id), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
+        ),
+        format!(
+            "CREATE TABLE \"{schema}\".usage_counters (tenant_id UUID NOT NULL, object_id UUID NOT NULL, usage_date DATE NOT NULL, pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), consumed_tokens BIGINT NOT NULL DEFAULT 0 CHECK (consumed_tokens >= 0), consumed_cost_micros BIGINT NOT NULL DEFAULT 0 CHECK (consumed_cost_micros >= 0), reserved_tokens BIGINT NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0), reserved_cost_micros BIGINT NOT NULL DEFAULT 0 CHECK (reserved_cost_micros >= 0), PRIMARY KEY (tenant_id, object_id, usage_date, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
+        ),
+        format!(
+            "CREATE TABLE \"{schema}\".caller_usage_counters (tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, usage_date DATE NOT NULL, consumed_tokens BIGINT NOT NULL DEFAULT 0 CHECK (consumed_tokens >= 0), reserved_tokens BIGINT NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0), PRIMARY KEY (tenant_id, object_id, caller_id, usage_date), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id) ON DELETE CASCADE)"
+        ),
+        format!(
+            "CREATE TABLE \"{schema}\".budget_reservations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), usage_date DATE NOT NULL, reserved_tokens BIGINT NOT NULL CHECK (reserved_tokens >= 0), reserved_cost_micros BIGINT NOT NULL CHECK (reserved_cost_micros >= 0), actual_tokens BIGINT CHECK (actual_tokens >= 0), actual_cost_micros BIGINT CHECK (actual_cost_micros >= 0), status TEXT NOT NULL CHECK (status IN ('Reserved','Settled','Released','Expired')), expires_at TIMESTAMPTZ NOT NULL, UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, invocation_id, pool) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, id, pool) DEFERRABLE INITIALLY DEFERRED)"
+        ),
+        format!(
+            "CREATE INDEX idx_resv_sweep ON \"{schema}\".budget_reservations (expires_at) WHERE status='Reserved'"
         ),
         format!(
             "CREATE TABLE \"{schema}\".interaction_messages (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, invocation_id UUID NOT NULL, role TEXT NOT NULL CHECK (role IN ('user','assistant','tool')), content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, FOREIGN KEY (tenant_id, object_id, caller_id, invocation_id) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, caller_id, id))"
@@ -176,10 +192,13 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
     sqlx::query("INSERT INTO objects (tenant_id, object_id, state, published_version_id) VALUES ($1::uuid, $2::uuid, 'active', $3::uuid)")
         .bind(tenant_id.to_string()).bind(object_id.to_string()).bind(version_id.to_string())
         .execute(&pool).await.expect("active object fixture should be inserted");
+    sqlx::query("INSERT INTO object_budgets (tenant_id, object_id, daily_token_limit, daily_cost_limit_micros, per_caller_daily_token_limit, max_concurrent_invocations, max_llm_calls, max_tool_calls, max_tokens_per_invocation, max_duration_ms) VALUES ($1::uuid, $2::uuid, 100000, 0, 100000, 10, 10, 0, 10000, 60000)")
+        .bind(tenant_id.to_string()).bind(object_id.to_string())
+        .execute(&pool).await.expect("object budget fixture should be inserted");
     sqlx::query("INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number, status) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'published')")
         .bind(tenant_id.to_string()).bind(object_id.to_string()).bind(version_id.to_string())
         .execute(&pool).await.expect("published version fixture should be inserted");
-    sqlx::query("INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, '{}'::bytea, decode(repeat('00',32),'hex'), '{}'::jsonb)")
+    sqlx::query("INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, convert_to('{\"limits\":{\"max_tokens_per_invocation\":10000}}','UTF8'), decode(repeat('00',32),'hex'), '{\"limits\":{\"max_tokens_per_invocation\":10000}}'::jsonb)")
         .bind(tenant_id.to_string()).bind(snapshot_id.to_string()).bind(object_id.to_string()).bind(version_id.to_string())
         .execute(&pool).await.expect("snapshot fixture should be inserted");
     sqlx::query("INSERT INTO knowledge_revisions (tenant_id, object_id, current_revision) VALUES ($1::uuid, $2::uuid, 7)")
@@ -269,6 +288,27 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         other => panic!("expected Created, got {other:?}"),
     };
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let reservation_count: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("reservation count");
+    assert_eq!(
+        reservation_count, 1,
+        "new invocation has exactly one reservation"
+    );
+    let object_reserved: i64 =
+        sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("object reserved tokens");
+    let caller_reserved: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM caller_usage_counters",
+    )
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("caller reserved tokens");
+    assert!(object_reserved > 0);
+    assert_eq!(caller_reserved, object_reserved);
 
     let persisted = sqlx::query_as::<_, (String, String, i64, String)>(
         "SELECT caller_id::text, snapshot_id::text, knowledge_revision, pool FROM object_invocations WHERE id=$1::uuid"
@@ -304,6 +344,15 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         .expect("same key and payload should replay without validating a new message expiry");
     assert_eq!(replay, BeginInvocationOutcome::Replay { invocation_id });
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let reservations_after_replay: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("reservation count after replay");
+    assert_eq!(
+        reservations_after_replay, 1,
+        "idempotent replay must not reserve twice"
+    );
     teardown(fixture).await;
 }
 
@@ -332,6 +381,19 @@ async fn invocation_insert_failure_rolls_back_idempotency_claim() {
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("reservation count");
+    let object_counters: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_counters")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("object counter count");
+    let caller_counters: i64 = sqlx::query_scalar("SELECT count(*) FROM caller_usage_counters")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("caller counter count");
+    assert_eq!((reservations, object_counters, caller_counters), (0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -1181,5 +1243,237 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     assert_eq!(row.0, "Failed");
     assert_eq!(row.1, None, "terminal failure is not marked cancelled");
 
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn object_daily_limit_is_aggregate_across_pools_and_ignores_anonymous_share() {
+    let fixture = setup(None).await;
+    let estimate = qembed_domain::budget::estimate_input_tokens(
+        command(&fixture, "daily-auth").input_message.len(),
+    )
+    .expect("input estimate");
+    sqlx::query("UPDATE object_budgets SET daily_token_limit=$2, anonymous_share_pct=0 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string())
+        .bind(i64::try_from(estimate).expect("estimate fits bigint"))
+        .execute(&fixture.pool)
+        .await
+        .expect("aggregate daily limit should be configured");
+
+    let first = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "daily-auth"),
+    )
+    .await
+    .expect("authenticated reservation should fit the aggregate daily limit");
+    assert!(matches!(first, BeginInvocationOutcome::Created { .. }));
+
+    let mut anonymous = command(&fixture, "daily-anon");
+    anonymous.invocation_pool = InvocationPool::Anonymous;
+    let error = begin_invocation(&fixture.pool, &fixture.scope, anonymous)
+        .await
+        .expect_err("anonymous pool must share the aggregate object ceiling");
+    assert!(matches!(
+        error,
+        BeginInvocationError::Budget(BudgetReservationError::Rejected(
+            BudgetRejection::ObjectDailyLimit
+        ))
+    ));
+    let pool_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_counters")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("pool counter rows");
+    assert_eq!(
+        pool_rows, 1,
+        "only the first pool has a committed reservation"
+    );
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn caller_daily_limit_rejects_and_rolls_back_all_begin_rows() {
+    let fixture = setup(None).await;
+    sqlx::query(
+        "UPDATE object_budgets SET per_caller_daily_token_limit=1 WHERE object_id=$1::uuid",
+    )
+    .bind(fixture.object_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("caller daily limit should be configured");
+    let error = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "caller-limit"),
+    )
+    .await
+    .expect_err("caller limit must reject a non-zero estimate");
+    assert!(matches!(
+        error,
+        BeginInvocationError::Budget(BudgetReservationError::Rejected(
+            BudgetRejection::CallerDailyLimit
+        ))
+    ));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("reservation count");
+    assert_eq!(reservations, 0);
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn concurrent_invocation_limit_counts_active_reservations() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE object_budgets SET max_concurrent_invocations=1 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string())
+        .execute(&fixture.pool)
+        .await
+        .expect("concurrency limit should be configured");
+    let first = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "concurrent-1"),
+    )
+    .await
+    .expect("first invocation should reserve the only slot");
+    assert!(matches!(first, BeginInvocationOutcome::Created { .. }));
+    let error = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "concurrent-2"),
+    )
+    .await
+    .expect_err("second active invocation must be rejected");
+    assert!(matches!(
+        error,
+        BeginInvocationError::Budget(BudgetReservationError::Rejected(
+            BudgetRejection::ConcurrentInvocationLimit
+        ))
+    ));
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
+    let fixture = setup(None).await;
+    let estimate = qembed_domain::budget::estimate_input_tokens(
+        command(&fixture, "race-a").input_message.len(),
+    )
+    .expect("input estimate");
+    sqlx::query("UPDATE object_budgets SET daily_token_limit=$2 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string())
+        .bind(i64::try_from(estimate).expect("estimate fits bigint"))
+        .execute(&fixture.pool)
+        .await
+        .expect("daily budget should be configured");
+
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let schema = fixture.schema.clone();
+    let second_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await
+        .expect("second independent pool");
+
+    let first_command = command(&fixture, "race-a");
+    let second_command = command(&fixture, "race-b");
+    let (first, second) = tokio::join!(
+        begin_invocation(&fixture.pool, &fixture.scope, first_command),
+        begin_invocation(&second_pool, &fixture.scope, second_command),
+    );
+    second_pool.close().await;
+
+    let first_created = matches!(first.as_ref(), Ok(BeginInvocationOutcome::Created { .. }));
+    let second_created = matches!(second.as_ref(), Ok(BeginInvocationOutcome::Created { .. }));
+    let successes = first_created as usize + second_created as usize;
+    assert_eq!(
+        successes, 1,
+        "exactly one independent session may consume the final budget"
+    );
+    let rejected = matches!(
+        (&first, &second),
+        (
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit,)
+            )),
+            _,
+        ) | (
+            _,
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit,)
+            )),
+        )
+    );
+    assert!(
+        rejected,
+        "the losing session must observe the committed reservation"
+    );
+    let reserved: i64 =
+        sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("reserved token sum");
+    assert_eq!(
+        reserved,
+        i64::try_from(estimate).expect("estimate fits bigint")
+    );
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn effective_invocation_cap_is_the_tighter_snapshot_or_live_limit() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE object_budgets SET max_tokens_per_invocation=1 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string())
+        .execute(&fixture.pool)
+        .await
+        .expect("live per-invocation cap should be lowered");
+    let error = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "tight-live-cap"),
+    )
+    .await
+    .expect_err("live cap below estimate must reject invocation");
+    assert!(matches!(
+        error,
+        BeginInvocationError::Budget(BudgetReservationError::Rejected(
+            BudgetRejection::InvocationLimit
+        ))
+    ));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn malformed_snapshot_budget_fails_closed_and_rolls_back_idempotency() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE snapshots SET json_projection='{}'::jsonb WHERE snapshot_id=$1::uuid")
+        .bind(fixture.snapshot_id.to_string())
+        .execute(&fixture.pool)
+        .await
+        .expect("fixture snapshot projection should be malformed");
+    let error = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "missing-snapshot-budget"),
+    )
+    .await
+    .expect_err("missing snapshot token cap must fail closed");
+    assert!(matches!(error, BeginInvocationError::SnapshotBudgetInvalid));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
