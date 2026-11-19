@@ -107,7 +107,10 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         .create_draft_version_with_snapshot(&scope_b, &foreign_version, &foreign_snapshot)
         .await
         .expect_err("cross-tenant object references must be rejected");
-    assert!(matches!(foreign_error, ObjectRepositoryError::ObjectNotFound));
+    assert!(matches!(
+        foreign_error,
+        ObjectRepositoryError::ObjectNotFound
+    ));
 
     // A failed atomic insert leaves no orphaned version.
     let missing_object_version =
@@ -119,7 +122,10 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         .create_draft_version_with_snapshot(&scope_a, &missing_object_version, &missing_snapshot)
         .await
         .expect_err("a version cannot be created without its parent object");
-    assert!(matches!(rollback_error, ObjectRepositoryError::ObjectNotFound));
+    assert!(matches!(
+        rollback_error,
+        ObjectRepositoryError::ObjectNotFound
+    ));
     let persisted: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM object_versions WHERE tenant_id = $1::uuid AND object_version_id = $2::uuid",
     )
@@ -158,10 +164,8 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         ObjectRepositoryError::VersionMustBeDraft
     ));
 
-    
     pool.close().await;
 }
-
 
 #[tokio::test]
 async fn concurrent_draft_creations_allocate_distinct_sequential_version_numbers() {

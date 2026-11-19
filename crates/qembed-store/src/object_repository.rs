@@ -542,7 +542,9 @@ impl fmt::Display for ObjectRepositoryError {
             Self::InvalidSchemaVersion => {
                 formatter.write_str("snapshot schema version exceeds PostgreSQL INTEGER")
             }
-            Self::InvalidSnapshot(error) => write!(formatter, "snapshot construction failed: {error:?}"),
+            Self::InvalidSnapshot(error) => {
+                write!(formatter, "snapshot construction failed: {error:?}")
+            }
             Self::InvalidIdentifier => formatter.write_str("persisted identifier is invalid"),
             Self::DeduplicationRowMissing => {
                 formatter.write_str("snapshot content conflict has no matching row")
