@@ -2540,9 +2540,9 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
             _,
         ) | (
             _,
-            Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(
-                BudgetRejection::CallerDailyLimit
-            ))),
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::CallerDailyLimit)
+            )),
         )
     );
     assert!(
