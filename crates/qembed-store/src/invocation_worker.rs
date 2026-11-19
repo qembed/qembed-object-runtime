@@ -3,7 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
+use qembed_domain::ids::{CallerId, InvocationId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::scope::Scope;
