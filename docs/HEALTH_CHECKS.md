@@ -38,10 +38,10 @@ tenant-scoped transactions.
 
 ## Test coverage
 
-- Actix API integration tests verify liveness independence, ready response,
-  database-unavailable response, migration-mismatch response, and response
-  minimization.
-- PostgreSQL store integration tests verify a migrated database is ready and
-  a closed pool is unavailable.
+- Actix API integration tests inject ready, database-unavailable, and
+  migration-mismatch probe results to verify HTTP status/body behavior,
+  liveness independence, and response minimization.
+- PostgreSQL store integration tests verify a real migrated database is ready
+  and a closed pool is unavailable.
 - Store unit tests verify exact migration version/checksum/success matching,
   including pending, extra, failed, and checksum-mismatched rows.
