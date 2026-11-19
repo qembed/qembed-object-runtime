@@ -603,21 +603,6 @@ mod lifecycle_tests {
                 .await
         }
 
-        async fn persist_assistant_output_owned(
-            &self,
-            scope: &Scope,
-            owner: &str,
-            version: u64,
-            token: FencingToken,
-            next: Invocation,
-            content: String,
-        ) -> Result<bool, Self::Error> {
-            let response = ChatResponse::new(content, ChatFinishReason::Stop, None)
-                .expect("legacy fake response should satisfy the response contract");
-            self.persist_provider_response_owned(scope, owner, version, token, next, response)
-                .await
-        }
-
         async fn load_provider_call_attempt(
             &self,
             scope: &Scope,
