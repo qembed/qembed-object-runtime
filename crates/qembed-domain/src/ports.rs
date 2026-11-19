@@ -101,7 +101,7 @@ pub trait ExecutionStore: Send + Sync {
 
 /// Durable message reads required by the invocation worker.
 ///
-/// Lifecycle writes are intentionally not exposed here: provider response,
+/// Provider-call lifecycle writes are intentionally not exposed here: response,
 /// attempt state, usage settlement, and terminal transitions must use the
 /// lease-fenced [`crate::invocation_lease::InvocationLeaseStore`] contract.
 pub trait InvocationWorkStore: ExecutionStore {
