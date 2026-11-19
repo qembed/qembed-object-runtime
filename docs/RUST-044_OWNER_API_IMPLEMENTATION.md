@@ -29,9 +29,21 @@ The Owner API is delivered in bounded increments. Each increment remains part of
 - Response: `201 Created` with only `object_id` and `state: "draft"`.
 - PostgreSQL API integration coverage verifies valid Owner creation, missing credentials, tenant/token mismatch, rejection of client-supplied body data, and persisted Draft state.
 
+## Increment C — authenticated Draft version and snapshot creation
+
+- Route: `POST /owner/objects/{object_id}/versions`.
+- Request: `schema_version` is a positive PostgreSQL-INT-compatible integer; `config` is any valid JSON value.
+- The original request is checked by both the DTO deserializer and the duplicate-key-rejecting JCS parser. This preserves integer-only DTO semantics while rejecting duplicate keys anywhere in the envelope. Duplicate keys, malformed JSON, unknown envelope fields, and invalid schema versions return 400.
+- The `config` value is canonicalized to RFC 8785 bytes. Those exact bytes are the immutable snapshot source of truth and the basis of SHA-256 content identity.
+- The runtime use case constructs a Draft version/snapshot pair. The Store allocates `version_number` while holding the object row lock and commits version + snapshot atomically.
+- The endpoint deliberately does not run semantic validation or create validation evidence. A semantically incomplete but valid JSON config may be saved as Draft; publication remains blocked until trusted validation succeeds.
+- Exact canonical content already present for the same tenant/object returns `200 OK` with `outcome: "identical_content"` and the existing IDs. New content returns `201 Created` with `outcome: "created"`.
+- A missing or cross-tenant object returns the same 404. Invalid credentials remain generic 401; Store failures fail closed as generic 500.
+- `schema_version` is the snapshot's schema identifier, not `object_versions.version_number`. No Schema v1 completeness or unknown-field policy is inferred.
+- PostgreSQL API integration coverage verifies persisted Draft state, exact canonical bytes, deduplication, cross-tenant denial, tenant/token mismatch, and duplicate-key rejection.
+
 ## Remaining RUST-044 increments
 
-- Create draft version/snapshot through the existing aggregate constructors and atomic Store operation.
 - Publish only after trusted validation evidence is produced for the exact persisted snapshot; never accept evidence from an HTTP DTO.
 - Invoke through the existing atomic begin-invocation contract after the approved request DTO and caller-selection contract are wired.
 - Add PostgreSQL-backed API integration tests for every route, authentication failures, cross-tenant isolation, DTO validation, publication evidence binding, and stale-pointer conflicts.

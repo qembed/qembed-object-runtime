@@ -10,9 +10,11 @@ use actix_web::web;
 use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
     ids::{InvocationId, ObjectId, TenantId},
+    ports::DraftVersionCreation,
 };
 use qembed_runtime::{
     invocation_query::InvocationQueryService, object_creation::ObjectCreationService,
+    object_version_creation::ObjectVersionCreationService,
 };
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
@@ -27,7 +29,10 @@ use crate::handlers::{
         HealthState, ReadinessProbe, ReadinessStatus, configure_health_routes as configure_routes,
     },
     invocation::{InvocationResponse, get_invocation},
-    owner::{OwnerApiBackend, OwnerApiBackendError, configure_owner_routes as configure_owner},
+    owner::{
+        ObjectVersionCreationOutcome, ObjectVersionCreationResponse, OwnerApiBackend,
+        OwnerApiBackendError, configure_owner_routes as configure_owner,
+    },
 };
 
 struct StoreReadinessProbe(PgReadinessProbe);
@@ -91,6 +96,54 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                 .create(&scope)
                 .await
                 .map_err(|_| OwnerApiBackendError::Internal)
+        })
+    }
+
+    fn create_version(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        schema_version: u32,
+        canonical_json: Vec<u8>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            let service =
+                ObjectVersionCreationService::new(ObjectRepository::new(self.pool.clone()));
+            match service
+                .create(&scope, object_id, schema_version, canonical_json)
+                .await
+            {
+                Ok(DraftVersionCreation::Created {
+                    version_id,
+                    snapshot_id,
+                }) => Ok(ObjectVersionCreationResponse {
+                    outcome: ObjectVersionCreationOutcome::Created,
+                    object_version_id: version_id.to_string(),
+                    snapshot_id: snapshot_id.to_string(),
+                }),
+                Ok(DraftVersionCreation::IdenticalContent {
+                    version_id,
+                    snapshot_id,
+                }) => Ok(ObjectVersionCreationResponse {
+                    outcome: ObjectVersionCreationOutcome::IdenticalContent,
+                    object_version_id: version_id.to_string(),
+                    snapshot_id: snapshot_id.to_string(),
+                }),
+                Err(
+                    qembed_runtime::object_version_creation::ObjectVersionCreationError::Store(
+                        qembed_store::object_repository::ObjectRepositoryError::ObjectNotFound,
+                    ),
+                ) => Err(OwnerApiBackendError::NotFound),
+                Err(_) => Err(OwnerApiBackendError::Internal),
+            }
         })
     }
 

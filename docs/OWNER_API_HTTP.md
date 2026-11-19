@@ -17,6 +17,29 @@ Unknown, disabled, revoked, tenant-mismatched, and non-owner credentials are int
 
 The HTTP handler parses headers and the path identifier, authenticates, and delegates to the invocation query use case. SQL and tenant scoping remain in the Store adapter.
 
+## Draft version creation
+
+`POST /owner/objects/{object_id}/versions` creates an immutable Draft version and snapshot.
+
+Request:
+
+```json
+{
+  "schema_version": 1,
+  "config": {
+    "limits": {
+      "max_tokens_per_invocation": 4096
+    }
+  }
+}
+```
+
+- `schema_version` must be a positive integer that fits PostgreSQL `INTEGER`. It is distinct from the server-assigned `version_number`.
+- `config` may be any valid JSON value. The endpoint rejects duplicate JSON object keys and stores its RFC 8785 canonical bytes.
+- Draft creation does not imply semantic validation. A semantically incomplete config may be stored as Draft; trusted publication validation remains a separate operation.
+- New content returns 201 with `outcome: "created"`. Exact canonical content already stored for this tenant/object returns 200 with `outcome: "identical_content"` and the existing version/snapshot IDs.
+- A missing or cross-tenant object returns the same 404. Invalid request JSON/DTO returns 400.
+
 ## Scope
 
-This is the first Owner API transport increment, not completion of RUST-044. Create object/version, publish, invoke, and full PostgreSQL API integration coverage remain outstanding. It does not start RUST-045.
+This is a bounded Owner API transport increment, not completion of RUST-044. Publish, invoke, and the remaining end-to-end acceptance coverage are still outstanding. It does not start RUST-045.
