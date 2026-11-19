@@ -1646,7 +1646,7 @@ async fn settlement_database_failure_rolls_back_both_counters_and_reservation() 
             .fetch_one(&fixture.pool)
             .await
             .expect("object counters after rollback");
-    assert_eq!(object_counts, (0, i64::try_from(estimate).unwrap()));
+    assert_eq!(object_counts, (0, i64::try_from(estimate).expect("estimate fits bigint")));
     let caller_counts: (i64, i64) =
         sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM caller_usage_counters")
             .fetch_one(&fixture.pool)
