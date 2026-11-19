@@ -132,6 +132,31 @@ pub trait ObjectCreationStore: Send + Sync {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
+/// Result of atomically creating a Draft version and its immutable snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DraftVersionCreation {
+    Created {
+        version_id: crate::ids::ObjectVersionId,
+        snapshot_id: crate::ids::SnapshotId,
+    },
+    IdenticalContent {
+        version_id: crate::ids::ObjectVersionId,
+        snapshot_id: crate::ids::SnapshotId,
+    },
+}
+
+/// Persistence boundary for creating a Draft version together with its snapshot.
+pub trait ObjectVersionCreationStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn create_draft_version_with_snapshot(
+        &self,
+        scope: &Scope,
+        version: &crate::object_version::ObjectVersion,
+        snapshot: &crate::snapshot::Snapshot,
+    ) -> impl Future<Output = Result<DraftVersionCreation, Self::Error>> + Send;
+}
+
 /// Read-only persistence boundary for the client-visible invocation projection.
 /// Implementations must use the trusted Scope and return None for both a missing
 /// invocation and an invocation belonging to another tenant.
