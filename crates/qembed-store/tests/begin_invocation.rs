@@ -1304,8 +1304,12 @@ async fn provider_response_and_usage_are_durable_before_replay_safe_settlement()
                 processing.version(),
                 processing.fencing_token(),
                 verifying,
-                "durable answer".to_owned(),
-                Some(TokenUsage::new(0, 0)),
+                qembed_domain::chat::ChatResponse::new(
+                    "durable answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid normalized response"),
             )
             .await
             .expect("persist response transaction")
