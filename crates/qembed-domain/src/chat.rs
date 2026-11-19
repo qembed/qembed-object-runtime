@@ -405,9 +405,7 @@ impl ChatResponse {
     }
 }
 
-fn deserialize_optional_token_usage<'de, D>(
-    deserializer: D,
-) -> Result<Option<TokenUsage>, D::Error>
+fn deserialize_optional_token_usage<'de, D>(deserializer: D) -> Result<Option<TokenUsage>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -585,9 +583,7 @@ mod tests {
             r#""usage":{"input_tokens":4294967296,"output_tokens":2}"#,
             r#""usage":{"input_tokens":1}"#,
         ] {
-            let json = format!(
-                r#"{{"content":"ok","finish_reason":"stop",{usage}}}"#
-            );
+            let json = format!(r#"{{"content":"ok","finish_reason":"stop",{usage}}}"#);
             let response: ChatResponse =
                 serde_json::from_str(&json).expect("malformed usage must not invalidate response");
             assert_eq!(response.usage(), None, "usage input: {usage}");
