@@ -117,6 +117,7 @@ pub mod invocation_read;
 pub mod jcs;
 pub mod object;
 pub mod object_version;
+pub mod object_validation;
 pub mod policy;
 pub mod ports;
 pub mod principal;
