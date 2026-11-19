@@ -33,11 +33,24 @@ CREATE TABLE budget_reservations (
     actual_cost_micros BIGINT CHECK (actual_cost_micros >= 0),
     status TEXT NOT NULL CHECK (status IN ('Reserved', 'Settled', 'Released', 'Expired')),
     expires_at TIMESTAMPTZ NOT NULL,
-    UNIQUE (tenant_id, object_id, invocation_id),
-    FOREIGN KEY (tenant_id, object_id, invocation_id, pool)
-        REFERENCES object_invocations (tenant_id, object_id, id, pool)
-        DEFERRABLE INITIALLY DEFERRED
+    UNIQUE (tenant_id, object_id, invocation_id)
 );
+
+-- The runtime migration chain does not yet create object_invocations (that
+-- table is supplied by the canonical application schema). Install the same
+-- deferred FK whenever that table is already present; a later migration must
+-- add it when object_invocations is introduced into this migration chain.
+DO $
+BEGIN
+    IF to_regclass('object_invocations') IS NOT NULL THEN
+        ALTER TABLE budget_reservations
+            ADD CONSTRAINT budget_reservations_tenant_object_invocation_pool_fkey
+            FOREIGN KEY (tenant_id, object_id, invocation_id, pool)
+            REFERENCES object_invocations (tenant_id, object_id, id, pool)
+            DEFERRABLE INITIALLY DEFERRED;
+    END IF;
+END
+$;
 
 CREATE INDEX idx_resv_sweep
     ON budget_reservations (expires_at)
