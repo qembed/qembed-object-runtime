@@ -8,14 +8,32 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use actix_web::{HttpRequest, HttpResponse, http::StatusCode, web};
-use qembed_domain::ids::{InvocationId, ObjectId, TenantId};
+use qembed_domain::{
+    ids::{InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId},
+    jcs::canonicalize_json,
+};
 
 use crate::handlers::invocation::InvocationResponse;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OwnerApiBackendError {
     Unauthorized,
+    NotFound,
     Internal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectVersionCreationOutcome {
+    Created,
+    IdenticalContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ObjectVersionCreationResponse {
+    pub outcome: ObjectVersionCreationOutcome,
+    pub object_version_id: String,
+    pub snapshot_id: String,
 }
 
 /// Application capability supplied by the composition root.
@@ -25,6 +43,15 @@ pub trait OwnerApiBackend: Send + Sync {
         tenant_id: TenantId,
         owner_token: String,
     ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>>;
+
+    fn create_version(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        schema_version: u32,
+        canonical_json: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>> + Send + '_>>;
 
     fn inspect(
         &self,
@@ -62,6 +89,10 @@ pub fn configure_owner_routes(
     config
         .app_data(web::Data::new(OwnerApiState::new(backend)))
         .route("/owner/objects", web::post().to(create_object))
+        .route(
+            "/owner/objects/{object_id}/versions",
+            web::post().to(create_object_version),
+        )
         .route(
             "/owner/invocations/{invocation_id}",
             web::get().to(inspect_invocation),
@@ -133,6 +164,93 @@ async fn create_object(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "Authentication is required.",
+        ),
+        Err(OwnerApiBackendError::NotFound) => api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "The requested resource was not found.",
+        ),
+        Err(OwnerApiBackendError::Internal) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "An unexpected internal error occurred.",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateObjectVersionRequest {
+    schema_version: i32,
+    config: serde_json::Value,
+}
+
+fn parse_create_object_version_body(body: &[u8]) -> Result<(u32, Vec<u8>), ()> {
+    // Canonicalize the envelope first: the strict JCS parser rejects duplicate
+    // keys anywhere in the request before serde_json can collapse them.
+    let canonical_envelope = canonicalize_json(body).map_err(|_| ())?;
+    let request: CreateObjectVersionRequest =
+        serde_json::from_slice(&canonical_envelope).map_err(|_| ())?;
+    if request.schema_version <= 0 {
+        return Err(());
+    }
+    let schema_version = u32::try_from(request.schema_version).map_err(|_| ())?;
+    let config_json = serde_json::to_vec(&request.config).map_err(|_| ())?;
+    let canonical_config = canonicalize_json(&config_json).map_err(|_| ())?;
+    Ok((schema_version, canonical_config))
+}
+
+async fn create_object_version(
+    request: HttpRequest,
+    path: web::Path<String>,
+    body: web::Bytes,
+    state: web::Data<OwnerApiState>,
+) -> HttpResponse {
+    let object_id = match path.into_inner().parse::<ObjectId>() {
+        Ok(id) => id,
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object ID is invalid.",
+            );
+        }
+    };
+
+    let (schema_version, canonical_json) = match parse_create_object_version_body(&body) {
+        Ok(parsed) => parsed,
+        Err(()) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The request body is invalid.",
+            );
+        }
+    };
+
+    let (tenant_id, token) = match owner_credentials(&request) {
+        Ok(credentials) => credentials,
+        Err(response) => return response,
+    };
+
+    match state
+        .backend
+        .create_version(tenant_id, token, object_id, schema_version, canonical_json)
+        .await
+    {
+        Ok(response) if response.outcome == ObjectVersionCreationOutcome::Created => {
+            HttpResponse::Created().json(response)
+        }
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(OwnerApiBackendError::Unauthorized) => api_error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Authentication is required.",
+        ),
+        Err(OwnerApiBackendError::NotFound) => api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "The requested resource was not found.",
         ),
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -246,6 +364,31 @@ mod tests {
         > {
             Box::pin(async { Ok(None) })
         }
+    }
+
+    #[test]
+    fn create_version_body_rejects_duplicate_keys_and_invalid_schema_versions() {
+        assert!(parse_create_object_version_body(
+            br#"{"schema_version":1,"config":{"a":1,"a":2}}"#
+        ).is_err());
+        assert!(parse_create_object_version_body(
+            br#"{"schema_version":0,"config":{}}"#
+        ).is_err());
+        assert!(parse_create_object_version_body(
+            br#"{"schema_version":1,"schema_version":2,"config":{}}"#
+        ).is_err());
+        assert!(parse_create_object_version_body(
+            br#"{"schema_version":2147483648,"config":{}}"#
+        ).is_err());
+    }
+
+    #[test]
+    fn create_version_body_accepts_semantically_incomplete_json_and_canonicalizes_it() {
+        let (schema_version, canonical) = parse_create_object_version_body(
+            br#"{"config":{"unvalidated":true,"limits":{}},"schema_version":1}"#
+        ).expect("well-formed JSON draft is accepted");
+        assert_eq!(schema_version, 1);
+        assert_eq!(canonical, br#"{"limits":{},"unvalidated":true}"#);
     }
 
     #[actix_web::test]
