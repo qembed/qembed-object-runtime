@@ -1286,14 +1286,20 @@ async fn object_daily_limit_is_aggregate_across_pools_and_ignores_anonymous_shar
 #[tokio::test]
 async fn caller_daily_limit_rejects_and_rolls_back_all_begin_rows() {
     let fixture = setup(None).await;
-    sqlx::query("UPDATE object_budgets SET per_caller_daily_token_limit=1 WHERE object_id=$1::uuid")
-        .bind(fixture.object_id.to_string())
-        .execute(&fixture.pool)
-        .await
-        .expect("caller daily limit should be configured");
-    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "caller-limit"))
-        .await
-        .expect_err("caller limit must reject a non-zero estimate");
+    sqlx::query(
+        "UPDATE object_budgets SET per_caller_daily_token_limit=1 WHERE object_id=$1::uuid",
+    )
+    .bind(fixture.object_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("caller daily limit should be configured");
+    let error = begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "caller-limit"),
+    )
+    .await
+    .expect_err("caller limit must reject a non-zero estimate");
     assert!(matches!(
         error,
         BeginInvocationError::Budget(BudgetReservationError::Rejected(
