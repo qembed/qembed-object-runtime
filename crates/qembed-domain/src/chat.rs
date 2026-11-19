@@ -405,6 +405,19 @@ impl ChatResponse {
     }
 }
 
+fn deserialize_optional_token_usage<'de, D>(
+    deserializer: D,
+) -> Result<Option<TokenUsage>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    // Provider usage is advisory metadata. Invalid shape, negative/fractional
+    // counts, or out-of-range values follow the same explicit degraded
+    // fallback as absent usage; they must never be coerced to zero.
+    Ok(value.and_then(|value| serde_json::from_value(value).ok()))
+}
+
 impl<'de> Deserialize<'de> for ChatResponse {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -415,6 +428,7 @@ impl<'de> Deserialize<'de> for ChatResponse {
         struct RawResponse {
             content: String,
             finish_reason: ChatFinishReason,
+            #[serde(default, deserialize_with = "deserialize_optional_token_usage")]
             usage: Option<TokenUsage>,
         }
 
@@ -560,6 +574,24 @@ mod tests {
             decoded.usage().expect("usage is present").input_tokens(),
             12
         );
+    }
+
+    #[test]
+    fn malformed_provider_usage_falls_back_to_missing_usage() {
+        for usage in [
+            r#""usage":"invalid""#,
+            r#""usage":{"input_tokens":-1,"output_tokens":2}"#,
+            r#""usage":{"input_tokens":1.5,"output_tokens":2}"#,
+            r#""usage":{"input_tokens":4294967296,"output_tokens":2}"#,
+            r#""usage":{"input_tokens":1}"#,
+        ] {
+            let json = format!(
+                r#"{{"content":"ok","finish_reason":"stop",{usage}}}"#
+            );
+            let response: ChatResponse =
+                serde_json::from_str(&json).expect("malformed usage must not invalidate response");
+            assert_eq!(response.usage(), None, "usage input: {usage}");
+        }
     }
 
     #[test]
