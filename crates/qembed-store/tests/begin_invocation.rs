@@ -633,6 +633,18 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
             .expect("persist response and verifying state")
     );
 
+    // Simulate a crash after settlement commits but before the terminal
+    // invocation transition. Recovery must replay settlement, not double count.
+    let first_settlement = settle_invocation_usage(
+        &fixture.pool,
+        &fixture.scope,
+        invocation_id,
+        Some(TokenUsage::new(0, 0)),
+    )
+    .await
+    .expect("settle durable provider usage before simulated crash");
+    assert!(!first_settlement.is_replay());
+
     // A new adapter instance and lease owner represent a restarted worker.
     sqlx::query(
         "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
