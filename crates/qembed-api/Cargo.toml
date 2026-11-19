@@ -7,6 +7,7 @@ license.workspace = true
 lints.workspace = true
 
 [dependencies]
+actix-web.workspace = true
 qembed-domain = { path = "../qembed-domain" }
 qembed-runtime = { path = "../qembed-runtime" }
 qembed-store = { path = "../qembed-store" }
