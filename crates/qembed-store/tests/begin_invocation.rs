@@ -14,7 +14,8 @@ use qembed_domain::ports::{
 };
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
-    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, BudgetRejection,\n    BudgetReservationError, begin_invocation,
+    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, BudgetRejection,
+    BudgetReservationError, begin_invocation,
 };
 use qembed_store::invocation_query::PgInvocationQueryStore;
 use qembed_store::invocation_worker::PgExecutionStore;
@@ -1292,7 +1293,7 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
     let second_pool = PgPoolOptions::new().max_connections(1).after_connect(move |connection, _| {
         let schema = schema.clone();
         Box::pin(async move {
-            sqlx::query(&format!("SET search_path TO \\"{schema}\\""))
+            sqlx::query(&format!("SET search_path TO \"{schema}\""))
                 .execute(connection).await?;
             Ok(())
         })
@@ -1306,8 +1307,9 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
     );
     second_pool.close().await;
 
-    let successes = usize::from(matches!(first, Ok(BeginInvocationOutcome::Created { .. })))
-        + usize::from(matches!(second, Ok(BeginInvocationOutcome::Created { .. })));
+    let first_created = matches!(first.as_ref(), Ok(BeginInvocationOutcome::Created { .. }));
+    let second_created = matches!(second.as_ref(), Ok(BeginInvocationOutcome::Created { .. }));
+    let successes = first_created as usize + second_created as usize;
     assert_eq!(successes, 1, "exactly one independent session may consume the final budget");
     let rejected = match (&first, &second) {
         (Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit))), _)
