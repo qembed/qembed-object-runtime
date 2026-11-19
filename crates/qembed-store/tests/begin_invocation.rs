@@ -349,7 +349,10 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
             .fetch_one(&fixture.pool)
             .await
             .expect("reservation count after replay");
-    assert_eq!(reservations_after_replay, 1, "idempotent replay must not reserve twice");
+    assert_eq!(
+        reservations_after_replay, 1,
+        "idempotent replay must not reserve twice"
+    );
     teardown(fixture).await;
 }
 
