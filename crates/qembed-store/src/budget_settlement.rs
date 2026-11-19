@@ -192,7 +192,7 @@ pub async fn settle_invocation_usage(
             replayed: true,
         });
     }
-    if status != "Reserved" || reserved_tokens < 0 {
+    if status != "Reserved" || reserved_tokens < 0 || actual_tokens.is_some() {
         return Err(UsageSettlementError::InvalidReservationState);
     }
 
