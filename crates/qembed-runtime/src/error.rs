@@ -3,6 +3,8 @@
 //! This taxonomy deliberately contains no SQLx, HTTP, or provider SDK types.
 //! Adapter-specific failures must be classified before crossing into runtime.
 
+use std::fmt;
+
 use qembed_domain::chat::{ChatContractError, ChatProviderError};
 
 /// Semantic runtime failure categories.
@@ -24,8 +26,20 @@ pub enum RuntimeError {
 }
 
 impl From<ChatContractError> for RuntimeError {
-    fn from(_: ChatContractError) -> Self {
-        Self::InvalidRequest
+    fn from(error: ChatContractError) -> Self {
+        match error {
+            ChatContractError::EmptyModelKey
+            | ChatContractError::ModelKeyTooLong
+            | ChatContractError::EmptyMessages
+            | ChatContractError::TooManyMessages
+            | ChatContractError::EmptyMessageContent
+            | ChatContractError::MessageTooLarge
+            | ChatContractError::RequestTooLarge
+            | ChatContractError::InvalidOutputTokenLimit => Self::InvalidRequest,
+            ChatContractError::EmptyResponse | ChatContractError::ResponseTooLarge => {
+                Self::ProviderFailure
+            }
+        }
     }
 }
 
@@ -45,19 +59,47 @@ impl From<ChatProviderError> for RuntimeError {
     }
 }
 
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::InvalidRequest => "runtime rejected an invalid request",
+            Self::Unauthenticated => "authentication is required",
+            Self::Forbidden => "operation is not permitted",
+            Self::NotFound => "resource was not found",
+            Self::Conflict => "operation conflicts with current state",
+            Self::BudgetExceeded => "configured usage budget was exceeded",
+            Self::RateLimited { .. } => "upstream provider rate limited the request",
+            Self::DependencyUnavailable => "a required dependency is unavailable",
+            Self::ProviderFailure => "provider failed to satisfy the response contract",
+            Self::Internal => "unexpected internal runtime failure",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for RuntimeError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn chat_contract_failures_are_client_input_errors() {
+    fn request_contract_failures_and_provider_response_failures_are_distinct() {
         assert_eq!(
             RuntimeError::from(ChatContractError::EmptyMessages),
             RuntimeError::InvalidRequest
         );
         assert_eq!(
-            RuntimeError::from(ChatContractError::ResponseTooLarge),
+            RuntimeError::from(ChatContractError::InvalidOutputTokenLimit),
             RuntimeError::InvalidRequest
+        );
+        assert_eq!(
+            RuntimeError::from(ChatContractError::EmptyResponse),
+            RuntimeError::ProviderFailure
+        );
+        assert_eq!(
+            RuntimeError::from(ChatContractError::ResponseTooLarge),
+            RuntimeError::ProviderFailure
         );
     }
 
