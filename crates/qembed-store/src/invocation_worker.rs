@@ -180,8 +180,7 @@ impl InvocationWorkStore for PgExecutionStore {
         .ok_or(InvocationStoreError::InvalidRequestedState(
             "provider call attempt is missing",
         ))?;
-        let state = parse_provider_attempt_state(&attempt.0)?;
-        if state != "ResponseReceived" {
+        if attempt.0 != "ResponseReceived" {
             return Err(InvocationStoreError::InvalidRequestedState(
                 "provider response is not durably recorded",
             ));
