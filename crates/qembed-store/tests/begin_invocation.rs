@@ -1236,7 +1236,6 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     teardown(fixture).await;
 }
 
-
 #[tokio::test]
 async fn object_daily_limit_is_aggregate_across_pools_and_ignores_anonymous_share() {
     let fixture = setup(None).await;
