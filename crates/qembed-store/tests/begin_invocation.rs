@@ -1726,21 +1726,23 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     };
 
     let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-terminal-failure";
     let current = store
-        .load_invocation(&fixture.scope, invocation_id)
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load invocation")
-        .expect("invocation exists");
+        .expect("claim invocation")
+        .expect("invocation is claimable");
     let mut failed = current.clone();
     failed
-        .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Failed, current.fencing_token())
         .expect("Received -> Failed");
     assert!(
         store
-            .fail_invocation(
+            .fail_invocation_owned(
                 &fixture.scope,
+                owner,
                 current.version(),
-                FencingToken::INITIAL,
+                current.fencing_token(),
                 failed,
                 "provider_timeout",
             )
