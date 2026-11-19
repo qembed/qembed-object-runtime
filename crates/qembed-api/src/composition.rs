@@ -34,3 +34,12 @@ pub fn configure_health_routes(config: &mut web::ServiceConfig, probe: PgReadine
     config.app_data(web::Data::new(HealthState::new(StoreReadinessProbe(probe))));
     configure_routes(config);
 }
+
+/// Installs the PostgreSQL-backed Owner API routes.
+///
+/// The same pool is used for owner-token authentication and tenant-scoped
+/// invocation queries. The caller remains responsible for installing the
+/// application's other route groups.
+pub fn configure_owner_routes(config: &mut web::ServiceConfig, pool: sqlx::PgPool) {
+    crate::handlers::owner::configure_owner_routes(config, pool);
+}
