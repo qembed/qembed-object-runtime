@@ -1396,15 +1396,15 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
     let rejected = matches!(
         (&first, &second),
         (
-            Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(
-                BudgetRejection::ObjectDailyLimit,
-            ))),
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit,)
+            )),
             _,
         ) | (
             _,
-            Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(
-                BudgetRejection::ObjectDailyLimit,
-            ))),
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit,)
+            )),
         )
     );
     assert!(
