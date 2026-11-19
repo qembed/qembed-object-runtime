@@ -550,10 +550,19 @@ mod lifecycle_tests {
             {
                 return Ok(false);
             }
-            let mut next = next;
-            if state.usage.is_none() {
-                next.mark_degraded_provider_usage_missing();
-            }
+            let next = if state.usage.is_none() {
+                Invocation::from_persisted(
+                    next.id(), next.tenant_id(), next.object_id(), next.caller_id(),
+                    next.snapshot_id(),
+                    InvocationCheckpoint::new(
+                        InvocationStatus::CompletedDegraded,
+                        next.version(),
+                        next.fencing_token(),
+                    ),
+                )
+            } else {
+                next
+            };
             state.invocation = next;
             Ok(true)
         }
