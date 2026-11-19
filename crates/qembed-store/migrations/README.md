@@ -23,10 +23,18 @@ bytes and checked by a database trigger. Snapshot rows reject UPDATE and
 DELETE; the repository verifies the stored digest again when reconstructing a
 domain Snapshot. JSONB is never used to recreate canonical bytes.
 
-
 The RUST-041b migration adds token-budget accounting tables and tenant RLS policies.
 The canonical qembed-sql schema also declares cross-table foreign keys from
 `budget_reservations` to `object_invocations` and from `caller_usage_counters` to
 `callers`. Those two parent tables are not yet introduced by this partial Rust
 migration chain, so their foreign keys remain owned by the canonical schema and
 must be added to this chain when the corresponding parent-table migrations land.
+
+The RUST-041d migration adds one durable `provider_call_attempts` row for each
+new token reservation. The trigger creates the `NotStarted` row in the same
+transaction as the reservation insert. State transitions and immutable
+response-usage rules are enforced by PostgreSQL, and the table uses the trusted
+tenant setting for RLS. The canonical qembed-sql schema also defines a deferred
+composite FK from `provider_call_attempts` to `object_invocations`; that FK is
+intentionally deferred in this partial Rust migration chain until the parent
+invocation table is introduced here.
