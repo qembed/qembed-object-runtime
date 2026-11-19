@@ -3,7 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
+use qembed_domain::ids::{CallerId, InvocationId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::scope::Scope;
@@ -26,6 +26,7 @@ impl PgExecutionStore {
 #[derive(Debug)]
 pub enum InvocationStoreError {
     Database(sqlx::Error),
+    Settlement(crate::budget_settlement::UsageSettlementError),
     InvalidPersistedValue(&'static str),
     InvalidRequestedState(&'static str),
     AmbiguousMessage(&'static str),
@@ -35,6 +36,9 @@ impl fmt::Display for InvocationStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
+            Self::Settlement(error) => {
+                write!(formatter, "invocation usage settlement failed: {error}")
+            }
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted invocation has invalid {field}")
             }
@@ -52,6 +56,7 @@ impl std::error::Error for InvocationStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
+            Self::Settlement(error) => Some(error),
             _ => None,
         }
     }
@@ -99,6 +104,16 @@ impl ExecutionStore for PgExecutionStore {
                 "terminal transitions require a dedicated atomic result operation",
             ));
         }
+        if matches!(
+            next.status(),
+            InvocationStatus::Processing
+                | InvocationStatus::ExecutingTool
+                | InvocationStatus::Verifying
+        ) {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "worker execution states require a live lease",
+            ));
+        }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let result = execute(
             &mut transaction,
@@ -134,137 +149,6 @@ impl InvocationWorkStore for PgExecutionStore {
         invocation_id: InvocationId,
     ) -> Result<Option<String>, Self::Error> {
         load_single_message(&self.pool, scope, invocation_id, "assistant").await
-    }
-
-    async fn persist_assistant_output(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        content: String,
-    ) -> Result<bool, Self::Error> {
-        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
-        if next.status() != InvocationStatus::Verifying {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "assistant output must move Processing to Verifying",
-            ));
-        }
-        if content.trim().is_empty() || content.len() > 1_048_576 {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "assistant output is empty or too large",
-            ));
-        }
-
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
-        let inserted = execute(
-            &mut transaction,
-            sqlx::query(
-                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $1::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $7, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$2::uuid AND invocation.object_id=$3::uuid AND invocation.id=$4::uuid AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND invocation.lease_owner IS NULL AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
-            )
-            .bind(MessageId::new().to_string())
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?)
-            .bind(content),
-        )
-        .await?;
-        if inserted.rows_affected() != 1 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-
-        let transitioned = execute(
-            &mut transaction,
-            sqlx::query(
-                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Processing' AND lease_owner IS NULL",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
-        )
-        .await?;
-        if transitioned.rows_affected() != 1 {
-            transaction.rollback().await?;
-            return Ok(false);
-        }
-        transaction.commit().await?;
-        Ok(true)
-    }
-
-    async fn complete_invocation(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-    ) -> Result<bool, Self::Error> {
-        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
-        if next.status() != InvocationStatus::Completed {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "completion must transition to Completed",
-            ));
-        }
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
-        let result = execute(
-            &mut transaction,
-            sqlx::query(
-                "UPDATE object_invocations SET status=CASE WHEN degraded_reason='provider_usage_missing' THEN 'CompletedDegraded' ELSE 'Completed' END, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND version=$4 AND fencing_token=$5 AND status='Verifying' AND lease_owner IS NULL AND EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='assistant')",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
-        )
-        .await?;
-        transaction.commit().await?;
-        Ok(result.rows_affected() == 1)
-    }
-
-    async fn fail_invocation(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        error_code: &'static str,
-    ) -> Result<bool, Self::Error> {
-        validate_next_state(scope, expected_version, expected_fencing_token, &next)?;
-        if next.status() != InvocationStatus::Failed
-            || !matches!(
-                error_code,
-                "provider_timeout"
-                    | "provider_rate_limited"
-                    | "provider_unavailable"
-                    | "provider_malformed_output"
-                    | "provider_other"
-            )
-        {
-            return Err(InvocationStoreError::InvalidRequestedState(
-                "failure must use a stable allowlisted provider error code",
-            ));
-        }
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
-        let result = execute(
-            &mut transaction,
-            sqlx::query(
-                "UPDATE object_invocations SET status='Failed', error_code=$1, finished_at=now(), version=version+1, lease_owner=NULL, lease_until=NULL WHERE tenant_id=$2::uuid AND object_id=$3::uuid AND id=$4::uuid AND version=$5 AND fencing_token=$6 AND lease_owner IS NULL AND status NOT IN ('Completed','CompletedDegraded','Failed','Cancelled')",
-            )
-            .bind(error_code)
-            .bind(scope.tenant_id().to_string())
-            .bind(next.object_id().to_string())
-            .bind(next.id().to_string())
-            .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
-        )
-        .await?;
-        transaction.commit().await?;
-        Ok(result.rows_affected() == 1)
     }
 }
 

@@ -146,6 +146,31 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .expect("owner should seed outbox fixtures");
     }
 
+    let attempt_invocation = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO budget_reservations
+            (id, tenant_id, object_id, invocation_id, pool, usage_date,
+             reserved_tokens, reserved_cost_micros, status, expires_at)
+         VALUES ($1, $2, $3, $4, 'authenticated', CURRENT_DATE, 1, 0, 'Reserved', now() + interval '1 hour')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_invocation)
+    .execute(&owner)
+    .await
+    .expect("owner should seed a reservation for provider attempt trigger");
+    let triggered_attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1 AND object_id=$2 AND invocation_id=$3",
+    )
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_invocation)
+    .fetch_one(&owner)
+    .await
+    .expect("reservation insert should create provider attempt");
+    assert_eq!(triggered_attempt.0, "NotStarted");
+
     let runtime = connect_as("qembed_runtime_test", RUNTIME_PASSWORD).await;
     let dispatcher = connect_as("qembed_dispatcher_test", DISPATCHER_PASSWORD).await;
     let admin = connect_as("qembed_admin_test", ADMIN_PASSWORD).await;
@@ -180,6 +205,47 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     tx.rollback()
         .await
         .expect("runtime transaction should roll back");
+
+    // Provider attempts are tenant-isolated and their state guard rejects
+    // rewinding a request after the conservative pre-send marker.
+    let mut tx = set_tenant(&runtime, tenant_a).await;
+    sqlx::query(
+        "UPDATE provider_call_attempts SET state='MayHaveBeenSent' WHERE tenant_id=$1 AND object_id=$2 AND invocation_id=$3",
+    )
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_invocation)
+    .execute(&mut *tx)
+    .await
+    .expect("runtime should commit the pre-send marker");
+    let foreign_attempts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM provider_call_attempts WHERE tenant_id=$1")
+            .bind(tenant_b)
+            .fetch_one(&mut *tx)
+            .await
+            .expect("RLS should hide another tenant's provider attempts");
+    assert_eq!(foreign_attempts, 0);
+    sqlx::query("SAVEPOINT provider_attempt_guard")
+        .execute(&mut *tx)
+        .await
+        .expect("provider attempt guard savepoint should be created");
+    let error = sqlx::query(
+        "UPDATE provider_call_attempts SET state='NotStarted' WHERE tenant_id=$1 AND object_id=$2 AND invocation_id=$3",
+    )
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(attempt_invocation)
+    .execute(&mut *tx)
+    .await
+    .expect_err("runtime must not rewind a potentially sent provider call");
+    assert_sqlstate(error, "23514");
+    sqlx::query("ROLLBACK TO SAVEPOINT provider_attempt_guard")
+        .execute(&mut *tx)
+        .await
+        .expect("provider attempt guard probe should recover the transaction");
+    tx.rollback()
+        .await
+        .expect("provider attempt transaction should roll back");
 
     // Runtime may append event/outbox records but cannot rewrite immutable rows
     // or acknowledge delivery (that capability belongs to the dispatcher).

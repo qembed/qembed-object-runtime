@@ -99,11 +99,11 @@ pub trait ExecutionStore: Send + Sync {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
-/// Durable persistence operations required by the minimal invocation worker.
+/// Durable message reads required by the invocation worker.
 ///
-/// The worker stores its provider response before entering Verifying. This
-/// makes a restart from Verifying independent of another provider request.
-/// Lease acquisition/reclaim is deliberately a separate RUST-038 concern.
+/// Provider-call lifecycle writes are intentionally not exposed here: response,
+/// attempt state, usage settlement, and terminal transitions must use the
+/// lease-fenced [`crate::invocation_lease::InvocationLeaseStore`] contract.
 pub trait InvocationWorkStore: ExecutionStore {
     fn load_user_input(
         &self,
@@ -116,35 +116,6 @@ pub trait InvocationWorkStore: ExecutionStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> impl Future<Output = Result<Option<String>, Self::Error>> + Send;
-
-    /// Atomically persist the assistant response and transition Processing → Verifying.
-    fn persist_assistant_output(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        content: String,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
-
-    /// Transition Verifying → Completed after the response is already durable.
-    fn complete_invocation(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
-
-    /// Persist a terminal failure and its stable, non-sensitive error code.
-    fn fail_invocation(
-        &self,
-        scope: &Scope,
-        expected_version: u64,
-        expected_fencing_token: FencingToken,
-        next: Invocation,
-        error_code: &'static str,
-    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
 /// Read-only persistence boundary for the client-visible invocation projection.

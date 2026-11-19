@@ -81,6 +81,9 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".budget_reservations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), usage_date DATE NOT NULL, reserved_tokens BIGINT NOT NULL CHECK (reserved_tokens >= 0), reserved_cost_micros BIGINT NOT NULL CHECK (reserved_cost_micros >= 0), actual_tokens BIGINT CHECK (actual_tokens >= 0), actual_cost_micros BIGINT CHECK (actual_cost_micros >= 0), status TEXT NOT NULL CHECK (status IN ('Reserved','Settled','Released','Expired')), expires_at TIMESTAMPTZ NOT NULL, UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, invocation_id, pool) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, id, pool) DEFERRABLE INITIALLY DEFERRED)"
         ),
         format!(
+            "CREATE TABLE \"{schema}\".provider_call_attempts (tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, state TEXT NOT NULL DEFAULT 'NotStarted' CHECK (state IN ('NotStarted','MayHaveBeenSent','ResponseReceived','ConfirmedNotAccepted','OutcomeUnknown','CancelledBeforeSend')), input_tokens BIGINT CHECK (input_tokens >= 0), output_tokens BIGINT CHECK (output_tokens >= 0), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (tenant_id, object_id, invocation_id), CHECK ((input_tokens IS NULL) = (output_tokens IS NULL)), CHECK (state='ResponseReceived' OR (input_tokens IS NULL AND output_tokens IS NULL)))"
+        ),
+        format!(
             "CREATE INDEX idx_resv_sweep ON \"{schema}\".budget_reservations (expires_at) WHERE status='Reserved'"
         ),
         format!(
@@ -102,6 +105,27 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             .await
             .expect("canonical table fixture should be created");
     }
+
+    let attempt_function = format!(
+        r#"CREATE FUNCTION "{schema}".create_provider_call_attempt() RETURNS trigger
+        LANGUAGE plpgsql AS $provider_attempt$
+        BEGIN
+          INSERT INTO "{schema}".provider_call_attempts (tenant_id, object_id, invocation_id, state)
+          VALUES (NEW.tenant_id, NEW.object_id, NEW.invocation_id, 'NotStarted');
+          RETURN NEW;
+        END; $provider_attempt$"#
+    );
+    sqlx::query(&attempt_function)
+        .execute(&admin_pool)
+        .await
+        .expect("provider attempt trigger function should be created");
+    let attempt_trigger = format!(
+        "CREATE TRIGGER reservation_provider_attempt AFTER INSERT ON \"{schema}\".budget_reservations FOR EACH ROW EXECUTE FUNCTION \"{schema}\".create_provider_call_attempt()"
+    );
+    sqlx::query(&attempt_trigger)
+        .execute(&admin_pool)
+        .await
+        .expect("provider attempt trigger should be created");
 
     let resolver = format!(
         r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(p_caller_id UUID)
@@ -298,6 +322,16 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         reservation_count, 1,
         "new invocation has exactly one reservation"
     );
+    let attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("reservation trigger should create provider attempt");
+    assert_eq!(attempt.0, "NotStarted");
     let object_reserved: i64 =
         sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
             .fetch_one(&fixture.pool)
@@ -512,76 +546,121 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
         .expect("durable user input");
     assert_eq!(input, "hello from durable invocation input");
 
-    let mut current = store
-        .load_invocation(&fixture.scope, invocation_id)
+    let owner = "worker-before-restart";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load invocation")
-        .expect("invocation exists");
-    assert_eq!(current.status(), InvocationStatus::Received);
+        .expect("claim invocation")
+        .expect("invocation is claimable");
+    assert_eq!(claimed.status(), InvocationStatus::Received);
 
-    let mut next = current.clone();
-    next.transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+    let mut context_loading = claimed.clone();
+    context_loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
         .expect("Received -> ContextLoading");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                current.version(),
-                FencingToken::INITIAL,
-                next,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                context_loading.clone(),
             )
             .await
             .expect("persist context-loading state")
     );
 
-    current = store
-        .load_invocation(&fixture.scope, invocation_id)
-        .await
-        .expect("reload invocation")
-        .expect("invocation exists");
-    let mut next = current.clone();
-    next.transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+    let mut processing = context_loading.clone();
+    processing
+        .transition_to(
+            InvocationStatus::Processing,
+            context_loading.fencing_token(),
+        )
         .expect("ContextLoading -> Processing");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                current.version(),
-                FencingToken::INITIAL,
-                next,
+                owner,
+                context_loading.version(),
+                context_loading.fencing_token(),
+                processing,
             )
             .await
             .expect("persist processing state")
     );
 
-    current = store
+    let processing = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
         .expect("reload processing invocation")
         .expect("invocation exists");
-    let mut next = current.clone();
-    next.transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
         .expect("Processing -> Verifying");
     assert!(
         store
-            .persist_assistant_output(
+            .persist_provider_response_owned(
                 &fixture.scope,
-                current.version(),
-                FencingToken::INITIAL,
-                next,
-                "durable answer".to_owned(),
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+                verifying,
+                qembed_domain::chat::ChatResponse::new(
+                    "durable answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid normalized response"),
             )
             .await
             .expect("persist response and verifying state")
     );
 
-    // A new adapter instance represents a restarted worker process.
+    // Simulate a crash after settlement commits but before the terminal
+    // invocation transition. Recovery must replay settlement, not double count.
+    let first_settlement = settle_invocation_usage(
+        &fixture.pool,
+        &fixture.scope,
+        invocation_id,
+        Some(TokenUsage::new(0, 0)),
+    )
+    .await
+    .expect("settle durable provider usage before simulated crash");
+    assert!(!first_settlement.is_replay());
+
+    // A new adapter instance and lease owner represent a restarted worker.
+    sqlx::query(
+        "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("expire pre-restart lease");
     let restarted = PgExecutionStore::new(fixture.pool.clone());
+    let recovery_owner = "worker-after-restart";
     let recovered = restarted
-        .load_invocation(&fixture.scope, invocation_id)
+        .claim_invocation(&fixture.scope, invocation_id, recovery_owner, 60)
         .await
-        .expect("reload after restart")
-        .expect("invocation exists");
+        .expect("reclaim after restart")
+        .expect("Verifying invocation is reclaimable");
     assert_eq!(recovered.status(), InvocationStatus::Verifying);
     let output = restarted
         .load_assistant_output(&fixture.scope, invocation_id)
@@ -592,18 +671,19 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
 
     let mut completed = recovered.clone();
     completed
-        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Completed, recovered.fencing_token())
         .expect("Verifying -> Completed");
     assert!(
         restarted
-            .complete_invocation(
+            .complete_invocation_owned(
                 &fixture.scope,
+                recovery_owner,
                 recovered.version(),
-                FencingToken::INITIAL,
+                recovered.fencing_token(),
                 completed,
             )
             .await
-            .expect("persist terminal state")
+            .expect("settle and persist terminal state")
     );
 
     let terminal = restarted
@@ -753,6 +833,19 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("load stale worker snapshot")
         .expect("invocation exists");
     assert_eq!(old_claim.status(), InvocationStatus::Processing);
+    assert!(
+        worker_a
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                "worker-a",
+                old_claim.version(),
+                old_claim.fencing_token(),
+            )
+            .await
+            .expect("commit provider pre-send marker")
+    );
 
     sqlx::query(
         "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
@@ -792,13 +885,18 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("old in-memory state can form a candidate response transition");
     assert!(
         !worker_a
-            .persist_assistant_output_owned(
+            .persist_provider_response_owned(
                 &fixture.scope,
                 "worker-a",
                 old_claim.version(),
                 old_claim.fencing_token(),
                 stale_output,
-                "stale answer".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "stale answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid stale response"),
             )
             .await
             .expect("stale response write is a normal CAS miss"),
@@ -824,13 +922,18 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("new lease owner can persist provider response");
     assert!(
         worker_b
-            .persist_assistant_output_owned(
+            .persist_provider_response_owned(
                 &fixture.scope,
                 "worker-b",
                 new_claim.version(),
                 new_claim.fencing_token(),
                 valid_response,
-                "current answer".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "current answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid current response"),
             )
             .await
             .expect("new owner response CAS")
@@ -929,42 +1032,43 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     );
 
     let store = PgExecutionStore::new(fixture.pool.clone());
-    let received = store
-        .load_invocation(&fixture.scope, invocation_id)
+    let owner = "worker-projection-success";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load invocation")
-        .expect("invocation exists");
-    let mut context_loading = received.clone();
+        .expect("claim invocation")
+        .expect("invocation is claimable");
+    let mut context_loading = claimed.clone();
     context_loading
-        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
         .expect("Received -> ContextLoading");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                received.version(),
-                FencingToken::INITIAL,
-                context_loading,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                context_loading.clone(),
             )
             .await
             .expect("persist context loading")
     );
 
-    let context = store
-        .load_invocation(&fixture.scope, invocation_id)
-        .await
-        .expect("reload invocation")
-        .expect("invocation exists");
-    let mut processing = context.clone();
+    let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .transition_to(
+            InvocationStatus::Processing,
+            context_loading.fencing_token(),
+        )
         .expect("ContextLoading -> Processing");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                context.version(),
-                FencingToken::INITIAL,
+                owner,
+                context_loading.version(),
+                context_loading.fencing_token(),
                 processing,
             )
             .await
@@ -976,18 +1080,37 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         .await
         .expect("reload processing invocation")
         .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
     let mut verifying = processing.clone();
     verifying
-        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
         .expect("Processing -> Verifying");
     assert!(
         store
-            .persist_assistant_output(
+            .persist_provider_response_owned(
                 &fixture.scope,
+                owner,
                 processing.version(),
-                FencingToken::INITIAL,
+                processing.fencing_token(),
                 verifying,
-                "private until completed".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "private until completed",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid normalized response"),
             )
             .await
             .expect("persist assistant output")
@@ -1012,14 +1135,15 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         .expect("invocation exists");
     let mut completed = verifying.clone();
     completed
-        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
         .expect("Verifying -> Completed");
     assert!(
         store
-            .complete_invocation(
+            .complete_invocation_owned(
                 &fixture.scope,
+                owner,
                 verifying.version(),
-                FencingToken::INITIAL,
+                verifying.fencing_token(),
                 completed,
             )
             .await
@@ -1046,26 +1170,28 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
+    let failure_owner = "worker-projection-failure";
     let failed_current = store
-        .load_invocation(&fixture.scope, failed_id)
+        .claim_invocation(&fixture.scope, failed_id, failure_owner, 60)
         .await
-        .expect("load failure case")
-        .expect("invocation exists");
+        .expect("claim failure case")
+        .expect("failure invocation is claimable");
     let mut failed = failed_current.clone();
     failed
-        .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Failed, failed_current.fencing_token())
         .expect("Received -> Failed");
     assert!(
         store
-            .fail_invocation(
+            .fail_invocation_owned(
                 &fixture.scope,
+                failure_owner,
                 failed_current.version(),
-                FencingToken::INITIAL,
+                failed_current.fencing_token(),
                 failed,
                 "provider_timeout",
             )
             .await
-            .expect("persist failure")
+            .expect("persist safe pre-send failure")
     );
 
     let failure_view = query_store
@@ -1188,6 +1314,625 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
 }
 
 #[tokio::test]
+async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "response-transaction-rollback"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-response-rollback";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("persist processing state")
+    );
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load processing")
+        .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+    assert!(
+        store
+            .mark_provider_outcome_unknown_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("record ambiguous provider outcome")
+    );
+
+    sqlx::query(&format!(
+        "ALTER TABLE \"{}\".interaction_messages ADD CONSTRAINT reject_assistant_response CHECK (role <> 'assistant')",
+        fixture.schema
+    ))
+    .execute(&fixture.admin_pool)
+    .await
+    .expect("install assistant insert failure");
+
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
+        .expect("Processing -> Verifying");
+    let response = qembed_domain::chat::ChatResponse::new(
+        "provider already answered",
+        qembed_domain::chat::ChatFinishReason::Stop,
+        Some(TokenUsage::new(4, 2)),
+    )
+    .expect("valid normalized response");
+    let error = store
+        .persist_provider_response_owned(
+            &fixture.scope,
+            owner,
+            processing.version(),
+            processing.fencing_token(),
+            verifying.clone(),
+            response.clone(),
+        )
+        .await
+        .expect_err("assistant insert constraint should abort the response transaction");
+    assert!(matches!(
+        error,
+        qembed_store::invocation_worker::InvocationStoreError::Database(_)
+    ));
+
+    let attempt: (String, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read attempt after rollback");
+    assert_eq!(attempt, ("OutcomeUnknown".to_owned(), None, None));
+    let current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("read invocation after rollback")
+        .expect("invocation exists");
+    assert_eq!(current.status(), InvocationStatus::Processing);
+    let assistant_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM interaction_messages WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND role='assistant'",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("count assistant messages");
+    assert_eq!(assistant_count, 0);
+
+    sqlx::query(&format!(
+        "ALTER TABLE \"{}\".interaction_messages DROP CONSTRAINT reject_assistant_response",
+        fixture.schema
+    ))
+    .execute(&fixture.admin_pool)
+    .await
+    .expect("remove assistant insert failure");
+    assert!(
+        store
+            .persist_provider_response_owned(
+                &fixture.scope,
+                owner,
+                current.version(),
+                current.fencing_token(),
+                verifying,
+                response,
+            )
+            .await
+            .expect("retry response persistence without another provider call")
+    );
+    let persisted_attempt: (String, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read committed response attempt");
+    assert_eq!(
+        persisted_attempt,
+        ("ResponseReceived".to_owned(), Some(4), Some(2))
+    );
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "send-marker-after-expiry"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-expired-reservation";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("persist processing state")
+    );
+
+    sqlx::query(
+        "UPDATE budget_reservations SET status='Expired' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("simulate sweeper expiry");
+
+    let current = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load invocation")
+        .expect("invocation exists");
+    assert!(
+        !store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                current.version(),
+                current.fencing_token(),
+            )
+            .await
+            .expect("expired reservation is a normal marker miss")
+    );
+    let attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read attempt");
+    assert_eq!(attempt.0, "NotStarted");
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn provider_response_and_usage_are_durable_before_replay_safe_settlement() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "provider-response-settlement"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-provider-response";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing.clone(),
+            )
+            .await
+            .expect("persist processing state")
+    );
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load processing")
+        .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
+        .expect("Processing -> Verifying");
+    assert!(
+        store
+            .persist_provider_response_owned(
+                &fixture.scope,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+                verifying,
+                qembed_domain::chat::ChatResponse::new(
+                    "durable answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid normalized response"),
+            )
+            .await
+            .expect("persist response transaction")
+    );
+    let attempt: (String, Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    ).bind(fixture.scope.tenant_id().to_string()).bind(invocation_id.to_string())
+        .fetch_one(&fixture.pool).await.expect("read response attempt");
+    assert_eq!(attempt, ("ResponseReceived".to_owned(), Some(0), Some(0)));
+
+    let verifying = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load verifying")
+        .expect("invocation exists");
+    let mut completed = verifying.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
+        .expect("Verifying -> Completed");
+    assert!(
+        store
+            .complete_invocation_owned(
+                &fixture.scope,
+                owner,
+                verifying.version(),
+                verifying.fencing_token(),
+                completed,
+            )
+            .await
+            .expect("settle and complete")
+    );
+
+    let reservation: (String, Option<i64>) = sqlx::query_as(
+        "SELECT status, actual_tokens FROM budget_reservations WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    ).bind(fixture.scope.tenant_id().to_string()).bind(invocation_id.to_string())
+        .fetch_one(&fixture.pool).await.expect("read settled reservation");
+    assert_eq!(reservation, ("Settled".to_owned(), Some(0)));
+    let invocation: (String,) = sqlx::query_as(
+        "SELECT status FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read completed invocation");
+    assert_eq!(invocation.0, "Completed");
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn terminal_failure_is_rejected_after_provider_may_have_been_sent() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "fail-after-send-marker"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-fail-after-marker";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing,
+            )
+            .await
+            .expect("persist processing state")
+    );
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load processing")
+        .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+
+    let mut failed = processing.clone();
+    failed
+        .transition_to(InvocationStatus::Failed, processing.fencing_token())
+        .expect("Processing -> Failed");
+    let error = store
+        .fail_invocation_owned(
+            &fixture.scope,
+            owner,
+            processing.version(),
+            processing.fencing_token(),
+            failed,
+            "provider_timeout",
+        )
+        .await
+        .expect_err("ambiguous provider outcome must not become Failed");
+    assert!(matches!(
+        error,
+        qembed_store::invocation_worker::InvocationStoreError::InvalidRequestedState(_)
+    ));
+    let attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read attempt");
+    assert_eq!(attempt.0, "MayHaveBeenSent");
+    let status: (String,) = sqlx::query_as(
+        "SELECT status FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("read invocation");
+    assert_eq!(status.0, "Processing");
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn cancellation_after_pre_send_marker_keeps_reservation_held() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "cancel-after-send-marker"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected new invocation, got {other:?}"),
+    };
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-cancel-after-marker";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
+        .await
+        .expect("claim")
+        .expect("claimable");
+    let mut loading = claimed.clone();
+    loading
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
+        .expect("Received -> ContextLoading");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                loading.clone(),
+            )
+            .await
+            .expect("persist context state")
+    );
+    let mut processing = loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, loading.fencing_token())
+        .expect("ContextLoading -> Processing");
+    assert!(
+        store
+            .compare_and_set_owned(
+                &fixture.scope,
+                owner,
+                loading.version(),
+                loading.fencing_token(),
+                processing.clone(),
+            )
+            .await
+            .expect("persist processing state")
+    );
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load processing")
+        .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
+
+    assert_eq!(
+        store
+            .cancel_invocation(&fixture.scope, invocation_id)
+            .await
+            .expect("cancel"),
+        InvocationCancellationOutcome::Cancelled {
+            newly_cancelled: true
+        },
+    );
+    let attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    ).bind(fixture.scope.tenant_id().to_string()).bind(invocation_id.to_string())
+        .fetch_one(&fixture.pool).await.expect("read provider attempt");
+    assert_eq!(attempt.0, "OutcomeUnknown");
+    let reservation: (String,) = sqlx::query_as(
+        "SELECT status FROM budget_reservations WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    ).bind(fixture.scope.tenant_id().to_string()).bind(invocation_id.to_string())
+        .fetch_one(&fixture.pool).await.expect("read reservation");
+    assert_eq!(reservation.0, "Reserved");
+    teardown(fixture).await;
+}
+
+#[tokio::test]
 async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
@@ -1203,21 +1948,23 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     };
 
     let store = PgExecutionStore::new(fixture.pool.clone());
+    let owner = "worker-terminal-failure";
     let current = store
-        .load_invocation(&fixture.scope, invocation_id)
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load invocation")
-        .expect("invocation exists");
+        .expect("claim invocation")
+        .expect("invocation is claimable");
     let mut failed = current.clone();
     failed
-        .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Failed, current.fencing_token())
         .expect("Received -> Failed");
     assert!(
         store
-            .fail_invocation(
+            .fail_invocation_owned(
                 &fixture.scope,
+                owner,
                 current.version(),
-                FencingToken::INITIAL,
+                current.fencing_token(),
                 failed,
                 "provider_timeout",
             )
@@ -1600,62 +2347,45 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
             .len(),
     )
     .expect("input estimate");
-    let outcome = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
-        .await
-        .expect("missing usage must use the non-zero estimate");
-    assert_eq!(outcome.actual_tokens(), estimate);
-    assert!(outcome.is_degraded());
-    let reason: Option<String> =
-        sqlx::query_scalar("SELECT degraded_reason FROM object_invocations WHERE id=$1::uuid")
-            .bind(invocation_id.to_string())
-            .fetch_one(&fixture.pool)
-            .await
-            .expect("degraded reason");
-    assert_eq!(reason.as_deref(), Some("provider_usage_missing"));
-    let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
-        .await
-        .expect("degraded settlement replay");
-    assert!(replay.is_degraded());
-    assert!(replay.is_replay());
-    assert_eq!(replay.actual_tokens(), estimate);
 
-    // The normal completion API preserves the degraded outcome in the durable state.
     let store = PgExecutionStore::new(fixture.pool.clone());
-    let received = store
-        .load_invocation(&fixture.scope, invocation_id)
+    let owner = "worker-missing-usage";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load received invocation")
-        .expect("invocation exists");
-    let mut context_loading = received.clone();
+        .expect("claim invocation")
+        .expect("invocation is claimable");
+    let mut context_loading = claimed.clone();
     context_loading
-        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
         .expect("Received -> ContextLoading");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                received.version(),
-                FencingToken::INITIAL,
-                context_loading,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                context_loading.clone(),
             )
             .await
             .expect("persist ContextLoading")
     );
-    let context_loading = store
-        .load_invocation(&fixture.scope, invocation_id)
-        .await
-        .expect("reload ContextLoading")
-        .expect("invocation exists");
+
     let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .transition_to(
+            InvocationStatus::Processing,
+            context_loading.fencing_token(),
+        )
         .expect("ContextLoading -> Processing");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
+                owner,
                 context_loading.version(),
-                FencingToken::INITIAL,
+                context_loading.fencing_token(),
                 processing,
             )
             .await
@@ -1666,22 +2396,42 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         .await
         .expect("reload Processing")
         .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                fixture.object_id,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
     let mut verifying = processing.clone();
     verifying
-        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
         .expect("Processing -> Verifying");
     assert!(
         store
-            .persist_assistant_output(
+            .persist_provider_response_owned(
                 &fixture.scope,
+                owner,
                 processing.version(),
-                FencingToken::INITIAL,
+                processing.fencing_token(),
                 verifying,
-                "degraded result".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "degraded result",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    None,
+                )
+                .expect("valid response without usage"),
             )
             .await
-            .expect("persist assistant output")
+            .expect("persist response with unavailable usage")
     );
+
     let verifying = store
         .load_invocation(&fixture.scope, invocation_id)
         .await
@@ -1689,19 +2439,35 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         .expect("invocation exists");
     let mut completed = verifying.clone();
     completed
-        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
         .expect("Verifying -> Completed");
     assert!(
         store
-            .complete_invocation(
+            .complete_invocation_owned(
                 &fixture.scope,
+                owner,
                 verifying.version(),
-                FencingToken::INITIAL,
+                verifying.fencing_token(),
                 completed,
             )
             .await
-            .expect("complete degraded invocation")
+            .expect("settle degraded usage and complete")
     );
+
+    let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
+        .await
+        .expect("degraded settlement replay");
+    assert_eq!(replay.actual_tokens(), estimate);
+    assert!(replay.is_degraded());
+    assert!(replay.is_replay());
+
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT degraded_reason FROM object_invocations WHERE id=$1::uuid")
+            .bind(invocation_id.to_string())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("degraded reason");
+    assert_eq!(reason.as_deref(), Some("provider_usage_missing"));
     let status: String =
         sqlx::query_scalar("SELECT status FROM object_invocations WHERE id=$1::uuid")
             .bind(invocation_id.to_string())

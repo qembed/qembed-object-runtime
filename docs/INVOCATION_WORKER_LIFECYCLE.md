@@ -15,53 +15,48 @@ A matching idempotency replay returns before inserting another message. The inpu
 Each transition reloads the persisted Invocation and uses the domain state machine plus PostgreSQL optimistic version/fencing-token predicates.
 
 - `Received → ContextLoading` and `ContextLoading → Processing` are independent committed CAS transitions.
+- Unowned compare-and-set cannot enter `Processing`, `ExecutingTool`, or `Verifying`; those execution states require the lease-fenced store contract.
+- A `provider_call_attempts` row is created with the budget reservation. Before provider I/O, the worker commits `NotStarted → MayHaveBeenSent` under its live lease; if that write fails, it does not send.
 - Provider I/O happens only while no SQL transaction is open.
-- The provider response is inserted as one `assistant` interaction message in the same transaction as `Processing → Verifying`.
-- `Verifying → Completed` records `finished_at` and advances the version. The assistant message already exists durably, so a restarted worker can complete without calling the provider again.
-- Provider errors map to a small allowlist of stable error codes and are persisted with `Failed` and `finished_at`.
+- The provider response, normalized usage (nullable only when unavailable), assistant message, `ResponseReceived`, and `Processing → Verifying` commit in one tenant-scoped transaction.
+- `Verifying → Completed` first performs replay-safe token settlement from the durable usage, then records `finished_at` and advances the version. Missing usage settles the original non-zero estimate and completes as `CompletedDegraded`.
+- Any generic provider error after the pre-send marker is ambiguous. The worker records `OutcomeUnknown`, does not fail the invocation, does not release the reservation, and never automatically sends that call again.
 - A terminal invocation is read-only to this worker. A completed result is loaded from `interaction_messages`, not process memory.
 
 The assistant message inherits the user message's retention deadline. Raw provider errors, SDK details, and credentials are not stored in `error_code`.
 
 ## Cancellation
 
-RUST-040 adds a tenant-scoped cancellation operation. A nonterminal invocation
-is durably moved to `Cancelled`; the transaction records
-`cancel_requested_at` and `finished_at`, advances the version and fencing
-token, and releases the worker lease. A stale worker can no longer heartbeat,
-persist an assistant response, or complete the invocation.
-
-Cancellation cannot roll back a provider request or other external side effect
-that has already been accepted. The provider call may still finish; its result
-is discarded because the cancelled invocation no longer accepts worker writes.
+Cancellation locks the durable provider attempt before changing invocation
+state, serializing against the worker's pre-send marker. Before the marker,
+`NotStarted` becomes `CancelledBeforeSend` and the invocation
+can be cancelled safely. After `MayHaveBeenSent`, cancellation records
+`OutcomeUnknown`; the invocation lease is revoked, but its token
+reservation remains held because the provider may have accepted the request.
+A durable `ResponseReceived` must finish settlement rather than be
+discarded by cancellation.
 
 ## Restart behavior and limits
 
-A process restart at `Received` or `ContextLoading` resumes from the last committed state. A restart at `Verifying` loads the persisted assistant output and performs only the terminal transition. A restart after `Completed` returns the durable assistant output.
+A restart at `Received` or `ContextLoading` resumes from the
+last committed state. At `Processing`, the worker reads the durable
+provider attempt before deciding what to do. Only `NotStarted` permits
+the first send. `MayHaveBeenSent` is conservatively reconciled to
+`OutcomeUnknown`; `OutcomeUnknown` is never reset to
+`NotStarted` and never triggers an automatic provider retry.
+`ResponseReceived` is committed atomically with the assistant message
+and `Verifying`, so recovery settles usage and completes without
+another provider call.
 
-If a process dies after a provider response arrives but before the response transaction commits, the database remains in `Processing`; a later worker pass may call the provider again. The mock-first chat completion path has no external write side effect, but duplicate provider cost is possible. RUST-037 does not claim exactly-once provider execution.
-
-RUST-038 adds PostgreSQL-backed lease ownership, heartbeat, expiry, and reclaim. A worker must claim before processing; every lifecycle write checks owner, unexpired lease, fencing token, and optimistic version. Reclaim increments token and version, so a stale worker cannot persist a response or terminal state. Heartbeats continue while waiting for provider I/O. The provider call itself may still complete after ownership is lost, and the result is then discarded.
-
-## Retry guarantees
-
-The durable invocation and transactional outbox record establish the work
-before provider I/O. Lease expiry/reclaim permits another worker attempt, and
-fencing prevents a stale attempt from persisting over the current owner. The
-worker derives a provider idempotency key from the invocation ID and reuses it
-across attempts; it never derives the key from the worker identity or fencing
-token.
-
-This is at-least-once processing/recovery, not exactly-once provider
-execution. Actual outbox delivery remains the responsibility of the later
-outbox-dispatcher work. Duplicate upstream execution is suppressed only when
-the configured adapter advertises support and the provider honors the key
-within its documented scope and retention window. Otherwise a crash after
-provider success but before the response transaction commits can still incur
-a second provider execution/cost.
+The database state is deliberately conservative: a crash after the marker but
+before the socket write is still treated as potentially accepted. Generic
+timeouts, resets, cancellation, worker crashes, HTTP 5xx, and unclassified
+errors do not prove non-acceptance. Only a provider adapter with an explicit,
+documented guarantee may eventually classify a result as
+`ConfirmedNotAccepted`.
 
 ## Persistence boundary
 
 `qembed-domain::InvocationWorkStore` describes durable input/output and terminal transitions. `qembed-store::PgExecutionStore` implements it using tenant-scoped PostgreSQL transactions. `qembed-runtime::InvocationWorker` coordinates the domain ports and `ChatProvider`; it contains no SQLx or provider SDK types.
 
-The worker does not yet dispatch the outbox, expose HTTP endpoints, execute tools, or settle budgets. Those remain later roadmap tasks.
+The worker does not yet dispatch the outbox, expose HTTP endpoints, execute tools, or reconcile ambiguous provider calls automatically. Provider-side idempotency and safe deduplication remain deferred until a route-specific guarantee is verified.

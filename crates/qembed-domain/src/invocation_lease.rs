@@ -48,18 +48,52 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         next: Invocation,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Persist assistant output and Processing → Verifying under one live lease.
-    fn persist_assistant_output_owned(
+    /// Load the durable provider-call state using the trusted tenant scope.
+    fn load_provider_call_attempt(
+        &self,
+        scope: &Scope,
+        object_id: crate::ids::ObjectId,
+        invocation_id: InvocationId,
+    ) -> impl Future<
+        Output = Result<Option<crate::provider_call_attempt::ProviderCallAttempt>, Self::Error>,
+    > + Send;
+
+    /// Commit the conservative pre-send marker under the current live lease.
+    /// A false result means the caller must not contact the provider.
+    fn mark_provider_may_have_been_sent_owned(
+        &self,
+        scope: &Scope,
+        object_id: crate::ids::ObjectId,
+        invocation_id: InvocationId,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
+    /// Persist an ambiguous provider outcome without releasing its reservation.
+    fn mark_provider_outcome_unknown_owned(
+        &self,
+        scope: &Scope,
+        object_id: crate::ids::ObjectId,
+        invocation_id: InvocationId,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
+    /// Atomically persist assistant output, normalized usage, ResponseReceived,
+    /// and Processing → Verifying under the live lease.
+    fn persist_provider_response_owned(
         &self,
         scope: &Scope,
         owner: &str,
         expected_version: u64,
         expected_fencing_token: FencingToken,
         next: Invocation,
-        content: String,
+        response: crate::chat::ChatResponse,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Complete Verifying → Completed and release the lease atomically.
+    /// Settle durable provider usage, complete Verifying → Completed, and release the lease.
     fn complete_invocation_owned(
         &self,
         scope: &Scope,
@@ -69,7 +103,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
         next: Invocation,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-    /// Persist a stable provider failure and release the lease atomically.
+    /// Persist a stable failure only when the durable attempt proves the provider did not accept the call.
     fn fail_invocation_owned(
         &self,
         scope: &Scope,
