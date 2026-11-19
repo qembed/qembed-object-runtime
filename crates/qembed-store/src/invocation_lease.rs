@@ -4,7 +4,9 @@ use std::str::FromStr;
 
 use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
+use qembed_domain::chat::TokenUsage;
 use qembed_domain::invocation_lease::InvocationLeaseStore;
+use qembed_domain::provider_call_attempt::{ProviderCallAttempt, ProviderCallAttemptState};
 use qembed_domain::scope::Scope;
 
 use crate::invocation_worker::{InvocationStoreError, PgExecutionStore};
@@ -140,6 +142,160 @@ impl InvocationLeaseStore for PgExecutionStore {
             return Ok(false);
         }
 
+        let transitioned = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE object_invocations SET status='Verifying', version=version+1 WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid AND lease_owner=$4 AND lease_until > now() AND version=$5 AND fencing_token=$6 AND status='Processing'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        if transitioned.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        transaction.commit().await?;
+        Ok(true)
+    }
+
+    async fn load_provider_call_attempt(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> Result<Option<ProviderCallAttempt>, Self::Error> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let row = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String, Option<i64>, Option<i64>)>(
+                "SELECT state, input_tokens, output_tokens FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(invocation_id.to_string()),
+        )
+        .await?;
+        transaction.commit().await?;
+        row.map(|(state, input, output)| {
+            let state = parse_provider_attempt_state(&state)?;
+            let usage = match (input, output) {
+                (None, None) => None,
+                (Some(input), Some(output)) => Some(TokenUsage::new(
+                    u32::try_from(input).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider input_tokens"))?,
+                    u32::try_from(output).map_err(|_| InvocationStoreError::InvalidPersistedValue("provider output_tokens"))?,
+                )),
+                _ => return Err(InvocationStoreError::InvalidPersistedValue("provider usage pair")),
+            };
+            Ok(ProviderCallAttempt::from_persisted(state, usage))
+        }).transpose()
+    }
+
+    async fn mark_provider_may_have_been_sent_owned(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+    ) -> Result<bool, Self::Error> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE provider_call_attempts AS attempt SET state='MayHaveBeenSent' FROM object_invocations AS invocation WHERE attempt.tenant_id=$1::uuid AND attempt.object_id=invocation.object_id AND attempt.invocation_id=$2::uuid AND invocation.tenant_id=$1::uuid AND invocation.id=$2::uuid AND invocation.lease_owner=$3 AND invocation.lease_until > now() AND invocation.version=$4 AND invocation.fencing_token=$5 AND invocation.status='Processing' AND attempt.state='NotStarted'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(invocation_id.to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn mark_provider_outcome_unknown_owned(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+    ) -> Result<bool, Self::Error> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE provider_call_attempts AS attempt SET state='OutcomeUnknown' FROM object_invocations AS invocation WHERE attempt.tenant_id=$1::uuid AND attempt.object_id=invocation.object_id AND attempt.invocation_id=$2::uuid AND invocation.tenant_id=$1::uuid AND invocation.id=$2::uuid AND invocation.lease_owner=$3 AND invocation.lease_until > now() AND invocation.version=$4 AND invocation.fencing_token=$5 AND invocation.status='Processing' AND attempt.state='MayHaveBeenSent'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(invocation_id.to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    async fn persist_provider_response_owned(
+        &self,
+        scope: &Scope,
+        owner: &str,
+        expected_version: u64,
+        expected_fencing_token: FencingToken,
+        next: Invocation,
+        content: String,
+        usage: Option<TokenUsage>,
+    ) -> Result<bool, Self::Error> {
+        validate_next(scope, expected_version, expected_fencing_token, &next)?;
+        if next.status() != InvocationStatus::Verifying || content.trim().is_empty() || content.len() > 1_048_576 {
+            return Err(InvocationStoreError::InvalidRequestedState("provider response must be non-empty and transition Processing to Verifying"));
+        }
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let attempt = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE provider_call_attempts AS attempt SET state='ResponseReceived', input_tokens=$6, output_tokens=$7 FROM object_invocations AS invocation WHERE attempt.tenant_id=$1::uuid AND attempt.object_id=invocation.object_id AND attempt.invocation_id=$3::uuid AND invocation.tenant_id=$1::uuid AND invocation.object_id=$2::uuid AND invocation.id=$3::uuid AND invocation.lease_owner=$4 AND invocation.lease_until > now() AND invocation.version=$5 AND invocation.fencing_token=$8 AND invocation.status='Processing' AND attempt.state IN ('MayHaveBeenSent','OutcomeUnknown')",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(usage.map(|value| i64::from(value.input_tokens())))
+            .bind(usage.map(|value| i64::from(value.output_tokens())))
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?),
+        )
+        .await?;
+        if attempt.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        let inserted = execute(
+            &mut transaction,
+            sqlx::query(
+                "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) SELECT $7::uuid, invocation.tenant_id, invocation.object_id, invocation.caller_id, invocation.id, 'assistant', $8, input.expires_at FROM object_invocations AS invocation JOIN LATERAL (SELECT expires_at FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='user' ORDER BY created_at, id LIMIT 1) AS input ON TRUE WHERE invocation.tenant_id=$1::uuid AND invocation.object_id=$2::uuid AND invocation.id=$3::uuid AND invocation.lease_owner=$4 AND invocation.lease_until > now() AND invocation.version=$5 AND invocation.fencing_token=$6 AND invocation.status='Processing' AND NOT EXISTS (SELECT 1 FROM interaction_messages WHERE tenant_id=invocation.tenant_id AND invocation_id=invocation.id AND role='assistant')",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string())
+            .bind(owner)
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(expected_fencing_token.value(), "fencing token")?)
+            .bind(MessageId::new().to_string())
+            .bind(content),
+        )
+        .await?;
+        if inserted.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
         let transitioned = execute(
             &mut transaction,
             sqlx::query(
@@ -378,5 +534,17 @@ const fn status_name(status: InvocationStatus) -> &'static str {
         InvocationStatus::CompletedDegraded => "CompletedDegraded",
         InvocationStatus::Failed => "Failed",
         InvocationStatus::Cancelled => "Cancelled",
+    }
+}
+
+fn parse_provider_attempt_state(value: &str) -> Result<ProviderCallAttemptState, InvocationStoreError> {
+    match value {
+        "NotStarted" => Ok(ProviderCallAttemptState::NotStarted),
+        "MayHaveBeenSent" => Ok(ProviderCallAttemptState::MayHaveBeenSent),
+        "ResponseReceived" => Ok(ProviderCallAttemptState::ResponseReceived),
+        "ConfirmedNotAccepted" => Ok(ProviderCallAttemptState::ConfirmedNotAccepted),
+        "OutcomeUnknown" => Ok(ProviderCallAttemptState::OutcomeUnknown),
+        "CancelledBeforeSend" => Ok(ProviderCallAttemptState::CancelledBeforeSend),
+        _ => Err(InvocationStoreError::InvalidPersistedValue("provider attempt state")),
     }
 }
