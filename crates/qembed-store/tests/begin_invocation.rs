@@ -361,6 +361,13 @@ async fn invocation_insert_failure_rolls_back_idempotency_claim() {
     .await;
     assert!(matches!(result, Err(BeginInvocationError::Database(_))));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool).await.expect("reservation count");
+    let object_counters: i64 = sqlx::query_scalar("SELECT count(*) FROM usage_counters")
+        .fetch_one(&fixture.pool).await.expect("object counter count");
+    let caller_counters: i64 = sqlx::query_scalar("SELECT count(*) FROM caller_usage_counters")
+        .fetch_one(&fixture.pool).await.expect("caller counter count");
+    assert_eq!((reservations, object_counters, caller_counters), (0, 0, 0));
     teardown(fixture).await;
 }
 
@@ -1320,5 +1327,34 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
     let reserved: i64 = sqlx::query_scalar("SELECT sum(reserved_tokens) FROM usage_counters")
         .fetch_one(&fixture.pool).await.expect("reserved token sum");
     assert_eq!(reserved, i64::try_from(estimate).expect("estimate fits bigint"));
+    teardown(fixture).await;
+}
+
+
+#[tokio::test]
+async fn effective_invocation_cap_is_the_tighter_snapshot_or_live_limit() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE object_budgets SET max_tokens_per_invocation=1 WHERE object_id=$1::uuid")
+        .bind(fixture.object_id.to_string()).execute(&fixture.pool).await
+        .expect("live per-invocation cap should be lowered");
+    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "tight-live-cap"))
+        .await.expect_err("live cap below estimate must reject invocation");
+    assert!(matches!(error, BeginInvocationError::Budget(BudgetReservationError::Rejected(
+        BudgetRejection::InvocationLimit
+    ))));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn malformed_snapshot_budget_fails_closed_and_rolls_back_idempotency() {
+    let fixture = setup(None).await;
+    sqlx::query("UPDATE snapshots SET json_projection='{}'::jsonb WHERE snapshot_id=$1::uuid")
+        .bind(fixture.snapshot_id.to_string()).execute(&fixture.pool).await
+        .expect("fixture snapshot projection should be malformed");
+    let error = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "missing-snapshot-budget"))
+        .await.expect_err("missing snapshot token cap must fail closed");
+    assert!(matches!(error, BeginInvocationError::SnapshotBudgetInvalid));
+    assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }
