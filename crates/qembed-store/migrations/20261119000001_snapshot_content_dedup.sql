@@ -1,7 +1,11 @@
 -- Match the canonical qembed-sql snapshots uniqueness invariant.
 -- Existing duplicate content hashes must be investigated rather than silently
 -- discarded: snapshots are immutable and are tied to exact object versions.
-DO $$
+-- Hold the table lock across the duplicate check and constraint creation so
+-- concurrent inserts cannot introduce a duplicate between those operations.
+LOCK TABLE snapshots IN ACCESS EXCLUSIVE MODE;
+
+DO $
 BEGIN
     IF EXISTS (
         SELECT 1
