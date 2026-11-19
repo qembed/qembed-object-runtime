@@ -600,6 +600,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
         store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 processing.version(),
@@ -824,6 +825,7 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         worker_a
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 "worker-a",
                 old_claim.version(),
@@ -1070,6 +1072,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 processing.version(),
@@ -1370,6 +1373,7 @@ async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
         !store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 current.version(),
@@ -1452,6 +1456,7 @@ async fn provider_response_and_usage_are_durable_before_replay_safe_settlement()
         store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 processing.version(),
@@ -1590,6 +1595,7 @@ async fn terminal_failure_is_rejected_after_provider_may_have_been_sent() {
         store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 processing.version(),
@@ -1701,6 +1707,7 @@ async fn cancellation_after_pre_send_marker_keeps_reservation_held() {
         store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 processing.version(),
@@ -2200,6 +2207,7 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
         store
             .mark_provider_may_have_been_sent_owned(
                 &fixture.scope,
+                fixture.object_id,
                 invocation_id,
                 owner,
                 processing.version(),
