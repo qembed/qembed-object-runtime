@@ -357,6 +357,7 @@ where
                                 .store
                                 .mark_provider_outcome_unknown_owned(
                                     scope,
+                                    invocation.object_id(),
                                     invocation_id,
                                     &self.config.worker_id,
                                     invocation.version(),
@@ -619,6 +620,7 @@ mod lifecycle_tests {
         async fn mark_provider_may_have_been_sent_owned(
             &self,
             scope: &Scope,
+            object_id: ObjectId,
             invocation_id: InvocationId,
             owner: &str,
             version: u64,
@@ -626,6 +628,7 @@ mod lifecycle_tests {
         ) -> Result<bool, Self::Error> {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.object_id() != object_id
                 || state.invocation.id() != invocation_id
                 || state.invocation.version() != version
                 || state.invocation.fencing_token() != token
@@ -641,6 +644,7 @@ mod lifecycle_tests {
         async fn mark_provider_outcome_unknown_owned(
             &self,
             scope: &Scope,
+            object_id: ObjectId,
             invocation_id: InvocationId,
             owner: &str,
             version: u64,
@@ -648,6 +652,7 @@ mod lifecycle_tests {
         ) -> Result<bool, Self::Error> {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
+                || state.invocation.object_id() != object_id
                 || state.invocation.id() != invocation_id
                 || state.invocation.version() != version
                 || state.invocation.fencing_token() != token
