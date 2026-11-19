@@ -2512,20 +2512,31 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
         .expect("second independent pool");
 
     let (first, second) = tokio::join!(
-        begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "caller-race-a")),
-        begin_invocation(&second_pool, &fixture.scope, command(&fixture, "caller-race-b")),
+        begin_invocation(
+            &fixture.pool,
+            &fixture.scope,
+            command(&fixture, "caller-race-a")
+        ),
+        begin_invocation(
+            &second_pool,
+            &fixture.scope,
+            command(&fixture, "caller-race-b")
+        ),
     );
     second_pool.close().await;
 
     let created = matches!(first, Ok(BeginInvocationOutcome::Created { .. })) as usize
         + matches!(second, Ok(BeginInvocationOutcome::Created { .. })) as usize;
-    assert_eq!(created, 1, "only one session may consume the caller's final budget");
+    assert_eq!(
+        created, 1,
+        "only one session may consume the caller's final budget"
+    );
     let caller_limit_rejected = matches!(
         (&first, &second),
         (
-            Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(
-                BudgetRejection::CallerDailyLimit
-            ))),
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::CallerDailyLimit)
+            )),
             _,
         ) | (
             _,
@@ -2534,7 +2545,10 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
             ))),
         )
     );
-    assert!(caller_limit_rejected, "the losing session must observe the committed caller reservation");
+    assert!(
+        caller_limit_rejected,
+        "the losing session must observe the committed caller reservation"
+    );
 
     let caller_reserved: i64 = sqlx::query_scalar(
         "SELECT reserved_tokens FROM caller_usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND caller_id=$3::uuid",
@@ -2545,7 +2559,10 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
     .fetch_one(&fixture.pool)
     .await
     .expect("caller reserved token count");
-    assert_eq!(caller_reserved, i64::try_from(estimate).expect("estimate fits bigint"));
+    assert_eq!(
+        caller_reserved,
+        i64::try_from(estimate).expect("estimate fits bigint")
+    );
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
     teardown(fixture).await;
 }
@@ -2620,7 +2637,10 @@ async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
             .fetch_one(&fixture.pool)
             .await
             .expect("object token counters");
-    assert_eq!(object_counts, (i64::try_from(first.actual_tokens()).unwrap(), 0));
+    assert_eq!(
+        object_counts,
+        (i64::try_from(first.actual_tokens()).unwrap(), 0)
+    );
     let caller_counts: (i64, i64) =
         sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM caller_usage_counters")
             .fetch_one(&fixture.pool)
@@ -2638,7 +2658,10 @@ async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
     .expect("settled reservation");
     assert_eq!(
         reservation,
-        ("Settled".to_owned(), Some(i64::try_from(first.actual_tokens()).unwrap()))
+        (
+            "Settled".to_owned(),
+            Some(i64::try_from(first.actual_tokens()).unwrap())
+        )
     );
     teardown(fixture).await;
 }
