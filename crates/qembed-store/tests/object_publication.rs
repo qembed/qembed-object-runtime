@@ -12,7 +12,9 @@ async fn publication_rejects_a_legacy_version_without_a_snapshot() {
     .await
     .expect("test fixture should insert a legacy version-only row");
 
-    let error = repository.publish_version(&scope, object_id, version_id, None).await
+    let error = repository
+        .publish_version(&scope, object_id, version_id, None)
+        .await
         .expect_err("a version without a snapshot must not be published");
     assert!(matches!(error, ObjectRepositoryError::SnapshotNotFound));
 
@@ -88,7 +90,10 @@ async fn create_draft_version(
         .expect("Draft version and snapshot should be created atomically");
     assert_eq!(
         result,
-        DraftCreation::Created { version_id, snapshot_id: snapshot.id() }
+        DraftCreation::Created {
+            version_id,
+            snapshot_id: snapshot.id()
+        }
     );
     version_id
 }

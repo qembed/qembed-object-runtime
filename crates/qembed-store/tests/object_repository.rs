@@ -30,7 +30,10 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
     let scope_a = scope_for_tenant(tenant_a);
     let object = Object::new(ObjectId::new(), tenant_a);
 
-    repository.create_object(&scope_a, &object).await.expect("Draft object should be created");
+    repository
+        .create_object(&scope_a, &object)
+        .await
+        .expect("Draft object should be created");
     let stored_state: String = sqlx::query_scalar(
         "SELECT state FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
     )
@@ -45,9 +48,14 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
         .expect("version number must be positive");
     let snap = snapshot(&version, br#"{"version":1}"#);
     assert_eq!(
-        repository.create_draft_version_with_snapshot(&scope_a, &version, &snap).await
+        repository
+            .create_draft_version_with_snapshot(&scope_a, &version, &snap)
+            .await
             .expect("version and snapshot should be atomic"),
-        DraftCreation::Created { version_id: version.id(), snapshot_id: snap.id() }
+        DraftCreation::Created {
+            version_id: version.id(),
+            snapshot_id: snap.id()
+        }
     );
 
     let stored: (i64, String, i64) = sqlx::query_as(
@@ -65,32 +73,50 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
     let duplicate_number = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
         .expect("version number must be positive");
     let duplicate_snapshot = snapshot(&duplicate_number, br#"{"version":2}"#);
-    let duplicate = repository.create_draft_version_with_snapshot(&scope_a, &duplicate_number, &duplicate_snapshot)
-        .await.expect_err("duplicate version numbers must be rejected");
-    assert!(matches!(duplicate, ObjectRepositoryError::Database(sqlx::Error::Database(_))));
+    let duplicate = repository
+        .create_draft_version_with_snapshot(&scope_a, &duplicate_number, &duplicate_snapshot)
+        .await
+        .expect_err("duplicate version numbers must be rejected");
+    assert!(matches!(
+        duplicate,
+        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+    ));
 
     // The trusted scope, not caller-provided tenant data, determines ownership.
     let tenant_b = TenantId::new();
     let scope_b = scope_for_tenant(tenant_b);
-    let mismatch = repository.create_object(&scope_b, &object).await
+    let mismatch = repository
+        .create_object(&scope_b, &object)
+        .await
         .expect_err("tenant A object cannot be inserted through tenant B scope");
     assert!(matches!(mismatch, ObjectRepositoryError::TenantMismatch));
 
     let foreign_version = ObjectVersion::new(ObjectVersionId::new(), tenant_b, object.id(), 2)
         .expect("version number must be positive");
     let foreign_snapshot = snapshot(&foreign_version, br#"{"version":3}"#);
-    let foreign_error = repository.create_draft_version_with_snapshot(&scope_b, &foreign_version, &foreign_snapshot)
-        .await.expect_err("cross-tenant object references must be rejected");
-    assert!(matches!(foreign_error, ObjectRepositoryError::Database(sqlx::Error::Database(_))));
+    let foreign_error = repository
+        .create_draft_version_with_snapshot(&scope_b, &foreign_version, &foreign_snapshot)
+        .await
+        .expect_err("cross-tenant object references must be rejected");
+    assert!(matches!(
+        foreign_error,
+        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+    ));
 
     // A failed atomic insert leaves no orphaned version.
-    let missing_object_version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, ObjectId::new(), 1)
-        .expect("version number must be positive");
+    let missing_object_version =
+        ObjectVersion::new(ObjectVersionId::new(), tenant_a, ObjectId::new(), 1)
+            .expect("version number must be positive");
     let missing_snapshot = snapshot(&missing_object_version, br#"{"version":4}"#);
     let failed_id = missing_object_version.id();
-    let rollback_error = repository.create_draft_version_with_snapshot(&scope_a, &missing_object_version, &missing_snapshot)
-        .await.expect_err("a version cannot be created without its parent object");
-    assert!(matches!(rollback_error, ObjectRepositoryError::Database(sqlx::Error::Database(_))));
+    let rollback_error = repository
+        .create_draft_version_with_snapshot(&scope_a, &missing_object_version, &missing_snapshot)
+        .await
+        .expect_err("a version cannot be created without its parent object");
+    assert!(matches!(
+        rollback_error,
+        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+    ));
     let persisted: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM object_versions WHERE tenant_id = $1::uuid AND object_version_id = $2::uuid",
     )
@@ -100,19 +126,34 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
     assert_eq!(persisted, 0);
 
     let active_object = Object::from_persisted(
-        ObjectId::new(), tenant_a, ObjectState::Active, Some(ObjectVersionId::new()),
-    ).expect("active object requires a published-version pointer");
-    let non_draft_object = repository.create_object(&scope_a, &active_object).await
+        ObjectId::new(),
+        tenant_a,
+        ObjectState::Active,
+        Some(ObjectVersionId::new()),
+    )
+    .expect("active object requires a published-version pointer");
+    let non_draft_object = repository
+        .create_object(&scope_a, &active_object)
+        .await
         .expect_err("create_object must reject an already-active object");
-    assert!(matches!(non_draft_object, ObjectRepositoryError::ObjectMustBeDraft));
+    assert!(matches!(
+        non_draft_object,
+        ObjectRepositoryError::ObjectMustBeDraft
+    ));
 
-    let mut published_version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 2)
-        .expect("version number must be positive");
+    let mut published_version =
+        ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 2)
+            .expect("version number must be positive");
     published_version.publish().expect("Draft can be published");
     let published_snapshot = snapshot(&published_version, br#"{"version":5}"#);
-    let non_draft_version = repository.create_draft_version_with_snapshot(&scope_a, &published_version, &published_snapshot)
-        .await.expect_err("atomic creation must reject a published version");
-    assert!(matches!(non_draft_version, ObjectRepositoryError::VersionMustBeDraft));
+    let non_draft_version = repository
+        .create_draft_version_with_snapshot(&scope_a, &published_version, &published_snapshot)
+        .await
+        .expect_err("atomic creation must reject a published version");
+    assert!(matches!(
+        non_draft_version,
+        ObjectRepositoryError::VersionMustBeDraft
+    ));
 
     pool.close().await;
 }
