@@ -53,19 +53,32 @@ impl std::error::Error for BudgetReservationError {
     }
 }
 
+/// All trusted, already-validated identifiers and budget inputs for one reservation.
+pub(crate) struct BudgetReservationRequest {
+    pub(crate) object_id: ObjectId,
+    pub(crate) caller_id: CallerId,
+    pub(crate) invocation_id: InvocationId,
+    pub(crate) pool: InvocationPool,
+    pub(crate) snapshot_limit: u64,
+    pub(crate) estimate: u64,
+}
+
 /// Atomically checks and reserves the token estimate in the caller's begin
 /// transaction. The reservation FK is deferred, so it may be inserted before
 /// object_invocations; both rows and counter changes commit or roll back together.
 pub(crate) async fn reserve_invocation_budget(
     transaction: &mut TenantTransaction,
     scope: &Scope,
-    object_id: ObjectId,
-    caller_id: CallerId,
-    invocation_id: InvocationId,
-    pool: InvocationPool,
-    snapshot_limit: u64,
-    estimate: u64,
+    request: BudgetReservationRequest,
 ) -> Result<(), BudgetReservationError> {
+    let BudgetReservationRequest {
+        object_id,
+        caller_id,
+        invocation_id,
+        pool,
+        snapshot_limit,
+        estimate,
+    } = request;
     if estimate == 0 {
         return Err(BudgetReservationError::InvalidEstimate);
     }
