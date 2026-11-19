@@ -66,9 +66,15 @@ The canonical M0 SQL defines `UNIQUE (tenant_id, object_id, content_hash)` on `s
 
 T-30 requires reuse of one snapshot for repeated invocations of the same configuration and a new snapshot after a binding change. It does **not** require a new object version to be created when its candidate bytes are identical to an existing version. Thus the acceptance test and the current schema are not inherently contradictory.
 
-**Preferred contract proposed for confirmation in [qembed-sql issue #16](https://github.com/qembed/qembed-sql/issues/16):** perform version-level deduplication. Compare exact canonical bytes for the same tenant/object; if an existing version already has those bytes, do not create a second version or snapshot. Return an explicit `identical_content` outcome identifying the existing version/snapshot, without claiming that a new version was created. A matching hash with different bytes is an integrity/collision failure. Different bytes create a new version and snapshot atomically.
+**Accepted project contract (2026-11-19):** [qembed-sql ADR RUST-044 — Identical-content object version semantics](https://github.com/qembed/qembed-sql/blob/master/ADR_RUST-044_Identical_Content_Version_Deduplication.md) resolves this ambiguity without a DDL change:
 
-This is a proposal, not yet an accepted SQL contract. Until qembed-sql confirms it, RUST-044 must not implement either a silent alias or a schema workaround. Any alternative requiring multiple version identities for identical content needs a separately reviewed qembed-sql physical-contract change.
+- For the same tenant/object, exact canonical-byte equality returns `identical_content` with the existing object-version and snapshot identifiers. No new version or snapshot is inserted, and the outcome must not claim that a new version was created.
+- A matching SHA-256 with different canonical bytes fails closed as an integrity/hash-collision error. Hash equality alone is never sufficient for reuse.
+- Different bytes create a new Draft version and snapshot atomically in one tenant-scoped transaction.
+- Deduplication never crosses tenant/object boundaries. The existing snapshot remains bound to its original version; no alias or reassignment is introduced.
+- PostgreSQL uniqueness remains authoritative under concurrent creation. A uniqueness race must be re-read and resolved using exact-byte comparison before returning `identical_content`.
+
+This is a newly approved RUST-044 project contract, not a recovered M0 v2.2 requirement. Required positive, negative, rollback, and concurrency tests are specified in the SQL ADR.
 
 ## 5. Required failure behaviour and tests
 
