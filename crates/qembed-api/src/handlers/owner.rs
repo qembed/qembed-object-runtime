@@ -185,18 +185,25 @@ struct CreateObjectVersionRequest {
     config: serde_json::Value,
 }
 
-fn parse_create_object_version_body(body: &[u8]) -> Result<(u32, Vec<u8>), ()> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CreateObjectVersionBodyError {
+    Invalid,
+}
+
+fn parse_create_object_version_body(
+    body: &[u8],
+) -> Result<(u32, Vec<u8>), CreateObjectVersionBodyError> {
     // Canonicalize the envelope first: the strict JCS parser rejects duplicate
     // keys anywhere in the request before serde_json can collapse them.
-    let canonical_envelope = canonicalize_json(body).map_err(|_| ())?;
+    let canonical_envelope = canonicalize_json(body).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
     let request: CreateObjectVersionRequest =
-        serde_json::from_slice(&canonical_envelope).map_err(|_| ())?;
+        serde_json::from_slice(&canonical_envelope).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
     if request.schema_version <= 0 {
-        return Err(());
+        return Err(CreateObjectVersionBodyError::Invalid);
     }
-    let schema_version = u32::try_from(request.schema_version).map_err(|_| ())?;
-    let config_json = serde_json::to_vec(&request.config).map_err(|_| ())?;
-    let canonical_config = canonicalize_json(&config_json).map_err(|_| ())?;
+    let schema_version = u32::try_from(request.schema_version).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    let config_json = serde_json::to_vec(&request.config).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
+    let canonical_config = canonicalize_json(&config_json).map_err(|_| CreateObjectVersionBodyError::Invalid)?;
     Ok((schema_version, canonical_config))
 }
 
@@ -219,7 +226,7 @@ async fn create_object_version(
 
     let (schema_version, canonical_json) = match parse_create_object_version_body(&body) {
         Ok(parsed) => parsed,
-        Err(()) => {
+        Err(CreateObjectVersionBodyError::Invalid) => {
             return api_error(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
