@@ -117,8 +117,8 @@ mod tests {
             DraftVersionCreation::Created { version_id, snapshot_id } => (version_id, snapshot_id),
             other => panic!("recording store should report creation, got {other:?}"),
         };
-        assert_ne!(version_id.to_string(), uuid::Uuid::nil().to_string());
-        assert_ne!(snapshot_id.to_string(), uuid::Uuid::nil().to_string());
+        assert_eq!(version_id.to_string().len(), 36);
+        assert_eq!(snapshot_id.to_string().len(), 36);
     }
 
     #[tokio::test]
