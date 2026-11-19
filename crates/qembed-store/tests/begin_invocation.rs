@@ -344,6 +344,12 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         .expect("same key and payload should replay without validating a new message expiry");
     assert_eq!(replay, BeginInvocationOutcome::Replay { invocation_id });
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let reservations_after_replay: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("reservation count after replay");
+    assert_eq!(reservations_after_replay, 1, "idempotent replay must not reserve twice");
     teardown(fixture).await;
 }
 
