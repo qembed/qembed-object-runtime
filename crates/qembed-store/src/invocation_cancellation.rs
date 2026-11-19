@@ -41,14 +41,18 @@ impl InvocationCancellationStore for PgExecutionStore {
             "NotStarted" => {
                 execute(
                     &mut transaction,
-                    sqlx::query("UPDATE provider_call_attempts SET state='CancelledBeforeSend' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND state='NotStarted'"),
+                    sqlx::query("UPDATE provider_call_attempts SET state='CancelledBeforeSend' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND state='NotStarted'")
+                        .bind(scope.tenant_id().to_string())
+                        .bind(invocation_id.to_string()),
                 )
                 .await?;
             }
             "MayHaveBeenSent" => {
                 execute(
                     &mut transaction,
-                    sqlx::query("UPDATE provider_call_attempts SET state='OutcomeUnknown' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND state='MayHaveBeenSent'"),
+                    sqlx::query("UPDATE provider_call_attempts SET state='OutcomeUnknown' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND state='MayHaveBeenSent'")
+                        .bind(scope.tenant_id().to_string())
+                        .bind(invocation_id.to_string()),
                 )
                 .await?;
             }
