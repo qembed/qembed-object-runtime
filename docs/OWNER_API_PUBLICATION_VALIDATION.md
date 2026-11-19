@@ -64,7 +64,11 @@ No network or validator I/O belongs inside this transaction. Snapshot/JCS constr
 
 The canonical M0 SQL defines `UNIQUE (tenant_id, object_id, content_hash)` on `snapshots`, while each snapshot row also stores `object_version_id` and has a composite FK to that exact version. Therefore, two versions of the same object cannot each receive a distinct snapshot row with identical canonical bytes/hash.
 
-The M0 acceptance plan requires reuse of a snapshot for repeated invocations of the same configuration, but does not settle the separate case of creating a *new version* whose content is byte-identical to an earlier version. Do not silently work around this by attaching the earlier version's snapshot to a different version: that would violate the required tenant/object/version/snapshot binding. Before implementing the Owner create-version contract, decide whether identical-content version creation is rejected/deduplicated at the version level or whether the canonical SQL contract is to be revised in a separate qembed-sql change. Rust must not independently change the physical schema.
+T-30 requires reuse of one snapshot for repeated invocations of the same configuration and a new snapshot after a binding change. It does **not** require a new object version to be created when its candidate bytes are identical to an existing version. Thus the acceptance test and the current schema are not inherently contradictory.
+
+**Preferred contract proposed for confirmation in [qembed-sql issue #16](https://github.com/qembed/qembed-sql/issues/16):** perform version-level deduplication. Compare exact canonical bytes for the same tenant/object; if an existing version already has those bytes, do not create a second version or snapshot. Return an explicit `identical_content` outcome identifying the existing version/snapshot, without claiming that a new version was created. A matching hash with different bytes is an integrity/collision failure. Different bytes create a new version and snapshot atomically.
+
+This is a proposal, not yet an accepted SQL contract. Until qembed-sql confirms it, RUST-044 must not implement either a silent alias or a schema workaround. Any alternative requiring multiple version identities for identical content needs a separately reviewed qembed-sql physical-contract change.
 
 ## 5. Required failure behaviour and tests
 
