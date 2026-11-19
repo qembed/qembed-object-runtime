@@ -78,13 +78,13 @@ pub fn output_token_allowance(
 /// Uses normalized provider usage when present; otherwise settles the non-zero
 /// reservation estimate and marks the invocation degraded.
 #[must_use]
-pub const fn settle_token_usage(
+pub fn settle_token_usage(
     reserved_estimate: u64,
     provider_usage: Option<TokenUsage>,
 ) -> TokenSettlement {
     match provider_usage {
         Some(usage) => TokenSettlement {
-            actual_tokens: usage.input_tokens() as u64 + usage.output_tokens() as u64,
+            actual_tokens: u64::from(usage.input_tokens()) + u64::from(usage.output_tokens()),
             degraded: false,
         },
         None => TokenSettlement {
