@@ -10,6 +10,7 @@
 pub mod auth;
 pub mod begin_invocation;
 mod budget_reservation;
+pub mod budget_settlement;
 pub mod caller;
 mod cas;
 pub mod idempotency;
