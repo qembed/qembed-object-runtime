@@ -176,7 +176,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         let result = execute(
             &mut transaction,
             sqlx::query(
-                "UPDATE provider_call_attempts AS attempt SET state='MayHaveBeenSent' FROM object_invocations AS invocation WHERE attempt.tenant_id=$1::uuid AND attempt.object_id=invocation.object_id AND attempt.invocation_id=$2::uuid AND invocation.tenant_id=$1::uuid AND invocation.id=$2::uuid AND invocation.lease_owner=$3 AND invocation.lease_until > now() AND invocation.version=$4 AND invocation.fencing_token=$5 AND invocation.status='Processing' AND attempt.state='NotStarted'",
+                "UPDATE provider_call_attempts AS attempt SET state='MayHaveBeenSent' FROM object_invocations AS invocation WHERE attempt.tenant_id=$1::uuid AND attempt.object_id=invocation.object_id AND attempt.invocation_id=$2::uuid AND invocation.tenant_id=$1::uuid AND invocation.id=$2::uuid AND invocation.lease_owner=$3 AND invocation.lease_until > now() AND invocation.version=$4 AND invocation.fencing_token=$5 AND invocation.status='Processing' AND attempt.state='NotStarted' AND EXISTS (SELECT 1 FROM budget_reservations AS reservation WHERE reservation.tenant_id=attempt.tenant_id AND reservation.object_id=attempt.object_id AND reservation.invocation_id=attempt.invocation_id AND reservation.status='Reserved' AND reservation.expires_at > now())",
             )
             .bind(scope.tenant_id().to_string())
             .bind(invocation_id.to_string())
