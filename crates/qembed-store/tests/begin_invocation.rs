@@ -820,6 +820,18 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("load stale worker snapshot")
         .expect("invocation exists");
     assert_eq!(old_claim.status(), InvocationStatus::Processing);
+    assert!(
+        worker_a
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                invocation_id,
+                "worker-a",
+                old_claim.version(),
+                old_claim.fencing_token(),
+            )
+            .await
+            .expect("commit provider pre-send marker")
+    );
 
     sqlx::query(
         "UPDATE object_invocations SET lease_until=now()-interval '1 second' WHERE tenant_id=$1::uuid AND id=$2::uuid",
@@ -859,13 +871,18 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("old in-memory state can form a candidate response transition");
     assert!(
         !worker_a
-            .persist_assistant_output_owned(
+            .persist_provider_response_owned(
                 &fixture.scope,
                 "worker-a",
                 old_claim.version(),
                 old_claim.fencing_token(),
                 stale_output,
-                "stale answer".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "stale answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid stale response"),
             )
             .await
             .expect("stale response write is a normal CAS miss"),
@@ -891,13 +908,18 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .expect("new lease owner can persist provider response");
     assert!(
         worker_b
-            .persist_assistant_output_owned(
+            .persist_provider_response_owned(
                 &fixture.scope,
                 "worker-b",
                 new_claim.version(),
                 new_claim.fencing_token(),
                 valid_response,
-                "current answer".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "current answer",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid current response"),
             )
             .await
             .expect("new owner response CAS")
