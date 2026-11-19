@@ -14,7 +14,7 @@ use qembed_domain::ports::{
 };
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::begin_invocation::{
-    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
+    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, BudgetRejection,\n    BudgetReservationError, begin_invocation,
 };
 use qembed_store::invocation_query::PgInvocationQueryStore;
 use qembed_store::invocation_worker::PgExecutionStore;
@@ -1309,7 +1309,7 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
     let successes = usize::from(matches!(first, Ok(BeginInvocationOutcome::Created { .. })))
         + usize::from(matches!(second, Ok(BeginInvocationOutcome::Created { .. })));
     assert_eq!(successes, 1, "exactly one independent session may consume the final budget");
-    let rejected = match (first, second) {
+    let rejected = match (&first, &second) {
         (Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit))), _)
         | (_, Err(BeginInvocationError::Budget(BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit)))) => true,
         _ => false,
