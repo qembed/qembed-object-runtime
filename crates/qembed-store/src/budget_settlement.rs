@@ -87,8 +87,8 @@ pub async fn settle_invocation_usage(
 
     let identity = fetch_optional(
         &mut transaction,
-        sqlx::query_as::<_, (String, String, String)>(
-            "SELECT object_id::text, caller_id::text, pool FROM object_invocations WHERE tenant_id=$1::uuid AND id=$2::uuid",
+        sqlx::query_as::<_, (String, String, String, String)>(
+            "SELECT invocation.object_id::text, invocation.caller_id::text, invocation.pool, reservation.usage_date::text FROM object_invocations AS invocation JOIN budget_reservations AS reservation ON reservation.tenant_id=invocation.tenant_id AND reservation.object_id=invocation.object_id AND reservation.invocation_id=invocation.id WHERE invocation.tenant_id=$1::uuid AND invocation.id=$2::uuid",
         )
         .bind(scope.tenant_id().to_string())
         .bind(invocation_id.to_string()),
@@ -96,7 +96,7 @@ pub async fn settle_invocation_usage(
     .await
     .map_err(UsageSettlementError::Database)?
     .ok_or(UsageSettlementError::NotFound)?;
-    let (object_id, caller_id, invocation_pool) = identity;
+    let (object_id, caller_id, invocation_pool, usage_date) = identity;
 
     let budget_exists: Option<(String,)> = fetch_optional(
         &mut transaction,
@@ -112,18 +112,19 @@ pub async fn settle_invocation_usage(
         return Err(UsageSettlementError::MissingBudgetConfiguration);
     }
 
-    let usage_date_and_counts: Option<(String, i64, i64)> = fetch_optional(
+    let usage_counts: Option<(i64, i64)> = fetch_optional(
         &mut transaction,
         sqlx::query_as(
-            "SELECT usage_date::text, consumed_tokens, reserved_tokens FROM usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND pool=$3 FOR UPDATE",
+            "SELECT consumed_tokens, reserved_tokens FROM usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND usage_date=$3::date AND pool=$4 FOR UPDATE",
         )
         .bind(scope.tenant_id().to_string())
         .bind(&object_id)
+        .bind(&usage_date)
         .bind(&invocation_pool),
     )
     .await
     .map_err(UsageSettlementError::Database)?;
-    let Some((usage_date, _object_consumed, object_reserved)) = usage_date_and_counts else {
+    let Some((_object_consumed, object_reserved)) = usage_counts else {
         return Err(UsageSettlementError::MissingAccountingRow);
     };
 
