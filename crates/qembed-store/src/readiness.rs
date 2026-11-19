@@ -75,7 +75,7 @@ fn migration_state_matches(expected: &[(i64, Vec<u8>)], applied: &[(i64, Vec<u8>
                 (expected_version, expected_checksum),
                 (applied_version, applied_checksum, success),
             )| {
-                success
+                *success
                     && expected_version == applied_version
                     && expected_checksum == applied_checksum
             },
