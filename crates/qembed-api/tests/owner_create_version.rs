@@ -102,7 +102,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         .to_owned();
 
     let persisted: (i64, String, i32, Vec<u8>) = sqlx::query_as(
-        "SELECT ov.version_number, ov.status, s.schema_version, s.canonical_json FROM object_versions ov JOIN snapshots s USING (tenant_id, object_id, object_version_id) WHERE ov.tenant_id = $1::uuid AND ov.object_id = $2::uuid AND ov.object_version_id = $3::uuid",
+        "SELECT ov.version_number, ov.status::text, s.schema_version, s.canonical_json FROM object_versions ov JOIN snapshots s USING (tenant_id, object_id, object_version_id) WHERE ov.tenant_id = $1::uuid AND ov.object_id = $2::uuid AND ov.object_version_id = $3::uuid",
     )
     .bind(tenant_id.to_string())
     .bind(object_id.to_string())
