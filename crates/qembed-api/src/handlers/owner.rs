@@ -206,6 +206,84 @@ mod tests {
         }
     }
 
+    struct FixedCreator(ObjectId);
+
+    impl OwnerApiBackend for FixedCreator {
+        fn create_object(
+            &self,
+            _: TenantId,
+            _: String,
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>> {
+            let id = self.0;
+            Box::pin(async move { Ok(id) })
+        }
+
+        fn inspect(
+            &self,
+            _: TenantId,
+            _: String,
+            _: InvocationId,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<Option<InvocationResponse>, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Ok(None) })
+        }
+    }
+
+    #[actix_web::test]
+    async fn create_object_returns_created_draft_projection() {
+        let object_id = ObjectId::new();
+        let app = test::init_service(
+            App::new().configure(|config| configure_owner_routes(config, FixedCreator(object_id))),
+        )
+        .await;
+        let response = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/owner/objects")
+                .insert_header(("X-Tenant-ID", TenantId::new().to_string()))
+                .insert_header((actix_web::http::header::AUTHORIZATION, "Bearer owner-token"))
+                .to_request(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = to_bytes(response.into_body()).await.expect("body reads");
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("response is JSON");
+        assert_eq!(json["object_id"], object_id.to_string());
+        assert_eq!(json["state"], "draft");
+        assert_eq!(json.as_object().expect("object response").len(), 2);
+    }
+
+    #[actix_web::test]
+    async fn create_object_rejects_missing_credentials_before_backend_access() {
+        let app = test::init_service(
+            App::new().configure(|config| configure_owner_routes(config, NeverCalled)),
+        )
+        .await;
+
+        let missing_tenant = test::call_service(
+            &app,
+            test::TestRequest::post().uri("/owner/objects").to_request(),
+        )
+        .await;
+        assert_eq!(missing_tenant.status(), StatusCode::BAD_REQUEST);
+
+        let missing_token = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/owner/objects")
+                .insert_header(("X-Tenant-ID", TenantId::new().to_string()))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(missing_token.status(), StatusCode::UNAUTHORIZED);
+    }
+
     #[actix_web::test]
     async fn owner_route_rejects_missing_tenant_header_before_backend_access() {
         let app = test::init_service(
