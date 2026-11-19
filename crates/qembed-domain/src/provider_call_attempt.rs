@@ -1,5 +1,29 @@
 //! Durable state of one logical provider call.
 
+use crate::chat::TokenUsage;
+
+/// Persisted state and optional normalized usage for one provider call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProviderCallAttempt {
+    state: ProviderCallAttemptState,
+    usage: Option<TokenUsage>,
+}
+
+impl ProviderCallAttempt {
+    /// Reconstitutes a value read from the tenant-scoped store.
+    #[must_use]
+    pub const fn from_persisted(state: ProviderCallAttemptState, usage: Option<TokenUsage>) -> Self {
+        Self { state, usage }
+    }
+
+    #[must_use]
+    pub const fn state(self) -> ProviderCallAttemptState { self.state }
+
+    /// None means unavailable; Some(TokenUsage::new(0, 0)) is explicit zero.
+    #[must_use]
+    pub const fn usage(self) -> Option<TokenUsage> { self.usage }
+}
+
 /// Database-backed state that decides whether a provider request may be sent
 /// and whether its token reservation can be safely released.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
