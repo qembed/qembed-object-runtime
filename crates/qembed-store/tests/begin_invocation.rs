@@ -2479,6 +2479,194 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
 }
 
 #[tokio::test]
+async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
+    let fixture = setup(None).await;
+    let estimate = qembed_domain::budget::estimate_input_tokens(
+        command(&fixture, "caller-race-a").input_message.len(),
+    )
+    .expect("input estimate");
+    sqlx::query(
+        "UPDATE object_budgets SET daily_token_limit=100000, per_caller_daily_token_limit=$2 WHERE object_id=$1::uuid",
+    )
+    .bind(fixture.object_id.to_string())
+    .bind(i64::try_from(estimate).expect("estimate fits bigint"))
+    .execute(&fixture.pool)
+    .await
+    .expect("caller daily budget should be configured");
+
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let schema = fixture.schema.clone();
+    let second_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await
+        .expect("second independent pool");
+
+    let (first, second) = tokio::join!(
+        begin_invocation(
+            &fixture.pool,
+            &fixture.scope,
+            command(&fixture, "caller-race-a")
+        ),
+        begin_invocation(
+            &second_pool,
+            &fixture.scope,
+            command(&fixture, "caller-race-b")
+        ),
+    );
+    second_pool.close().await;
+
+    let created = matches!(first, Ok(BeginInvocationOutcome::Created { .. })) as usize
+        + matches!(second, Ok(BeginInvocationOutcome::Created { .. })) as usize;
+    assert_eq!(
+        created, 1,
+        "only one session may consume the caller's final budget"
+    );
+    let caller_limit_rejected = matches!(
+        (&first, &second),
+        (
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::CallerDailyLimit)
+            )),
+            _,
+        ) | (
+            _,
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::CallerDailyLimit)
+            )),
+        )
+    );
+    assert!(
+        caller_limit_rejected,
+        "the losing session must observe the committed caller reservation"
+    );
+
+    let caller_reserved: i64 = sqlx::query_scalar(
+        "SELECT reserved_tokens FROM caller_usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND caller_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(fixture.caller_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("caller reserved token count");
+    assert_eq!(
+        caller_reserved,
+        i64::try_from(estimate).expect("estimate fits bigint")
+    );
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
+    let fixture = setup(None).await;
+    let invocation_id = match begin_invocation(
+        &fixture.pool,
+        &fixture.scope,
+        command(&fixture, "settlement-race"),
+    )
+    .await
+    .expect("begin invocation")
+    {
+        BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
+        other => panic!("expected Created, got {other:?}"),
+    };
+
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let schema = fixture.schema.clone();
+    let second_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await
+        .expect("second independent pool");
+
+    let (first, second) = tokio::join!(
+        settle_invocation_usage(
+            &fixture.pool,
+            &fixture.scope,
+            invocation_id,
+            Some(TokenUsage::new(31, 12)),
+        ),
+        settle_invocation_usage(
+            &second_pool,
+            &fixture.scope,
+            invocation_id,
+            Some(TokenUsage::new(900, 900)),
+        ),
+    );
+    second_pool.close().await;
+
+    let first = first.expect("first settlement or replay");
+    let second = second.expect("second settlement or replay");
+    assert_ne!(
+        first.is_replay(),
+        second.is_replay(),
+        "exactly one concurrent transaction must perform the settlement"
+    );
+    assert_eq!(
+        first.actual_tokens(),
+        second.actual_tokens(),
+        "the replay must return the winning transaction's persisted usage"
+    );
+    assert!(
+        [43, 1800].contains(&first.actual_tokens()),
+        "the persisted usage must come from exactly one submitted result"
+    );
+
+    let object_counts: (i64, i64) =
+        sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("object token counters");
+    assert_eq!(
+        object_counts,
+        (i64::try_from(first.actual_tokens()).unwrap(), 0)
+    );
+    let caller_counts: (i64, i64) =
+        sqlx::query_as("SELECT consumed_tokens, reserved_tokens FROM caller_usage_counters")
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("caller token counters");
+    assert_eq!(caller_counts, object_counts);
+
+    let reservation: (String, Option<i64>) = sqlx::query_as(
+        "SELECT status, actual_tokens FROM budget_reservations WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("settled reservation");
+    assert_eq!(
+        reservation,
+        (
+            "Settled".to_owned(),
+            Some(i64::try_from(first.actual_tokens()).unwrap())
+        )
+    );
+    teardown(fixture).await;
+}
+
+#[tokio::test]
 async fn settlement_database_failure_rolls_back_both_counters_and_reservation() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
