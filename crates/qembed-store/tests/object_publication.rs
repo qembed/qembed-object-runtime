@@ -1,3 +1,16 @@
+
+mod common;
+
+use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
+use qembed_domain::object::Object;
+use qembed_domain::object_version::ObjectVersion;
+use qembed_domain::scope::Scope;
+use qembed_domain::snapshot::SnapshotBuilder;
+use qembed_domain::test_support::scope_for_tenant;
+use qembed_store::object_repository::{DraftCreation, ObjectRepository, ObjectRepositoryError};
+use qembed_store::run_migrations;
+use sqlx::PgPool;
+
 #[tokio::test]
 async fn publication_rejects_a_legacy_version_without_a_snapshot() {
     let (pool, repository, scope, object_id) = setup().await;
@@ -28,17 +41,6 @@ async fn publication_rejects_a_legacy_version_without_a_snapshot() {
     assert_eq!(state, ("validating".to_owned(), "draft".to_owned()));
     pool.close().await;
 }
-
-mod common;
-
-use qembed_domain::ids::{ObjectId, ObjectVersionId, TenantId};
-use qembed_domain::object::Object;
-use qembed_domain::object_version::ObjectVersion;
-use qembed_domain::scope::Scope;
-use qembed_domain::test_support::scope_for_tenant;
-use qembed_store::object_repository::{ObjectRepository, ObjectRepositoryError};
-use qembed_store::run_migrations;
-use sqlx::PgPool;
 
 async fn setup() -> (PgPool, ObjectRepository, Scope, ObjectId) {
     let pool = common::connect().await;

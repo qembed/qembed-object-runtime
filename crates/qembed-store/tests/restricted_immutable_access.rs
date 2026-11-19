@@ -6,8 +6,7 @@ use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::SnapshotBuilder;
 use qembed_domain::test_support::scope_for_tenant;
-use qembed_store::object_repository::ObjectRepository;
-use qembed_store::snapshot_repository::SnapshotRepository;
+use qembed_store::object_repository::{DraftCreation, ObjectRepository};
 use qembed_store::{begin_tenant_transaction, run_migrations};
 use sqlx::PgPool;
 
@@ -34,15 +33,8 @@ async fn setup() -> Fixture {
         .create_object(&scope, &Object::new(object_id, tenant_id))
         .await
         .expect("object should be created");
-    objects
-        .create_draft_version(
-            &scope,
-            &ObjectVersion::new(version_id, tenant_id, object_id, 1)
-                .expect("version number should be valid"),
-        )
-        .await
-        .expect("draft version should be created");
-
+    let version = ObjectVersion::new(version_id, tenant_id, object_id, 1)
+        .expect("version number should be valid");
     let snapshot = SnapshotBuilder::new(
         SnapshotId::new(),
         tenant_id,
@@ -54,10 +46,17 @@ async fn setup() -> Fixture {
     .build()
     .expect("snapshot should be valid");
     let snapshot_id = snapshot.id();
-    SnapshotRepository::new(pool.clone())
-        .insert(&scope, &snapshot)
+    let creation = objects
+        .create_draft_version_with_snapshot(&scope, &version, &snapshot)
         .await
-        .expect("snapshot should be persisted");
+        .expect("version and snapshot should be persisted atomically");
+    assert_eq!(
+        creation,
+        DraftCreation::Created {
+            version_id,
+            snapshot_id
+        }
+    );
 
     objects
         .begin_validation(&scope, object_id)
