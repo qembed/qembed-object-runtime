@@ -46,11 +46,15 @@ impl InvocationCancellationStore for PgExecutionStore {
         let current_status = parse_status(&current_status)?;
         if current_status == InvocationStatus::Cancelled {
             transaction.commit().await?;
-            return Ok(InvocationCancellationOutcome::Cancelled { newly_cancelled: false });
+            return Ok(InvocationCancellationOutcome::Cancelled {
+                newly_cancelled: false,
+            });
         }
         if current_status.is_terminal() {
             transaction.commit().await?;
-            return Ok(InvocationCancellationOutcome::AlreadyTerminal(current_status));
+            return Ok(InvocationCancellationOutcome::AlreadyTerminal(
+                current_status,
+            ));
         }
 
         let Some((attempt_state,)) = attempt else {
@@ -88,7 +92,9 @@ impl InvocationCancellationStore for PgExecutionStore {
             }
             _ => {
                 transaction.rollback().await?;
-                return Err(InvocationStoreError::InvalidPersistedValue("provider attempt state"));
+                return Err(InvocationStoreError::InvalidPersistedValue(
+                    "provider attempt state",
+                ));
             }
         }
 
