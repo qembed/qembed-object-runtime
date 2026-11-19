@@ -17,7 +17,7 @@ use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
-use qembed_domain::ports::ObjectCreationStore;
+use qembed_domain::ports::{DraftVersionCreation, ObjectCreationStore, ObjectVersionCreationStore};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
@@ -471,6 +471,28 @@ impl ObjectCreationStore for ObjectRepository {
 
     async fn create_object(&self, scope: &Scope, object: &Object) -> Result<(), Self::Error> {
         ObjectRepository::create_object(self, scope, object).await
+    }
+}
+
+impl ObjectVersionCreationStore for ObjectRepository {
+    type Error = ObjectRepositoryError;
+
+    async fn create_draft_version_with_snapshot(
+        &self,
+        scope: &Scope,
+        version: &ObjectVersion,
+        snapshot: &Snapshot,
+    ) -> Result<DraftVersionCreation, Self::Error> {
+        ObjectRepository::create_draft_version_with_snapshot(self, scope, version, snapshot)
+            .await
+            .map(|creation| match creation {
+                DraftCreation::Created { version_id, snapshot_id } => {
+                    DraftVersionCreation::Created { version_id, snapshot_id }
+                }
+                DraftCreation::IdenticalContent { version_id, snapshot_id } => {
+                    DraftVersionCreation::IdenticalContent { version_id, snapshot_id }
+                }
+            })
     }
 }
 
