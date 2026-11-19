@@ -126,7 +126,7 @@ pub(crate) async fn reserve_invocation_budget(
     .bind(scope.tenant_id().to_string())
     .bind(object_id.to_string())
     .bind(caller_id.to_string())
-    .bind(usage_date)
+    .bind(&usage_date)
     .fetch_optional(transaction.connection())
     .await
     .map_err(BudgetReservationError::Database)?
@@ -166,7 +166,7 @@ pub(crate) async fn reserve_invocation_budget(
         )
         .bind(scope.tenant_id().to_string())
         .bind(object_id.to_string())
-        .bind(usage_date)
+        .bind(&usage_date)
         .bind(pool.as_sql())
         .bind(estimate_i64),
     )
@@ -181,7 +181,7 @@ pub(crate) async fn reserve_invocation_budget(
         .bind(scope.tenant_id().to_string())
         .bind(object_id.to_string())
         .bind(caller_id.to_string())
-        .bind(usage_date)
+        .bind(&usage_date)
         .bind(estimate_i64),
     )
     .await
@@ -196,7 +196,7 @@ pub(crate) async fn reserve_invocation_budget(
         .bind(object_id.to_string())
         .bind(invocation_id.to_string())
         .bind(pool.as_sql())
-        .bind(usage_date)
+        .bind(&usage_date)
         .bind(estimate_i64)
         .bind(max_duration_ms),
     )
