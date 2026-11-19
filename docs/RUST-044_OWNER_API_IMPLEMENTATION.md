@@ -33,7 +33,7 @@ The Owner API is delivered in bounded increments. Each increment remains part of
 
 - Route: `POST /owner/objects/{object_id}/versions`.
 - Request: `schema_version` is a positive PostgreSQL-INT-compatible integer; `config` is any valid JSON value.
-- The complete request envelope is parsed through the duplicate-key-rejecting JCS parser before DTO deserialization. Duplicate keys, malformed JSON, unknown envelope fields, and invalid schema versions return 400.
+- The original request is checked by both the DTO deserializer and the duplicate-key-rejecting JCS parser. This preserves integer-only DTO semantics while rejecting duplicate keys anywhere in the envelope. Duplicate keys, malformed JSON, unknown envelope fields, and invalid schema versions return 400.
 - The `config` value is canonicalized to RFC 8785 bytes. Those exact bytes are the immutable snapshot source of truth and the basis of SHA-256 content identity.
 - The runtime use case constructs a Draft version/snapshot pair. The Store allocates `version_number` while holding the object row lock and commits version + snapshot atomically.
 - The endpoint deliberately does not run semantic validation or create validation evidence. A semantically incomplete but valid JSON config may be saved as Draft; publication remains blocked until trusted validation succeeds.
