@@ -44,7 +44,6 @@ The Owner API is delivered in bounded increments. Each increment remains part of
 
 ## Remaining RUST-044 increments
 
-- Create draft version/snapshot through the existing aggregate constructors and atomic Store operation.
 - Publish only after trusted validation evidence is produced for the exact persisted snapshot; never accept evidence from an HTTP DTO.
 - Invoke through the existing atomic begin-invocation contract after the approved request DTO and caller-selection contract are wired.
 - Add PostgreSQL-backed API integration tests for every route, authentication failures, cross-tenant isolation, DTO validation, publication evidence binding, and stale-pointer conflicts.
