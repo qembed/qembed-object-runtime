@@ -111,9 +111,7 @@ impl ObjectRepository {
         version: &ObjectVersion,
         snapshot: &Snapshot,
     ) -> Result<DraftCreation, ObjectRepositoryError> {
-        if version.tenant_id() != scope.tenant_id()
-            || snapshot.tenant_id() != scope.tenant_id()
-        {
+        if version.tenant_id() != scope.tenant_id() || snapshot.tenant_id() != scope.tenant_id() {
             return Err(ObjectRepositoryError::TenantMismatch);
         }
         if version.status() != ObjectVersionStatus::Draft {
@@ -190,9 +188,13 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ContentHashCollision);
         }
 
-        let existing_version_id = existing.0.parse()
+        let existing_version_id = existing
+            .0
+            .parse()
             .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-        let existing_snapshot_id = existing.1.parse()
+        let existing_snapshot_id = existing
+            .1
+            .parse()
             .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
 
         transaction
