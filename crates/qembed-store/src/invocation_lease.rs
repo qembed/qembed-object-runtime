@@ -111,8 +111,9 @@ impl InvocationLeaseStore for PgExecutionStore {
     ) -> Result<bool, Self::Error> {
         // Compatibility entry point: preserve the durable attempt protocol and
         // explicitly treat unavailable usage as missing, never as zero.
-        let response = ChatResponse::new(content, ChatFinishReason::Stop, None)
-            .map_err(|_| InvocationStoreError::InvalidRequestedState("assistant output is invalid"))?;
+        let response = ChatResponse::new(content, ChatFinishReason::Stop, None).map_err(|_| {
+            InvocationStoreError::InvalidRequestedState("assistant output is invalid")
+        })?;
         self.persist_provider_response_owned(
             scope,
             owner,
