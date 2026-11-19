@@ -494,7 +494,6 @@ mod lifecycle_tests {
         ) -> Result<Option<Invocation>, Self::Error> {
             let state = self.0.lock().expect("fake store lock");
             Ok((state.invocation.tenant_id() == scope.tenant_id()
-                && state.invocation.object_id() == object_id
                 && state.invocation.id() == invocation_id)
                 .then(|| state.invocation.clone()))
         }
@@ -613,6 +612,7 @@ mod lifecycle_tests {
         ) -> Result<Option<ProviderCallAttempt>, Self::Error> {
             let state = self.0.lock().expect("fake store lock");
             Ok((state.invocation.tenant_id() == scope.tenant_id()
+                && state.invocation.object_id() == object_id
                 && state.invocation.id() == invocation_id)
                 .then(|| ProviderCallAttempt::from_persisted(state.attempt, state.usage)))
         }
@@ -677,6 +677,7 @@ mod lifecycle_tests {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
                 || state.invocation.version() != version
+                || state.invocation.object_id() != next.object_id()
                 || state.invocation.fencing_token() != token
                 || state.lease_owner.as_deref() != Some(owner)
                 || state.attempt != ProviderCallAttemptState::MayHaveBeenSent
@@ -702,6 +703,7 @@ mod lifecycle_tests {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
                 || state.invocation.version() != version
+                || state.invocation.object_id() != next.object_id()
                 || state.invocation.fencing_token() != token
                 || state.lease_owner.as_deref() != Some(owner)
                 || state.attempt != ProviderCallAttemptState::ResponseReceived
@@ -743,6 +745,7 @@ mod lifecycle_tests {
             let mut state = self.0.lock().expect("fake store lock");
             if state.invocation.tenant_id() != scope.tenant_id()
                 || state.invocation.version() != version
+                || state.invocation.object_id() != next.object_id()
                 || state.invocation.fencing_token() != token
                 || state.lease_owner.as_deref() != Some(owner)
                 || !matches!(
