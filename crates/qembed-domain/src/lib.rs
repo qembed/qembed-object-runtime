@@ -107,6 +107,7 @@
 //! ```
 
 pub mod auth;
+pub mod budget;
 pub mod caller;
 pub mod chat;
 pub mod ids;
