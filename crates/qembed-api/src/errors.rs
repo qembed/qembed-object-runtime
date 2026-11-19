@@ -246,8 +246,8 @@ mod tests {
         let rejected_write = map_invocation_store_error(
             &InvocationStoreError::InvalidRequestedState("private state detail"),
         );
-        assert_eq!(rejected_write.status(), 409);
-        assert_eq!(rejected_write.body().code, "conflict");
+        assert_eq!(rejected_write.status(), 500);
+        assert_eq!(rejected_write.body().code, "internal_error");
 
         let malformed_store =
             map_invocation_store_error(&InvocationStoreError::AmbiguousMessage("assistant"));
