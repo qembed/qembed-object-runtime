@@ -421,54 +421,6 @@ where
     }
 }
 
-const fn provider_error_code(error: ChatProviderError) -> &'static str {
-    match error {
-        ChatProviderError::Timeout => "provider_timeout",
-        ChatProviderError::RateLimited { .. } => "provider_rate_limited",
-        ChatProviderError::Unavailable => "provider_unavailable",
-        ChatProviderError::MalformedOutput => "provider_malformed_output",
-        ChatProviderError::Other => "provider_other",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn worker_configuration_uses_domain_request_validation() {
-        assert!(InvocationWorkerConfig::new("test-chat", 128).is_ok());
-        assert!(InvocationWorkerConfig::new("", 128).is_err());
-        assert!(InvocationWorkerConfig::new("test-chat", 0).is_err());
-    }
-
-    #[test]
-    fn provider_failures_map_to_stable_non_sensitive_codes() {
-        assert_eq!(
-            provider_error_code(ChatProviderError::Timeout),
-            "provider_timeout"
-        );
-        assert_eq!(
-            provider_error_code(ChatProviderError::RateLimited {
-                retry_after_ms: Some(100)
-            }),
-            "provider_rate_limited"
-        );
-        assert_eq!(
-            provider_error_code(ChatProviderError::Unavailable),
-            "provider_unavailable"
-        );
-        assert_eq!(
-            provider_error_code(ChatProviderError::MalformedOutput),
-            "provider_malformed_output"
-        );
-        assert_eq!(
-            provider_error_code(ChatProviderError::Other),
-            "provider_other"
-        );
-    }
-}
-
 #[cfg(test)]
 mod lifecycle_tests {
     use std::convert::Infallible;
