@@ -1021,7 +1021,10 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
 
     let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, context_loading.fencing_token())
+        .transition_to(
+            InvocationStatus::Processing,
+            context_loading.fencing_token(),
+        )
         .expect("ContextLoading -> Processing");
     assert!(
         store
@@ -2147,7 +2150,10 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
 
     let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, context_loading.fencing_token())
+        .transition_to(
+            InvocationStatus::Processing,
+            context_loading.fencing_token(),
+        )
         .expect("ContextLoading -> Processing");
     assert!(
         store
