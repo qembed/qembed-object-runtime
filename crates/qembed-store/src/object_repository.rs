@@ -15,6 +15,7 @@ use std::fmt;
 
 use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
+use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::Snapshot;
@@ -216,20 +217,31 @@ impl ObjectRepository {
             .map_err(ObjectRepositoryError::Database)
     }
 
-    /// Atomically publishes a Draft version and updates its object's pointer.
+    /// Atomically publishes a Draft version using trusted semantic-validation evidence.
     ///
-    /// The expected current version is None for first publication and the
-    /// currently published version ID when replacing it. The object row is
-    /// locked first, serializing concurrent publications for the same object.
-    /// Replacements supersede the previous version, publish the new one, and
-    /// move the pointer in the same transaction.
+    /// The evidence must be produced by the current bounded validator and bind
+    /// the exact tenant/object/version/snapshot/content hash. PostgreSQL verifies
+    /// that binding against the persisted immutable snapshot while holding a
+    /// shared row lock. The expected current version is None for first
+    /// publication and the current pointer when replacing it. All version
+    /// transitions, pointer changes, and the audit/outbox event commit together.
     pub async fn publish_version(
         &self,
         scope: &Scope,
         object_id: ObjectId,
         version_id: ObjectVersionId,
         expected_current: Option<ObjectVersionId>,
+        evidence: &ValidationEvidence,
     ) -> Result<(), ObjectRepositoryError> {
+        if evidence.tenant_id() != scope.tenant_id()
+            || evidence.object_id() != object_id
+            || evidence.object_version_id() != version_id
+            || evidence.validator_version() != OBJECT_VALIDATOR_VERSION
+            || evidence.max_tokens_per_invocation() == 0
+        {
+            return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
+        }
+
         let mut transaction = begin_tenant_transaction(&self.pool, scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
@@ -271,10 +283,10 @@ impl ObjectRepository {
         .map_err(ObjectRepositoryError::Database)?
         .ok_or(ObjectRepositoryError::VersionNotFound)?;
 
-        let snapshot_exists = fetch_optional(
+        let persisted_snapshot = fetch_optional(
             &mut transaction,
-            sqlx::query_as::<_, (bool,)>(
-                "SELECT EXISTS (SELECT 1 FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid)",
+            sqlx::query_as::<_, (String, Vec<u8>)>(
+                "SELECT snapshot_id::text, content_hash FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid FOR SHARE",
             )
             .bind(scope.tenant_id().to_string())
             .bind(object_id.to_string())
@@ -282,10 +294,12 @@ impl ObjectRepository {
         )
         .await
         .map_err(ObjectRepositoryError::Database)?
-        .map(|row| row.0)
-        .unwrap_or(false);
-        if !snapshot_exists {
-            return Err(ObjectRepositoryError::SnapshotNotFound);
+        .ok_or(ObjectRepositoryError::SnapshotNotFound)?;
+
+        if persisted_snapshot.0 != evidence.snapshot_id().to_string()
+            || persisted_snapshot.1.as_slice() != evidence.content_hash()
+        {
+            return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
         }
 
         let version_status = parse_version_status(&version_row.0)?;
@@ -388,6 +402,8 @@ impl ObjectRepository {
                 expected_current,
                 version_id,
                 object.state(),
+                evidence.snapshot_id(),
+                evidence.validator_version(),
             ),
         )
         .await
@@ -446,6 +462,8 @@ pub enum ObjectRepositoryError {
     VersionNotFound,
     /// A Draft version cannot be published without its immutable snapshot.
     SnapshotNotFound,
+    /// Trusted validation evidence does not match the requested persisted snapshot.
+    ValidationEvidenceMismatch,
     /// The persisted object state does not permit this operation.
     InvalidObjectState,
     /// The current published pointer differs from the expected value.
@@ -490,6 +508,9 @@ impl fmt::Display for ObjectRepositoryError {
             }
             Self::SnapshotNotFound => {
                 formatter.write_str("object version has no persisted snapshot")
+            }
+            Self::ValidationEvidenceMismatch => {
+                formatter.write_str("validation evidence does not match the persisted snapshot")
             }
             Self::InvalidObjectState => {
                 formatter.write_str("object state does not permit this operation")

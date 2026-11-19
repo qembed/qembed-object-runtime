@@ -2,6 +2,7 @@ mod common;
 
 use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::object::Object;
+use qembed_domain::object_validation::ObjectValidator;
 use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::SnapshotBuilder;
@@ -31,7 +32,10 @@ async fn create_draft_version(
     scope: &Scope,
     object_id: ObjectId,
     number: u64,
-) -> ObjectVersionId {
+) -> (
+    ObjectVersionId,
+    qembed_domain::object_validation::ValidationEvidence,
+) {
     let id = ObjectVersionId::new();
     let version = ObjectVersion::new(id, scope.tenant_id(), object_id, number)
         .expect("version number must be positive");
@@ -41,7 +45,8 @@ async fn create_draft_version(
         object_id,
         id,
         1,
-        format!(r#"{{"version":{number}}}"#).into_bytes(),
+        format!(r#"{{"limits":{{"max_tokens_per_invocation":4096}},"version":{number}}}"#)
+            .into_bytes(),
     )
     .build()
     .expect("snapshot should be valid canonical JSON");
@@ -56,20 +61,22 @@ async fn create_draft_version(
             snapshot_id: snapshot.id()
         }
     );
-    id
+    let evidence = ObjectValidator::validate(&snapshot)
+        .expect("snapshot should pass the bounded semantic validator");
+    (id, evidence)
 }
 
 #[tokio::test]
 async fn state_event_and_outbox_commit_together() {
     let (pool, repository, scope, object_id) = setup().await;
-    let version_id = create_draft_version(&repository, &scope, object_id, 1).await;
+    let (version_id, evidence) = create_draft_version(&repository, &scope, object_id, 1).await;
 
     repository
         .begin_validation(&scope, object_id)
         .await
         .expect("validation transition should commit with its event");
     repository
-        .publish_version(&scope, object_id, version_id, None)
+        .publish_version(&scope, object_id, version_id, None, &evidence)
         .await
         .expect("publication should commit with its event");
 
@@ -126,7 +133,7 @@ async fn state_event_and_outbox_commit_together() {
 #[tokio::test]
 async fn failed_state_transition_rolls_back_event_and_outbox() {
     let (pool, repository, scope, object_id) = setup().await;
-    let version_id = create_draft_version(&repository, &scope, object_id, 1).await;
+    let (version_id, evidence) = create_draft_version(&repository, &scope, object_id, 1).await;
     repository
         .begin_validation(&scope, object_id)
         .await
@@ -166,7 +173,7 @@ async fn failed_state_transition_rolls_back_event_and_outbox() {
 
     assert!(
         repository
-            .publish_version(&scope, object_id, version_id, None)
+            .publish_version(&scope, object_id, version_id, None, &evidence)
             .await
             .is_err(),
         "injected outbox failure should abort publication"
