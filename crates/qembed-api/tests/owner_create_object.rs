@@ -73,7 +73,10 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
         test::TestRequest::post()
             .uri("/owner/objects")
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((
+                actix_web::http::header::AUTHORIZATION,
+                format!("Bearer {token}"),
+            ))
             .set_json(serde_json::json!({ "object_id": ObjectId::new() }))
             .to_request(),
     )
