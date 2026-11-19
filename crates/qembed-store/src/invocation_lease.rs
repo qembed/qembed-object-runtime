@@ -424,6 +424,35 @@ impl InvocationLeaseStore for PgExecutionStore {
         }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
 
+        // A terminal failure is safe only while the attempt proves that the
+        // provider was not authorized to receive the request or rejected it.
+        // Lock the attempt first, matching cancellation and expiry-sweeper order.
+        let attempt = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(next.object_id().to_string())
+            .bind(next.id().to_string()),
+        )
+        .await?;
+        let Some((attempt_state,)) = attempt else {
+            transaction.rollback().await?;
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "provider call attempt is missing; failure fails closed",
+            ));
+        };
+        if !matches!(
+            attempt_state.as_str(),
+            "NotStarted" | "ConfirmedNotAccepted" | "CancelledBeforeSend"
+        ) {
+            transaction.rollback().await?;
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "cannot fail invocation after provider may have accepted the call",
+            ));
+        }
+
         let expired = execute(
             &mut transaction,
             sqlx::query(
