@@ -63,6 +63,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
     fn mark_provider_may_have_been_sent_owned(
         &self,
         scope: &Scope,
+        object_id: crate::ids::ObjectId,
         invocation_id: InvocationId,
         owner: &str,
         expected_version: u64,
@@ -73,6 +74,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
     fn mark_provider_outcome_unknown_owned(
         &self,
         scope: &Scope,
+        object_id: crate::ids::ObjectId,
         invocation_id: InvocationId,
         owner: &str,
         expected_version: u64,
