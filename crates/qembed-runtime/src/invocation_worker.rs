@@ -988,6 +988,31 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
+    async fn crash_after_send_marker_is_reconciled_without_resending() {
+        let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
+        {
+            let mut state = store.0.lock().expect("fake store lock");
+            state.attempt = ProviderCallAttemptState::MayHaveBeenSent;
+        }
+        let response = ChatResponse::new("must not be used", ChatFinishReason::Stop, None)
+            .expect("valid provider response");
+        let (worker, calls, _) = worker(store.clone(), Ok(response));
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("recovery remains ambiguous");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::OutcomeUnknown { invocation_id: id }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            store.0.lock().expect("fake store lock").attempt,
+            ProviderCallAttemptState::OutcomeUnknown
+        );
+    }
+
+    #[tokio::test]
     async fn restart_after_ambiguous_attempt_does_not_call_provider_again() {
         let (scope, id, store) = fixture(InvocationStatus::Processing, 2, None);
         {
