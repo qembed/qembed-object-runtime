@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use qembed_domain::chat::{ChatFinishReason, ChatResponse, TokenUsage};
+use qembed_domain::chat::{ChatResponse, TokenUsage};
 use qembed_domain::ids::{CallerId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::invocation_lease::InvocationLeaseStore;
