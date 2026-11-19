@@ -8,7 +8,7 @@ use std::fmt;
 use std::time::Duration;
 
 use qembed_domain::chat::{
-    ChatContractError, ChatMessage, ChatProviderError, ChatRequest, ChatRole,
+    ChatContractError, ChatMessage, ChatRequest, ChatRole,
     ProviderRequestContext,
 };
 use qembed_domain::ids::InvocationId;
@@ -458,7 +458,7 @@ mod lifecycle_tests {
     use std::sync::{Arc, Mutex};
 
     use qembed_domain::chat::{
-        ChatCapabilities, ChatFinishReason, ChatResponse, ProviderRequestContext,
+        ChatCapabilities, ChatFinishReason, ChatProviderError, ChatResponse, ProviderRequestContext,
     };
     use qembed_domain::ids::{CallerId, ObjectId, SnapshotId, TenantId};
     use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint};
