@@ -81,6 +81,9 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".budget_reservations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), usage_date DATE NOT NULL, reserved_tokens BIGINT NOT NULL CHECK (reserved_tokens >= 0), reserved_cost_micros BIGINT NOT NULL CHECK (reserved_cost_micros >= 0), actual_tokens BIGINT CHECK (actual_tokens >= 0), actual_cost_micros BIGINT CHECK (actual_cost_micros >= 0), status TEXT NOT NULL CHECK (status IN ('Reserved','Settled','Released','Expired')), expires_at TIMESTAMPTZ NOT NULL, UNIQUE (tenant_id, object_id, invocation_id), FOREIGN KEY (tenant_id, object_id, invocation_id, pool) REFERENCES \"{schema}\".object_invocations(tenant_id, object_id, id, pool) DEFERRABLE INITIALLY DEFERRED)"
         ),
         format!(
+            "CREATE TABLE \"{schema}\".provider_call_attempts (tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, state TEXT NOT NULL DEFAULT 'NotStarted' CHECK (state IN ('NotStarted','MayHaveBeenSent','ResponseReceived','ConfirmedNotAccepted','OutcomeUnknown','CancelledBeforeSend')), input_tokens BIGINT CHECK (input_tokens >= 0), output_tokens BIGINT CHECK (output_tokens >= 0), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (tenant_id, object_id, invocation_id), CHECK ((input_tokens IS NULL) = (output_tokens IS NULL)), CHECK (state='ResponseReceived' OR (input_tokens IS NULL AND output_tokens IS NULL)))"
+        ),
+        format!(
             "CREATE INDEX idx_resv_sweep ON \"{schema}\".budget_reservations (expires_at) WHERE status='Reserved'"
         ),
         format!(
@@ -102,6 +105,23 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             .await
             .expect("canonical table fixture should be created");
     }
+
+    let attempt_function = format!(
+        r#"CREATE FUNCTION "{schema}".create_provider_call_attempt() RETURNS trigger
+        LANGUAGE plpgsql AS $
+        BEGIN
+          INSERT INTO "{schema}".provider_call_attempts (tenant_id, object_id, invocation_id, state)
+          VALUES (NEW.tenant_id, NEW.object_id, NEW.invocation_id, 'NotStarted');
+          RETURN NEW;
+        END $"#
+    );
+    sqlx::query(&attempt_function).execute(&admin_pool).await
+        .expect("provider attempt trigger function should be created");
+    let attempt_trigger = format!(
+        "CREATE TRIGGER reservation_provider_attempt AFTER INSERT ON \"{schema}\".budget_reservations FOR EACH ROW EXECUTE FUNCTION \"{schema}\".create_provider_call_attempt()"
+    );
+    sqlx::query(&attempt_trigger).execute(&admin_pool).await
+        .expect("provider attempt trigger should be created");
 
     let resolver = format!(
         r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(p_caller_id UUID)
@@ -298,6 +318,16 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         reservation_count, 1,
         "new invocation has exactly one reservation"
     );
+    let attempt: (String,) = sqlx::query_as(
+        "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("reservation trigger should create provider attempt");
+    assert_eq!(attempt.0, "NotStarted");
     let object_reserved: i64 =
         sqlx::query_scalar("SELECT COALESCE(sum(reserved_tokens), 0)::bigint FROM usage_counters")
             .fetch_one(&fixture.pool)
