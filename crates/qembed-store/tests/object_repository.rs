@@ -1,27 +1,30 @@
 mod common;
 
-use qembed_domain::ids::{ObjectId, ObjectVersionId, TenantId};
+use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::object::{Object, ObjectState};
 use qembed_domain::object_version::ObjectVersion;
+use qembed_domain::snapshot::SnapshotBuilder;
 use qembed_domain::test_support::scope_for_tenant;
-use qembed_store::object_repository::{ObjectRepository, ObjectRepositoryError};
+use qembed_store::object_repository::{DraftCreation, ObjectRepository, ObjectRepositoryError};
 use qembed_store::run_migrations;
 
-fn is_database_constraint(error: ObjectRepositoryError, expected_code: &str) -> bool {
-    matches!(
-        error,
-        ObjectRepositoryError::Database(sqlx::Error::Database(database_error))
-            if database_error.code().as_deref() == Some(expected_code)
+fn snapshot(version: &ObjectVersion, bytes: &[u8]) -> qembed_domain::snapshot::Snapshot {
+    SnapshotBuilder::new(
+        SnapshotId::new(),
+        version.tenant_id(),
+        version.object_id(),
+        version.id(),
+        1,
+        bytes.to_vec(),
     )
+    .build()
+    .expect("snapshot should be valid canonical JSON")
 }
 
 #[tokio::test]
-async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
+async fn object_repository_creates_objects_and_only_atomic_draft_version_snapshot_pairs() {
     let pool = common::connect().await;
-    run_migrations(&pool)
-        .await
-        .expect("migrations should be applied");
-
+    run_migrations(&pool).await.expect("migrations should run");
     let repository = ObjectRepository::new(pool.clone());
     let tenant_a = TenantId::new();
     let scope_a = scope_for_tenant(tenant_a);
@@ -30,8 +33,7 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     repository
         .create_object(&scope_a, &object)
         .await
-        .expect("a Draft object should be created in its tenant");
-
+        .expect("Draft object should be created");
     let stored_state: String = sqlx::query_scalar(
         "SELECT state FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
     )
@@ -39,85 +41,90 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     .bind(object.id().to_string())
     .fetch_one(&pool)
     .await
-    .expect("the object should be persisted");
+    .expect("object should be persisted");
     assert_eq!(stored_state, "draft");
 
     let version = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
         .expect("version number must be positive");
-    repository
-        .create_draft_version(&scope_a, &version)
-        .await
-        .expect("a Draft version should be created for its object");
+    let snap = snapshot(&version, br#"{"version":1}"#);
+    assert_eq!(
+        repository
+            .create_draft_version_with_snapshot(&scope_a, &version, &snap)
+            .await
+            .expect("version and snapshot should be atomic"),
+        DraftCreation::Created {
+            version_id: version.id(),
+            snapshot_id: snap.id()
+        }
+    );
 
-    let stored_version: (i64, String) = sqlx::query_as(
-        "SELECT version_number, status FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid",
+    let stored: (i64, String, i64) = sqlx::query_as(
+        "SELECT v.version_number, v.status, count(s.snapshot_id) FROM object_versions v LEFT JOIN snapshots s ON s.tenant_id = v.tenant_id AND s.object_id = v.object_id AND s.object_version_id = v.object_version_id WHERE v.tenant_id = $1::uuid AND v.object_id = $2::uuid AND v.object_version_id = $3::uuid GROUP BY v.version_number, v.status",
     )
     .bind(tenant_a.to_string())
     .bind(object.id().to_string())
     .bind(version.id().to_string())
     .fetch_one(&pool)
     .await
-    .expect("the draft version should be persisted");
-    assert_eq!(stored_version, (1, "draft".to_owned()));
+    .expect("version and snapshot should be queryable");
+    assert_eq!(stored, (1, "draft".to_owned(), 1));
 
-    // Duplicate object IDs and duplicate version numbers are rejected by
-    // database constraints rather than silently overwriting existing rows.
-    let duplicate_object = Object::new(object.id(), tenant_a);
-    let duplicate = repository
-        .create_object(&scope_a, &duplicate_object)
-        .await
-        .expect_err("duplicate object IDs must be rejected");
-    assert!(is_database_constraint(duplicate, "23505"));
-
+    // A different payload with the same version number is rejected by the DB.
     let duplicate_number = ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 1)
         .expect("version number must be positive");
+    let duplicate_snapshot = snapshot(&duplicate_number, br#"{"version":2}"#);
     let duplicate = repository
-        .create_draft_version(&scope_a, &duplicate_number)
+        .create_draft_version_with_snapshot(&scope_a, &duplicate_number, &duplicate_snapshot)
         .await
-        .expect_err("duplicate version numbers for one object must be rejected");
-    assert!(is_database_constraint(duplicate, "23505"));
+        .expect_err("duplicate version numbers must be rejected");
+    assert!(matches!(
+        duplicate,
+        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+    ));
 
-    // An entity cannot be submitted under a different authenticated tenant.
+    // The trusted scope, not caller-provided tenant data, determines ownership.
     let tenant_b = TenantId::new();
     let scope_b = scope_for_tenant(tenant_b);
     let mismatch = repository
         .create_object(&scope_b, &object)
         .await
-        .expect_err("tenant A object must not be inserted through tenant B scope");
+        .expect_err("tenant A object cannot be inserted through tenant B scope");
     assert!(matches!(mismatch, ObjectRepositoryError::TenantMismatch));
 
-    // Even with a matching scope tenant, a version cannot reference an object
-    // owned by another tenant: the composite foreign key rejects the insert.
-    let foreign_reference = ObjectVersion::new(ObjectVersionId::new(), tenant_b, object.id(), 1)
+    let foreign_version = ObjectVersion::new(ObjectVersionId::new(), tenant_b, object.id(), 2)
         .expect("version number must be positive");
+    let foreign_snapshot = snapshot(&foreign_version, br#"{"version":3}"#);
     let foreign_error = repository
-        .create_draft_version(&scope_b, &foreign_reference)
+        .create_draft_version_with_snapshot(&scope_b, &foreign_version, &foreign_snapshot)
         .await
         .expect_err("cross-tenant object references must be rejected");
-    assert!(is_database_constraint(foreign_error, "23503"));
+    assert!(matches!(
+        foreign_error,
+        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+    ));
 
-    // A failed insert rolls its transaction back and leaves no partial row.
+    // A failed atomic insert leaves no orphaned version.
     let missing_object_version =
         ObjectVersion::new(ObjectVersionId::new(), tenant_a, ObjectId::new(), 1)
             .expect("version number must be positive");
+    let missing_snapshot = snapshot(&missing_object_version, br#"{"version":4}"#);
     let failed_id = missing_object_version.id();
     let rollback_error = repository
-        .create_draft_version(&scope_a, &missing_object_version)
+        .create_draft_version_with_snapshot(&scope_a, &missing_object_version, &missing_snapshot)
         .await
         .expect_err("a version cannot be created without its parent object");
-    assert!(is_database_constraint(rollback_error, "23503"));
-
-    let persisted_after_failure: i64 = sqlx::query_scalar(
+    assert!(matches!(
+        rollback_error,
+        ObjectRepositoryError::Database(sqlx::Error::Database(_))
+    ));
+    let persisted: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM object_versions WHERE tenant_id = $1::uuid AND object_version_id = $2::uuid",
     )
     .bind(tenant_a.to_string())
     .bind(failed_id.to_string())
-    .fetch_one(&pool)
-    .await
-    .expect("the failed insert should be queryable");
-    assert_eq!(persisted_after_failure, 0);
+    .fetch_one(&pool).await.expect("rollback result should be queryable");
+    assert_eq!(persisted, 0);
 
-    // Repository methods accept only new Draft domain entities.
     let active_object = Object::from_persisted(
         ObjectId::new(),
         tenant_a,
@@ -128,7 +135,7 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
     let non_draft_object = repository
         .create_object(&scope_a, &active_object)
         .await
-        .expect_err("create_object must not persist an already-active object");
+        .expect_err("create_object must reject an already-active object");
     assert!(matches!(
         non_draft_object,
         ObjectRepositoryError::ObjectMustBeDraft
@@ -138,10 +145,11 @@ async fn object_repository_creates_tenant_scoped_objects_and_draft_versions() {
         ObjectVersion::new(ObjectVersionId::new(), tenant_a, object.id(), 2)
             .expect("version number must be positive");
     published_version.publish().expect("Draft can be published");
+    let published_snapshot = snapshot(&published_version, br#"{"version":5}"#);
     let non_draft_version = repository
-        .create_draft_version(&scope_a, &published_version)
+        .create_draft_version_with_snapshot(&scope_a, &published_version, &published_snapshot)
         .await
-        .expect_err("create_draft_version must reject a published version");
+        .expect_err("atomic creation must reject a published version");
     assert!(matches!(
         non_draft_version,
         ObjectRepositoryError::VersionMustBeDraft

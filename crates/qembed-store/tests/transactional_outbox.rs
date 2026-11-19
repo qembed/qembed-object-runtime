@@ -1,11 +1,12 @@
 mod common;
 
-use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, TenantId};
+use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::object::Object;
 use qembed_domain::object_version::ObjectVersion;
 use qembed_domain::scope::Scope;
+use qembed_domain::snapshot::SnapshotBuilder;
 use qembed_domain::test_support::scope_for_tenant;
-use qembed_store::object_repository::ObjectRepository;
+use qembed_store::object_repository::{DraftCreation, ObjectRepository};
 use qembed_store::run_migrations;
 use sqlx::PgPool;
 
@@ -34,10 +35,27 @@ async fn create_draft_version(
     let id = ObjectVersionId::new();
     let version = ObjectVersion::new(id, scope.tenant_id(), object_id, number)
         .expect("version number must be positive");
-    repository
-        .create_draft_version(scope, &version)
+    let snapshot = SnapshotBuilder::new(
+        SnapshotId::new(),
+        scope.tenant_id(),
+        object_id,
+        id,
+        1,
+        format!(r#"{{"version":{number}}}"#).into_bytes(),
+    )
+    .build()
+    .expect("snapshot should be valid canonical JSON");
+    let result = repository
+        .create_draft_version_with_snapshot(scope, &version, &snapshot)
         .await
-        .expect("draft version should be created");
+        .expect("version and snapshot should be created atomically");
+    assert_eq!(
+        result,
+        DraftCreation::Created {
+            version_id: id,
+            snapshot_id: snapshot.id()
+        }
+    );
     id
 }
 

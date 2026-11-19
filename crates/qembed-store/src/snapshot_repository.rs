@@ -31,59 +31,29 @@ use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
 
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{begin_tenant_transaction, fetch_optional};
 
-/// Persists and retrieves immutable snapshots.
+/// Retrieves immutable snapshots. Creation is owned by ObjectRepository.
 #[derive(Clone, Debug)]
 pub struct SnapshotRepository {
     pool: PgPool,
 }
 
 impl SnapshotRepository {
+    /// Snapshot insertion is intentionally unavailable outside atomic draft creation.
+    ///
+    /// ```compile_fail
+    /// use qembed_domain::scope::Scope;
+    /// use qembed_domain::snapshot::Snapshot;
+    /// use qembed_store::snapshot_repository::SnapshotRepository;
+    /// async fn bypass(repository: &SnapshotRepository, scope: &Scope, snapshot: &Snapshot) {
+    ///     repository.insert(scope, snapshot).await;
+    /// }
+    /// ```
     /// Creates a repository backed by the application's PostgreSQL pool.
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
-    }
-
-    /// Inserts a snapshot, deriving its JSONB projection from its exact source bytes.
-    ///
-    /// The database trigger independently verifies that the projection matches
-    /// the JSON represented by `canonical_json`. The canonical bytes and hash
-    /// are stored separately; JSONB is never used to reconstruct the source.
-    pub async fn insert(
-        &self,
-        scope: &Scope,
-        snapshot: &Snapshot,
-    ) -> Result<(), SnapshotRepositoryError> {
-        if snapshot.tenant_id() != scope.tenant_id() {
-            return Err(SnapshotRepositoryError::TenantMismatch);
-        }
-
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
-            .await
-            .map_err(SnapshotRepositoryError::Database)?;
-
-        execute(
-            &mut transaction,
-            sqlx::query(
-                "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, convert_from($6, 'UTF8')::jsonb)",
-            )
-            .bind(snapshot.tenant_id().to_string())
-            .bind(snapshot.id().to_string())
-            .bind(snapshot.object_id().to_string())
-            .bind(snapshot.object_version_id().to_string())
-            .bind(i32::try_from(snapshot.schema_version()).map_err(|_| SnapshotRepositoryError::InvalidSchemaVersion)?)
-            .bind(snapshot.canonical_json())
-            .bind(snapshot.content_hash().to_vec()),
-        )
-        .await
-        .map_err(SnapshotRepositoryError::Database)?;
-
-        transaction
-            .commit()
-            .await
-            .map_err(SnapshotRepositoryError::Database)
     }
 
     /// Reads a snapshot and verifies SHA-256 against the exact persisted bytes.
