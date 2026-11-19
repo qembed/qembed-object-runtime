@@ -217,13 +217,14 @@ impl ObjectRepository {
             .map_err(ObjectRepositoryError::Database)
     }
 
-    /// Atomically publishes a Draft version and updates its object's pointer.
+    /// Atomically publishes a Draft version using trusted semantic-validation evidence.
     ///
-    /// The expected current version is None for first publication and the
-    /// currently published version ID when replacing it. The object row is
-    /// locked first, serializing concurrent publications for the same object.
-    /// Replacements supersede the previous version, publish the new one, and
-    /// move the pointer in the same transaction.
+    /// The evidence must be produced by the current bounded validator and bind
+    /// the exact tenant/object/version/snapshot/content hash. PostgreSQL verifies
+    /// that binding against the persisted immutable snapshot while holding a
+    /// shared row lock. The expected current version is None for first
+    /// publication and the current pointer when replacing it. All version
+    /// transitions, pointer changes, and the audit/outbox event commit together.
     pub async fn publish_version(
         &self,
         scope: &Scope,

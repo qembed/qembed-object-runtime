@@ -48,6 +48,50 @@ async fn publication_rejects_a_legacy_version_without_a_snapshot() {
     pool.close().await;
 }
 
+#[tokio::test]
+async fn publication_rejects_evidence_for_a_different_snapshot_of_the_same_version() {
+    let (pool, repository, scope, object_id) = setup().await;
+    let (version_id, _) =
+        create_draft_version(&repository, &scope, object_id, scope.tenant_id(), 1).await;
+
+    let alternate_snapshot = SnapshotBuilder::new(
+        SnapshotId::new(),
+        scope.tenant_id(),
+        object_id,
+        version_id,
+        1,
+        br#"{"limits":{"max_tokens_per_invocation":2048}}"#.to_vec(),
+    )
+    .build()
+    .expect("alternate candidate should be canonical");
+    let wrong_evidence = ObjectValidator::validate(&alternate_snapshot)
+        .expect("alternate candidate should pass bounded validation");
+
+    let error = repository
+        .publish_version(&scope, object_id, version_id, None, &wrong_evidence)
+        .await
+        .expect_err("evidence for another snapshot must not authorize publication");
+    assert!(matches!(
+        error,
+        ObjectRepositoryError::ValidationEvidenceMismatch
+    ));
+
+    let persisted: (String, String, Option<String>) = sqlx::query_as(
+        "SELECT o.state, v.status, o.published_version_id::text FROM objects o JOIN object_versions v ON v.tenant_id = o.tenant_id AND v.object_id = o.object_id WHERE o.tenant_id = $1::uuid AND o.object_id = $2::uuid AND v.object_version_id = $3::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("rejected publication state should remain queryable");
+    assert_eq!(
+        persisted,
+        ("validating".to_owned(), "draft".to_owned(), None)
+    );
+    pool.close().await;
+}
+
 async fn setup() -> (PgPool, ObjectRepository, Scope, ObjectId) {
     let pool = common::connect().await;
     run_migrations(&pool)
@@ -118,6 +162,18 @@ async fn publication_and_replacement_update_version_and_object_atomically() {
         .publish_version(&scope, object_id, first, None, &first_evidence)
         .await
         .expect("first publication should activate the object");
+
+    let publication_event: (String, serde_json::Value) = sqlx::query_as(
+        "SELECT event_type, payload FROM events WHERE tenant_id = $1::uuid AND aggregate_id = $2::uuid AND event_type = 'object.version_published' ORDER BY occurred_at DESC LIMIT 1",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("publication event should be committed with the pointer");
+    assert_eq!(publication_event.0, "object.version_published");
+    assert_eq!(publication_event.1["snapshot_id"], first_evidence.snapshot_id().to_string());
+    assert_eq!(publication_event.1["validator_version"], "m0-r3-bounded-budget-v1");
 
     let first_state: (String, Option<String>) = sqlx::query_as(
         "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",

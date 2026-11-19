@@ -183,7 +183,10 @@ mod tests {
         assert!(object.contains_key("previous_version_id"));
         assert!(object.contains_key("version_id"));
         assert!(object.contains_key("snapshot_id"));
-        assert_eq!(object.get("validator_version").and_then(|v| v.as_str()), Some("m0-r3-bounded-budget-v1"));
+        assert_eq!(
+            object.get("validator_version").and_then(|v| v.as_str()),
+            Some("m0-r3-bounded-budget-v1")
+        );
         assert!(!contains_sensitive_key(object));
     }
 
