@@ -99,6 +99,16 @@ impl ExecutionStore for PgExecutionStore {
                 "terminal transitions require a dedicated atomic result operation",
             ));
         }
+        if matches!(
+            next.status(),
+            InvocationStatus::Processing
+                | InvocationStatus::ExecutingTool
+                | InvocationStatus::Verifying
+        ) {
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "worker execution states require a live lease",
+            ));
+        }
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let result = execute(
             &mut transaction,
