@@ -116,7 +116,7 @@ pub(crate) async fn reserve_invocation_budget(
     )
     .bind(scope.tenant_id().to_string())
     .bind(object_id.to_string())
-    .bind(usage_date)
+    .bind(&usage_date)
     .fetch_one(transaction.connection())
     .await
     .map_err(BudgetReservationError::Database)?;
