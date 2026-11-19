@@ -1595,6 +1595,89 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     assert!(replay.is_degraded());
     assert!(replay.is_replay());
     assert_eq!(replay.actual_tokens(), estimate);
+
+    // The normal completion API preserves the degraded outcome in the durable state.
+    let store = PgExecutionStore::new(fixture.pool.clone());
+    let received = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("load received invocation")
+        .expect("invocation exists");
+    let mut context_loading = received.clone();
+    context_loading
+        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .expect("Received -> ContextLoading");
+    assert!(store
+        .compare_and_set_invocation(
+            &fixture.scope,
+            received.version(),
+            FencingToken::INITIAL,
+            context_loading,
+        )
+        .await
+        .expect("persist ContextLoading"));
+    let context_loading = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload ContextLoading")
+        .expect("invocation exists");
+    let mut processing = context_loading.clone();
+    processing
+        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .expect("ContextLoading -> Processing");
+    assert!(store
+        .compare_and_set_invocation(
+            &fixture.scope,
+            context_loading.version(),
+            FencingToken::INITIAL,
+            processing,
+        )
+        .await
+        .expect("persist Processing"));
+    let processing = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload Processing")
+        .expect("invocation exists");
+    let mut verifying = processing.clone();
+    verifying
+        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .expect("Processing -> Verifying");
+    assert!(store
+        .persist_assistant_output(
+            &fixture.scope,
+            processing.version(),
+            FencingToken::INITIAL,
+            verifying,
+            "degraded result".to_owned(),
+        )
+        .await
+        .expect("persist assistant output"));
+    let verifying = store
+        .load_invocation(&fixture.scope, invocation_id)
+        .await
+        .expect("reload Verifying")
+        .expect("invocation exists");
+    let mut completed = verifying.clone();
+    completed
+        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .expect("Verifying -> Completed");
+    assert!(store
+        .complete_invocation(
+            &fixture.scope,
+            verifying.version(),
+            FencingToken::INITIAL,
+            completed,
+        )
+        .await
+        .expect("complete degraded invocation"));
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM object_invocations WHERE id=$1::uuid")
+            .bind(invocation_id.to_string())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("persisted terminal status");
+    assert_eq!(status, "CompletedDegraded");
     teardown(fixture).await;
 }
 
