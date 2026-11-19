@@ -43,7 +43,7 @@ BEGIN
         NEW.tenant_id, NEW.object_id, NEW.invocation_id, 'NotStarted'
     );
     RETURN NEW;
-END
+END;
 $provider_attempt_create$;
 
 CREATE TRIGGER trg_budget_reservation_provider_attempt
@@ -88,7 +88,7 @@ BEGIN
     END IF;
 
     RETURN NEW;
-END
+END;
 $provider_attempt_guard$;
 
 CREATE TRIGGER trg_provider_call_attempt_state_guard
