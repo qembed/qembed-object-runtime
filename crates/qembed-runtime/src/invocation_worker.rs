@@ -550,6 +550,10 @@ mod lifecycle_tests {
             {
                 return Ok(false);
             }
+            let mut next = next;
+            if state.usage.is_none() {
+                next.mark_degraded_provider_usage_missing();
+            }
             state.invocation = next;
             Ok(true)
         }
@@ -813,7 +817,7 @@ mod lifecycle_tests {
             output: output.map(str::to_owned),
             error_code: None,
             lease_owner: None,
-            attempt: ProviderCallAttemptState::NotStarted,
+            attempt: if status == InvocationStatus::Verifying && output.is_some() { ProviderCallAttemptState::ResponseReceived } else { ProviderCallAttemptState::NotStarted },
             usage: None,
         })));
         (scope, invocation_id, store)
@@ -867,7 +871,7 @@ mod lifecycle_tests {
                 .to_owned()]
         );
         let state = store.0.lock().expect("fake store lock");
-        assert_eq!(state.invocation.status(), InvocationStatus::Completed);
+        assert_eq!(state.invocation.status(), InvocationStatus::CompletedDegraded);
         assert_eq!(state.output.as_deref(), Some("hello back"));
     }
 
@@ -889,7 +893,7 @@ mod lifecycle_tests {
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert_eq!(
             store.0.lock().expect("fake store lock").invocation.status(),
-            InvocationStatus::Completed
+            InvocationStatus::CompletedDegraded
         );
     }
 
