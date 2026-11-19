@@ -9,13 +9,14 @@ use std::pin::Pin;
 use actix_web::web;
 use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
-    ids::{InvocationId, TenantId},
+    ids::{InvocationId, ObjectId, TenantId},
 };
-use qembed_runtime::invocation_query::InvocationQueryService;
+use qembed_runtime::{invocation_query::InvocationQueryService, object_creation::ObjectCreationService};
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
     auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
     invocation_query::PgInvocationQueryStore,
+    object_repository::ObjectRepository,
 };
 use sqlx::PgPool;
 
@@ -53,7 +54,41 @@ struct PgOwnerApiBackend {
     pool: PgPool,
 }
 
+impl PgOwnerApiBackend {
+    async fn authenticate(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+    ) -> Result<qembed_domain::scope::Scope, OwnerApiBackendError> {
+        let authenticator = OwnerAuthenticator::new(self.pool.clone());
+        authenticate_owner(&authenticator, OwnerCredentials::new(tenant_id, owner_token))
+            .await
+            .map_err(|error| match error {
+                OwnerAuthenticationError::Rejected(StoreAuthError::InvalidCredentials)
+                | OwnerAuthenticationError::NotOwner => OwnerApiBackendError::Unauthorized,
+                OwnerAuthenticationError::Rejected(StoreAuthError::Database(_))
+                | OwnerAuthenticationError::InvalidPrincipal(_)
+                | OwnerAuthenticationError::InvalidScope(_) => OwnerApiBackendError::Internal,
+            })
+    }
+}
+
 impl OwnerApiBackend for PgOwnerApiBackend {
+    fn create_object(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+    ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>> {
+        Box::pin(async move {
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            let service = ObjectCreationService::new(ObjectRepository::new(self.pool.clone()));
+            service
+                .create(&scope)
+                .await
+                .map_err(|_| OwnerApiBackendError::Internal)
+        })
+    }
+
     fn inspect(
         &self,
         tenant_id: TenantId,
@@ -67,25 +102,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
         >,
     > {
         Box::pin(async move {
-            let authenticator = OwnerAuthenticator::new(self.pool.clone());
-            let scope = match authenticate_owner(
-                &authenticator,
-                OwnerCredentials::new(tenant_id, owner_token),
-            )
-            .await
-            {
-                Ok(scope) => scope,
-                Err(OwnerAuthenticationError::Rejected(StoreAuthError::InvalidCredentials))
-                | Err(OwnerAuthenticationError::NotOwner) => {
-                    return Err(OwnerApiBackendError::Unauthorized);
-                }
-                Err(OwnerAuthenticationError::Rejected(StoreAuthError::Database(_)))
-                | Err(OwnerAuthenticationError::InvalidPrincipal(_))
-                | Err(OwnerAuthenticationError::InvalidScope(_)) => {
-                    return Err(OwnerApiBackendError::Internal);
-                }
-            };
-
+            let scope = self.authenticate(tenant_id, owner_token).await?;
             let query = InvocationQueryService::new(PgInvocationQueryStore::new(self.pool.clone()));
             get_invocation(&query, &scope, invocation_id)
                 .await
