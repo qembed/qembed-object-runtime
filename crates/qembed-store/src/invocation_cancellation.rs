@@ -18,6 +18,53 @@ impl InvocationCancellationStore for PgExecutionStore {
     ) -> Result<InvocationCancellationOutcome, Self::Error> {
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
 
+        // Lock the provider attempt before touching the invocation. This is the
+        // same serialization point used by the pre-send marker and the canonical
+        // reservation sweeper, so cancellation cannot race a send authorization.
+        let attempt = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String,)>(
+                "SELECT state FROM provider_call_attempts WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid FOR UPDATE",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(invocation_id.to_string()),
+        )
+        .await?;
+        let Some((attempt_state,)) = attempt else {
+            transaction.rollback().await?;
+            return Err(InvocationStoreError::InvalidRequestedState(
+                "provider call attempt is missing; cancellation fails closed",
+            ));
+        };
+
+        match attempt_state.as_str() {
+            "NotStarted" => {
+                execute(
+                    &mut transaction,
+                    sqlx::query("UPDATE provider_call_attempts SET state='CancelledBeforeSend' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND state='NotStarted'"),
+                )
+                .await?;
+            }
+            "MayHaveBeenSent" => {
+                execute(
+                    &mut transaction,
+                    sqlx::query("UPDATE provider_call_attempts SET state='OutcomeUnknown' WHERE tenant_id=$1::uuid AND invocation_id=$2::uuid AND state='MayHaveBeenSent'"),
+                )
+                .await?;
+            }
+            "OutcomeUnknown" | "CancelledBeforeSend" | "ConfirmedNotAccepted" => {}
+            "ResponseReceived" => {
+                transaction.rollback().await?;
+                return Err(InvocationStoreError::InvalidRequestedState(
+                    "provider response is already durable; invocation must finish settlement",
+                ));
+            }
+            _ => {
+                transaction.rollback().await?;
+                return Err(InvocationStoreError::InvalidPersistedValue("provider attempt state"));
+            }
+        }
+
         // Expire an active lease before releasing its owner; the row lock and
         // transaction hide this intermediate state from competing workers.
         execute(
