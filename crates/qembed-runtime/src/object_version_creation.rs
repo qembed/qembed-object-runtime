@@ -62,8 +62,6 @@ pub enum ObjectVersionCreationError<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
-    use std::future::{Future, ready};
     use qembed_domain::{
         ids::TenantId,
         ports::{DraftVersionCreation, ObjectVersionCreationStore},
@@ -71,6 +69,8 @@ mod tests {
         snapshot::Snapshot,
         test_support::scope_for_tenant,
     };
+    use std::convert::Infallible;
+    use std::future::{Future, ready};
 
     use super::*;
 
