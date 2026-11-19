@@ -16,18 +16,20 @@ Payload canonicalization/hash algorithm and expiry policy remain upstream contra
 4. Lock the Object row `FOR SHARE` and require Active state.
 5. Verify the requested Snapshot belongs to the tenant/object and points to the Object's current Published version.
 6. Read and lock the object's current `knowledge_revisions.current_revision` `FOR SHARE`.
-7. Insert `object_invocations` with the resolved Caller, selected snapshot, pinned revision, explicit pool, Received state, and trace ID.
-8. Insert exactly one `user` row into `interaction_messages` using the same effective Caller and invocation ID. Its expiry is supplied separately from idempotency-key expiry.
-9. Append the allowlisted `invocation.received` event and its outbox delivery row in the same transaction.
-10. Commit. Only then may the application call a ChatProvider or perform other external I/O.
+7. Validate the snapshot's positive integer `limits.max_tokens_per_invocation` and estimate input tokens from UTF-8 bytes.
+8. Lock `object_budgets` `FOR UPDATE`; enforce the effective snapshot/live invocation cap, aggregate object UTC-day token limit, caller UTC-day token limit, and active object concurrency limit. Increment the pool-attributed object counter and caller counter, then insert the `Reserved` budget row.
+9. Insert `object_invocations` with the resolved Caller, selected snapshot, pinned revision, explicit pool, Received state, and trace ID. The canonical schema's reservation-to-invocation FK is deferred to transaction commit.
+10. Insert exactly one `user` row into `interaction_messages` using the same effective Caller and invocation ID. Its expiry is supplied separately from idempotency-key expiry.
+11. Append the allowlisted `invocation.received` event and its outbox delivery row in the same transaction.
+12. Commit. Only then may the application call a ChatProvider or perform other external I/O.
 
-The SQL invocation-idempotency FK is DEFERRABLE INITIALLY DEFERRED. It permits the reservation to be claimed before the invocation row, but requires both to exist at commit.
+The SQL invocation-idempotency FK is DEFERRABLE INITIALLY DEFERRED. The canonical budget-reservation FK is also DEFERRABLE INITIALLY DEFERRED, permitting the reservation to be inserted before its invocation row while requiring both to exist at commit. The current partial Rust store migration chain documents the latter constraint but defers installing it until the migration that introduces `object_invocations`; see [Token budget reservation](TOKEN_BUDGET_RESERVATION.md).
 
 ## Atomicity and replay
 
 Any failure after the claim causes transaction rollback: no idempotency reservation, invocation, input message, event, or outbox row survives. The integration suite injects failures at snapshot validation, invocation insert, event insert, and outbox insert.
 
-A matching idempotency replay commits the read/lock transaction and returns the original InvocationId without creating another invocation, input message, event, or outbox message. A different payload hash for the same effective Caller/key is a conflict. A different Caller has an independent key namespace.
+A matching idempotency replay commits the read/lock transaction and returns the original InvocationId without creating another invocation, budget reservation, counter increment, input message, event, or outbox message. A different payload hash for the same effective Caller/key is a conflict. A different Caller has an independent key namespace.
 
 ## Locking and external side effects
 
