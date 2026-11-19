@@ -35,7 +35,9 @@ impl fmt::Display for BudgetReservationError {
         match self {
             Self::Rejected(reason) => write!(f, "token budget rejected invocation: {reason:?}"),
             Self::InvalidEstimate => f.write_str("token reservation estimate must be positive"),
-            Self::InvalidConfiguration => f.write_str("object token budget configuration is invalid"),
+            Self::InvalidConfiguration => {
+                f.write_str("object token budget configuration is invalid")
+            }
             Self::ArithmeticOverflow => f.write_str("token budget arithmetic overflow"),
             Self::Database(error) => write!(f, "token budget reservation database error: {error}"),
         }
@@ -82,7 +84,8 @@ pub(crate) async fn reserve_invocation_budget(
     .map_err(BudgetReservationError::Database)?
     .ok_or(BudgetReservationError::InvalidConfiguration)?;
 
-    let (daily_limit, caller_limit, max_concurrent, live_invocation_limit, max_duration_ms) = budget;
+    let (daily_limit, caller_limit, max_concurrent, live_invocation_limit, max_duration_ms) =
+        budget;
     if daily_limit < 0
         || caller_limit < 0
         || max_concurrent <= 0
@@ -97,14 +100,14 @@ pub(crate) async fn reserve_invocation_budget(
             .map_err(|_| BudgetReservationError::InvalidConfiguration)?,
     );
     if effective_limit == 0 || estimate > effective_limit {
-        return Err(BudgetReservationError::Rejected(BudgetRejection::InvocationLimit));
+        return Err(BudgetReservationError::Rejected(
+            BudgetRejection::InvocationLimit,
+        ));
     }
     let estimate_i64 =
         i64::try_from(estimate).map_err(|_| BudgetReservationError::ArithmeticOverflow)?;
 
-    let usage_date: String = sqlx::query_scalar(
-        "SELECT (now() AT TIME ZONE 'UTC')::date::text",
-    )
+    let usage_date: String = sqlx::query_scalar("SELECT (now() AT TIME ZONE 'UTC')::date::text")
     .fetch_one(transaction.connection())
     .await
     .map_err(BudgetReservationError::Database)?;
@@ -136,13 +139,17 @@ pub(crate) async fn reserve_invocation_budget(
         .checked_add(estimate_i64)
         .ok_or(BudgetReservationError::ArithmeticOverflow)?;
     if object_total > daily_limit {
-        return Err(BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit));
+        return Err(BudgetReservationError::Rejected(
+            BudgetRejection::ObjectDailyLimit,
+        ));
     }
     let caller_total = caller_usage
         .checked_add(estimate_i64)
         .ok_or(BudgetReservationError::ArithmeticOverflow)?;
     if caller_total > caller_limit {
-        return Err(BudgetReservationError::Rejected(BudgetRejection::CallerDailyLimit));
+        return Err(BudgetReservationError::Rejected(
+            BudgetRejection::CallerDailyLimit,
+        ));
     }
 
     let active_reservations: i64 = sqlx::query_scalar(
@@ -154,7 +161,9 @@ pub(crate) async fn reserve_invocation_budget(
     .await
     .map_err(BudgetReservationError::Database)?;
     if active_reservations >= i64::from(max_concurrent) {
-        return Err(BudgetReservationError::Rejected(BudgetRejection::ConcurrentInvocationLimit));
+        return Err(BudgetReservationError::Rejected(
+            BudgetRejection::ConcurrentInvocationLimit,
+        ));
     }
 
     // The same usage date is used for both accounting dimensions. Cost remains
