@@ -146,3 +146,12 @@ Authenticated Principal identity is represented separately from the effective in
 ## Invocation worker lifecycle
 
 `begin_invocation` stores the original user message in the same transaction as the idempotency reservation and invocation. The worker resumes from the persisted invocation checkpoint, persists the assistant response before terminal completion, and can finish after a process restart without repeating a provider call once the response is in `Verifying`. Invocation leases, heartbeat, expiry/reclaim, and fencing-token checks are implemented (RUST-038); provider retries reuse a stable idempotency key derived from the durable invocation ID (RUST-038A), with upstream deduplication only when the configured adapter and provider guarantee it. Actual outbox dispatch remains a later task. See [invocation worker lifecycle](docs/INVOCATION_WORKER_LIFECYCLE.md), [lease and fencing contract](docs/INVOCATION_LEASES_AND_FENCING.md), and [ChatProvider contract](docs/CHAT_PROVIDER_CONTRACT.md).
+
+
+## Error handling contract
+
+Runtime failures use a provider-neutral typed taxonomy; the API owns stable
+public error codes and HTTP status mapping. See [Error handling contract](docs/ERROR_HANDLING.md)
+for classification rules, tenant-concealment behavior, sensitive-data boundaries,
+and the prohibition on treating HTTP errors as permission to retry ambiguous
+provider calls.
