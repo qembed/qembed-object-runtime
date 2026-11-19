@@ -35,7 +35,7 @@
 1. Define the versioned object-configuration schema and supported feature set from recoverable evidence or an explicitly approved new specification.
 2. Define unknown-field and extension compatibility semantics.
 3. Define tool/provider/permission/security-policy validation requirements before those features can be considered validated.
-4. Approve an immutable validator/ruleset versioning policy. Evidence must bind tenant, object, version, snapshot, content hash, and ruleset version.
+4. Extend the immutable validator/ruleset versioning policy as additional rules are approved. The first bounded implementation uses the immutable code identifier `m0-r3-bounded-budget-v1` and binds evidence to tenant, object, version, snapshot, content hash, and validator version. Persistence/revalidation policy remains open if validation becomes asynchronous or evidence must survive process boundaries.
 5. Define the public error taxonomy for semantic rejection, unsupported configuration, stale evidence, and stale publication pointer.
 
 ## Accepted new project decisions
