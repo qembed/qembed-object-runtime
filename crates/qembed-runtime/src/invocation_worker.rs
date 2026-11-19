@@ -542,8 +542,6 @@ mod lifecycle_tests {
                 },
             )
         }
-
-
     }
 
     impl InvocationLeaseStore for FakeStore {
