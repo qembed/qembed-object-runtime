@@ -29,7 +29,7 @@ The coverage report makes that limited scope explicit so that a successful check
 | Provider configuration | `not_validated` | `GAP-044-03` | Provider configuration semantics are not established |
 | Permissions | `not_validated` | `GAP-044-04` | Permission semantics are not established |
 | Security policies | `not_validated` | `GAP-044-04` | Security-policy semantics are not established |
-| Unknown fields/extensions | `not_validated` | `GAP-044-05` | Compatibility policy is not established |
+| Unknown fields/extensions | `not_validated` | `GAP-044-05` | Compatibility policy is not established for each schema version; no global default is implied |
 
 `not_validated` means no verified rule set is implemented for that area. It does **not** mean that arbitrary JSON fields in that area are automatically rejected. Conversely, the runtime must fail closed before relying on a feature whose required semantics are not validated. Authorization enforcement remains independent of this report.
 
@@ -39,11 +39,14 @@ The current identifier is `m0-r3-bounded-budget-v1`. This increment adds coverag
 
 Any change to semantic rules requires a new immutable validator version. Previously issued evidence must never be reinterpreted under a later version. Every newly approved rule must record its source or explicit project approval, gap/decision identifier, validator version, and positive/negative tests.
 
+The Schema Registry is version-indexed. Each supported `schema_version` must resolve to an explicit entry identifying its Schema Validator, the fields/structures checked, that version's unknown-field/extension policy, and the constraints classified as confirmed versus `not_validated`. These policies are independent across schema versions; there is no global unknown-field policy. The v1 unknown-field policy and complete v1 schema are still unspecified. Receiving `schema_version: 1` does not imply either has been defined, and must not be treated as proof of complete structural validation.
+
 ## Explicit non-goals
 
 This report does not:
 - reconstruct the lost M0 v2.2 specification;
 - define new schema, tool, provider, permission, security-policy, or extension semantics;
+- define the unknown-field policy or complete structural schema for v1;
 - blanket-reject unknown fields;
 - claim complete M0 semantic validation;
 - replace execution-time authorization or policy checks.
