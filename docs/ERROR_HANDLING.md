@@ -6,18 +6,23 @@ lives in qembed_runtime::error and qembed_api::errors.
 
 ## Responsibility boundaries
 
-1. **Adapters** classify implementation-specific failures. SQLx errors, provider
-   SDK errors, raw response bodies, connection strings, SQL statements, and
-   vendor request identifiers remain inside their adapter/diagnostic boundary.
-2. **Runtime** expresses the semantic outcome using RuntimeError. It does not
+1. **Adapters/Store** retain implementation-specific diagnostics such as SQLx
+   errors, provider SDK errors, raw response bodies, connection strings, SQL
+   statements, and vendor request identifiers. Opaque Store errors can travel
+   through generic ports, but their diagnostic text is not a public contract.
+2. **Runtime** expresses semantic failures using RuntimeError. It does not
    depend on HTTP status codes, SQLx, or provider SDK types.
-3. **API** maps RuntimeError to a stable HTTP status and a deliberately small
-   public body. Public messages are fixed constants; never build them from
-   Display, Debug, or an adapter error string.
+3. **API** maps RuntimeError and explicitly recognized Store outcomes to a stable
+   HTTP status and deliberately small public body. Public messages are fixed
+   constants; never build them from Display, Debug, or an adapter error string.
 
 A known semantic failure should be classified before reaching the generic
-fallback. An unclassified Store/adapter error maps to internal_error (500),
-not to a guessed client error.
+fallback. The current begin-invocation mapper recognizes concealed not-found,
+idempotency conflict, invalid request, inactive object/current-snapshot conflict,
+and explicit budget rejection. Invocation query corruption and unknown Store
+failures map to internal_error (500), not to a guessed client error. The
+invocation Store mapper treats an explicitly rejected state write as conflict;
+malformed persisted data and ambiguous messages remain internal errors.
 
 ## Public mapping
 
