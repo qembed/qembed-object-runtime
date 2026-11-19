@@ -993,42 +993,40 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     );
 
     let store = PgExecutionStore::new(fixture.pool.clone());
-    let received = store
-        .load_invocation(&fixture.scope, invocation_id)
+    let owner = "worker-projection-success";
+    let claimed = store
+        .claim_invocation(&fixture.scope, invocation_id, owner, 60)
         .await
-        .expect("load invocation")
-        .expect("invocation exists");
-    let mut context_loading = received.clone();
+        .expect("claim invocation")
+        .expect("invocation is claimable");
+    let mut context_loading = claimed.clone();
     context_loading
-        .transition_to(InvocationStatus::ContextLoading, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::ContextLoading, claimed.fencing_token())
         .expect("Received -> ContextLoading");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                received.version(),
-                FencingToken::INITIAL,
-                context_loading,
+                owner,
+                claimed.version(),
+                claimed.fencing_token(),
+                context_loading.clone(),
             )
             .await
             .expect("persist context loading")
     );
 
-    let context = store
-        .load_invocation(&fixture.scope, invocation_id)
-        .await
-        .expect("reload invocation")
-        .expect("invocation exists");
-    let mut processing = context.clone();
+    let mut processing = context_loading.clone();
     processing
-        .transition_to(InvocationStatus::Processing, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Processing, context_loading.fencing_token())
         .expect("ContextLoading -> Processing");
     assert!(
         store
-            .compare_and_set_invocation(
+            .compare_and_set_owned(
                 &fixture.scope,
-                context.version(),
-                FencingToken::INITIAL,
+                owner,
+                context_loading.version(),
+                context_loading.fencing_token(),
                 processing,
             )
             .await
@@ -1040,18 +1038,36 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         .await
         .expect("reload processing invocation")
         .expect("invocation exists");
+    assert!(
+        store
+            .mark_provider_may_have_been_sent_owned(
+                &fixture.scope,
+                invocation_id,
+                owner,
+                processing.version(),
+                processing.fencing_token(),
+            )
+            .await
+            .expect("commit pre-send marker")
+    );
     let mut verifying = processing.clone();
     verifying
-        .transition_to(InvocationStatus::Verifying, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Verifying, processing.fencing_token())
         .expect("Processing -> Verifying");
     assert!(
         store
-            .persist_assistant_output(
+            .persist_provider_response_owned(
                 &fixture.scope,
+                owner,
                 processing.version(),
-                FencingToken::INITIAL,
+                processing.fencing_token(),
                 verifying,
-                "private until completed".to_owned(),
+                qembed_domain::chat::ChatResponse::new(
+                    "private until completed",
+                    qembed_domain::chat::ChatFinishReason::Stop,
+                    Some(TokenUsage::new(0, 0)),
+                )
+                .expect("valid normalized response"),
             )
             .await
             .expect("persist assistant output")
@@ -1076,14 +1092,15 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         .expect("invocation exists");
     let mut completed = verifying.clone();
     completed
-        .transition_to(InvocationStatus::Completed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Completed, verifying.fencing_token())
         .expect("Verifying -> Completed");
     assert!(
         store
-            .complete_invocation(
+            .complete_invocation_owned(
                 &fixture.scope,
+                owner,
                 verifying.version(),
-                FencingToken::INITIAL,
+                verifying.fencing_token(),
                 completed,
             )
             .await
@@ -1110,26 +1127,28 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
+    let failure_owner = "worker-projection-failure";
     let failed_current = store
-        .load_invocation(&fixture.scope, failed_id)
+        .claim_invocation(&fixture.scope, failed_id, failure_owner, 60)
         .await
-        .expect("load failure case")
-        .expect("invocation exists");
+        .expect("claim failure case")
+        .expect("failure invocation is claimable");
     let mut failed = failed_current.clone();
     failed
-        .transition_to(InvocationStatus::Failed, FencingToken::INITIAL)
+        .transition_to(InvocationStatus::Failed, failed_current.fencing_token())
         .expect("Received -> Failed");
     assert!(
         store
-            .fail_invocation(
+            .fail_invocation_owned(
                 &fixture.scope,
+                failure_owner,
                 failed_current.version(),
-                FencingToken::INITIAL,
+                failed_current.fencing_token(),
                 failed,
                 "provider_timeout",
             )
             .await
-            .expect("persist failure")
+            .expect("persist safe pre-send failure")
     );
 
     let failure_view = query_store
