@@ -1520,7 +1520,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
     .fetch_one(&fixture.pool)
     .await
     .expect("settled reservation");
-    assert_eq!(reservation, ("Settled".to_owned(), i64::try_from(estimate).unwrap(), Some(43)));
+    assert_eq!(reservation, ("Settled".to_owned(), i64::try_from(estimate).expect("estimate fits bigint"), Some(43)));
 
     let object_counts: (i64, i64) = sqlx::query_as(
         "SELECT consumed_tokens, reserved_tokens FROM usage_counters",
