@@ -52,6 +52,7 @@ pub trait InvocationLeaseStore: InvocationWorkStore {
     fn load_provider_call_attempt(
         &self,
         scope: &Scope,
+        object_id: crate::ids::ObjectId,
         invocation_id: InvocationId,
     ) -> impl Future<
         Output = Result<Option<crate::provider_call_attempt::ProviderCallAttempt>, Self::Error>,
