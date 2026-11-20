@@ -11,7 +11,9 @@ use qembed_store::run_migrations;
 #[tokio::test]
 async fn same_tenant_objects_cannot_cross_reference_versions_or_snapshots() {
     let pool = common::connect().await;
-    run_migrations(&pool).await.expect("migrations should apply");
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
 
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
