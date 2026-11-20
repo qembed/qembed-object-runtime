@@ -42,9 +42,22 @@ The Owner API is delivered in bounded increments. Each increment remains part of
 - `schema_version` is the snapshot's schema identifier, not `object_versions.version_number`. No Schema v1 completeness or unknown-field policy is inferred.
 - PostgreSQL API integration coverage verifies persisted Draft state, exact canonical bytes, deduplication, cross-tenant denial, tenant/token mismatch, and duplicate-key rejection.
 
+## Increment D — authenticated trusted publication
+
+- Route: `POST /owner/objects/{object_id}/versions/{version_id}/publish`.
+- Request body: empty. The caller cannot submit validation results, snapshot IDs, hashes, validator versions, or lifecycle states.
+- The composition root authenticates the Owner and invokes the runtime `ObjectPublicationService`. The HTTP handler performs only path/header/body validation and response mapping.
+- The Store loads the exact persisted Draft snapshot and captures the current published-version pointer. The bounded `ObjectValidator::validate_with_report()` runs outside a database transaction and returns opaque evidence bound to tenant, object, version, snapshot, content hash, and validator version.
+- First publication: the runtime starts the trusted validation transition; a rejected validation returns the object from `Validating` to `Draft`. Successful evidence is passed to the Store for atomic publication.
+- Replacement: the existing `Active` or `Suspended` lifecycle state remains unchanged during validation. The captured current pointer is passed to `publish_version()`; PostgreSQL rechecks it under the object lock and rejects a stale pointer.
+- The Store verifies the evidence against the persisted immutable snapshot and atomically updates version status, object pointer/state, event, and outbox.
+- Success returns `200 OK` with the published version/snapshot IDs, validator version, and explicit validation coverage report. A semantic rejection returns `422`; a lifecycle or stale-pointer conflict returns `409`; missing/cross-tenant resources return the same `404`.
+- Validation remains deliberately bounded to the positive integer `limits.max_tokens_per_invocation` invariant. Other semantic areas remain explicitly `not_validated`; publication does not imply complete M0 schema validation.
+- PostgreSQL API integration coverage verifies first publication, replacement/supersession, validation rejection, tenant isolation, and persisted state.
+
 ## Remaining RUST-044 increments
 
-- Publish only after trusted validation evidence is produced for the exact persisted snapshot; never accept evidence from an HTTP DTO.
+- Invoke through the existing atomic begin-invocation contract after the approved request DTO and caller-selection contract are wired.
 - Invoke through the existing atomic begin-invocation contract after the approved request DTO and caller-selection contract are wired.
 - Add PostgreSQL-backed API integration tests for every route, authentication failures, cross-tenant isolation, DTO validation, publication evidence binding, and stale-pointer conflicts.
 

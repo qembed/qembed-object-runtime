@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use actix_web::{HttpRequest, HttpResponse, http::StatusCode, web};
 use qembed_domain::{
-    ids::{InvocationId, ObjectId, TenantId},
+    ids::{InvocationId, ObjectId, ObjectVersionId, TenantId},
     jcs::canonicalize_json,
 };
 
@@ -19,6 +19,8 @@ use crate::handlers::invocation::InvocationResponse;
 pub enum OwnerApiBackendError {
     Unauthorized,
     NotFound,
+    ValidationRejected,
+    Conflict,
     Internal,
 }
 
@@ -34,6 +36,15 @@ pub struct ObjectVersionCreationResponse {
     pub outcome: ObjectVersionCreationOutcome,
     pub object_version_id: String,
     pub snapshot_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ObjectVersionPublicationResponse {
+    pub status: &'static str,
+    pub object_version_id: String,
+    pub snapshot_id: String,
+    pub validator_version: &'static str,
+    pub validation: qembed_domain::object_validation::ValidationReport,
 }
 
 /// Application capability supplied by the composition root.
@@ -54,6 +65,20 @@ pub trait OwnerApiBackend: Send + Sync {
     ) -> Pin<
         Box<
             dyn Future<Output = Result<ObjectVersionCreationResponse, OwnerApiBackendError>>
+                + Send
+                + '_,
+        >,
+    >;
+
+    fn publish_version(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>>
                 + Send
                 + '_,
         >,
@@ -98,6 +123,10 @@ pub fn configure_owner_routes(
         .route(
             "/owner/objects/{object_id}/versions",
             web::post().to(create_object_version),
+        )
+        .route(
+            "/owner/objects/{object_id}/versions/{version_id}/publish",
+            web::post().to(publish_object_version),
         )
         .route(
             "/owner/invocations/{invocation_id}",
@@ -176,6 +205,13 @@ async fn create_object(
             "not_found",
             "The requested resource was not found.",
         ),
+        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -269,6 +305,87 @@ async fn create_object_version(
             "not_found",
             "The requested resource was not found.",
         ),
+        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
+        Err(OwnerApiBackendError::Internal) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "An unexpected internal error occurred.",
+        ),
+    }
+}
+
+async fn publish_object_version(
+    request: HttpRequest,
+    path: web::Path<(String, String)>,
+    body: web::Bytes,
+    state: web::Data<OwnerApiState>,
+) -> HttpResponse {
+    if !body.is_empty() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "This endpoint does not accept a request body.",
+        );
+    }
+
+    let (object_id, version_id) = path.into_inner();
+    let object_id = match object_id.parse::<ObjectId>() {
+        Ok(id) => id,
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object ID is invalid.",
+            );
+        }
+    };
+    let version_id = match version_id.parse::<ObjectVersionId>() {
+        Ok(id) => id,
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object version ID is invalid.",
+            );
+        }
+    };
+    let (tenant_id, token) = match owner_credentials(&request) {
+        Ok(credentials) => credentials,
+        Err(response) => return response,
+    };
+
+    match state
+        .backend
+        .publish_version(tenant_id, token, object_id, version_id)
+        .await
+    {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(OwnerApiBackendError::Unauthorized) => api_error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Authentication is required.",
+        ),
+        Err(OwnerApiBackendError::NotFound) => api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "The requested resource was not found.",
+        ),
+        Err(OwnerApiBackendError::ValidationRejected) => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "The draft version failed trusted validation.",
+        ),
+        Err(OwnerApiBackendError::Conflict) => api_error(
+            StatusCode::CONFLICT,
+            "conflict",
+            "The object changed or is not in a publishable state.",
+        ),
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -315,6 +432,13 @@ async fn inspect_invocation(
             "not_found",
             "The requested resource was not found.",
         ),
+        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -360,6 +484,22 @@ mod tests {
             Box::pin(async { panic!("backend must not be called for invalid transport input") })
         }
 
+        fn publish_version(
+            &self,
+            _: TenantId,
+            _: String,
+            _: ObjectId,
+            _: ObjectVersionId,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { panic!("backend must not be called for invalid transport input") })
+        }
+
         fn inspect(
             &self,
             _: TenantId,
@@ -379,6 +519,22 @@ mod tests {
     struct FixedCreator(ObjectId);
 
     impl OwnerApiBackend for FixedCreator {
+        fn publish_version(
+            &self,
+            _: TenantId,
+            _: String,
+            _: ObjectId,
+            _: ObjectVersionId,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
+            Box::pin(async { Err(OwnerApiBackendError::Internal) })
+        }
+
         fn create_object(
             &self,
             _: TenantId,

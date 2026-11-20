@@ -9,11 +9,13 @@ use std::pin::Pin;
 use actix_web::web;
 use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
-    ids::{InvocationId, ObjectId, TenantId},
+    ids::{InvocationId, ObjectId, ObjectVersionId, TenantId},
     ports::DraftVersionCreation,
 };
 use qembed_runtime::{
-    invocation_query::InvocationQueryService, object_creation::ObjectCreationService,
+    invocation_query::InvocationQueryService,
+    object_creation::ObjectCreationService,
+    object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
 };
 use qembed_store::{
@@ -30,8 +32,9 @@ use crate::handlers::{
     },
     invocation::{InvocationResponse, get_invocation},
     owner::{
-        ObjectVersionCreationOutcome, ObjectVersionCreationResponse, OwnerApiBackend,
-        OwnerApiBackendError, configure_owner_routes as configure_owner,
+        ObjectVersionCreationOutcome, ObjectVersionCreationResponse,
+        ObjectVersionPublicationResponse, OwnerApiBackend, OwnerApiBackendError,
+        configure_owner_routes as configure_owner,
     },
 };
 
@@ -143,6 +146,52 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     ),
                 ) => Err(OwnerApiBackendError::NotFound),
                 Err(_) => Err(OwnerApiBackendError::Internal),
+            }
+        })
+    }
+
+    fn publish_version(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            let service = ObjectPublicationService::new(ObjectRepository::new(self.pool.clone()));
+            match service.publish(&scope, object_id, version_id).await {
+                Ok(result) => {
+                    let report = *result.report();
+                    Ok(ObjectVersionPublicationResponse {
+                        status: "published",
+                        object_version_id: result.object_version_id().to_string(),
+                        snapshot_id: result.snapshot_id().to_string(),
+                        validator_version: report.validator_version(),
+                        validation: report,
+                    })
+                }
+                Err(ObjectPublicationError::NotFound) => Err(OwnerApiBackendError::NotFound),
+                Err(ObjectPublicationError::ValidationRejected(_)) => Err(OwnerApiBackendError::ValidationRejected),
+                Err(ObjectPublicationError::InvalidObjectState) => Err(OwnerApiBackendError::Conflict),
+                Err(ObjectPublicationError::Store(
+                    qembed_store::object_repository::ObjectRepositoryError::ObjectNotFound
+                    | qembed_store::object_repository::ObjectRepositoryError::VersionNotFound
+                    | qembed_store::object_repository::ObjectRepositoryError::SnapshotNotFound,
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(ObjectPublicationError::Store(
+                    qembed_store::object_repository::ObjectRepositoryError::InvalidObjectState
+                    | qembed_store::object_repository::ObjectRepositoryError::PublishedVersionMismatch
+                    | qembed_store::object_repository::ObjectRepositoryError::VersionMustBeDraft
+                    | qembed_store::object_repository::ObjectRepositoryError::CurrentVersionNotPublished,
+                )) => Err(OwnerApiBackendError::Conflict),
+                Err(ObjectPublicationError::Store(_)) => Err(OwnerApiBackendError::Internal),
             }
         })
     }

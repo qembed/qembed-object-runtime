@@ -10,10 +10,13 @@ use std::future::Future;
 use crate::chat::{
     ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse, ProviderRequestContext,
 };
-use crate::ids::{InvocationId, PrincipalId, TenantId};
+use crate::ids::{InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId};
 use crate::invocation::{FencingToken, Invocation};
+use crate::object::ObjectState;
+use crate::object_validation::ValidationEvidence;
 use crate::principal::PrincipalKind;
 use crate::scope::Scope;
+use crate::snapshot::Snapshot;
 
 /// Identity returned by a trusted authentication adapter after credential
 /// verification.
@@ -155,6 +158,85 @@ pub trait ObjectVersionCreationStore: Send + Sync {
         version: &crate::object_version::ObjectVersion,
         snapshot: &crate::snapshot::Snapshot,
     ) -> impl Future<Output = Result<DraftVersionCreation, Self::Error>> + Send;
+}
+
+/// A Draft snapshot selected for trusted publication validation.
+///
+/// The expected pointer is captured before validation and is rechecked by the
+/// Store during publication. This makes replacement publication a compare-and-set
+/// operation even though validation runs outside the database transaction.
+#[derive(Debug)]
+pub struct PublicationCandidate {
+    snapshot: Snapshot,
+    object_state: ObjectState,
+    expected_current: Option<ObjectVersionId>,
+}
+
+impl PublicationCandidate {
+    #[must_use]
+    pub const fn new(
+        snapshot: Snapshot,
+        object_state: ObjectState,
+        expected_current: Option<ObjectVersionId>,
+    ) -> Self {
+        Self {
+            snapshot,
+            object_state,
+            expected_current,
+        }
+    }
+
+    #[must_use]
+    pub const fn snapshot(&self) -> &Snapshot {
+        &self.snapshot
+    }
+
+    #[must_use]
+    pub const fn object_state(&self) -> ObjectState {
+        self.object_state
+    }
+
+    #[must_use]
+    pub const fn expected_current(&self) -> Option<ObjectVersionId> {
+        self.expected_current
+    }
+}
+
+/// Persistence boundary for trusted Owner publication.
+///
+/// Candidate reads and validation happen before the final publish transaction.
+/// The Store owns lifecycle transitions, persisted evidence verification, and
+/// the expected-current-pointer CAS.
+pub trait ObjectPublicationStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn load_publication_candidate(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+    ) -> impl Future<Output = Result<Option<PublicationCandidate>, Self::Error>> + Send;
+
+    fn begin_validation(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    fn reject_validation(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    fn publish_version(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+        expected_current: Option<ObjectVersionId>,
+        evidence: &ValidationEvidence,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 /// Read-only persistence boundary for the client-visible invocation projection.
