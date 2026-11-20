@@ -205,11 +205,13 @@ async fn create_object(
             "not_found",
             "The requested resource was not found.",
         ),
-        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "An unexpected internal error occurred.",
-        ),
+        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -333,24 +335,60 @@ async fn publish_object_version(
     let (object_id, version_id) = path.into_inner();
     let object_id = match object_id.parse::<ObjectId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The object ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object ID is invalid.",
+            );
+        }
     };
     let version_id = match version_id.parse::<ObjectVersionId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The object version ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object version ID is invalid.",
+            );
+        }
     };
     let (tenant_id, token) = match owner_credentials(&request) {
         Ok(credentials) => credentials,
         Err(response) => return response,
     };
 
-    match state.backend.publish_version(tenant_id, token, object_id, version_id).await {
+    match state
+        .backend
+        .publish_version(tenant_id, token, object_id, version_id)
+        .await
+    {
         Ok(response) => HttpResponse::Ok().json(response),
-        Err(OwnerApiBackendError::Unauthorized) => api_error(StatusCode::UNAUTHORIZED, "unauthorized", "Authentication is required."),
-        Err(OwnerApiBackendError::NotFound) => api_error(StatusCode::NOT_FOUND, "not_found", "The requested resource was not found."),
-        Err(OwnerApiBackendError::ValidationRejected) => api_error(StatusCode::UNPROCESSABLE_ENTITY, "validation_failed", "The draft version failed trusted validation."),
-        Err(OwnerApiBackendError::Conflict) => api_error(StatusCode::CONFLICT, "conflict", "The object changed or is not in a publishable state."),
-        Err(OwnerApiBackendError::Internal) => api_error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", "An unexpected internal error occurred."),
+        Err(OwnerApiBackendError::Unauthorized) => api_error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Authentication is required.",
+        ),
+        Err(OwnerApiBackendError::NotFound) => api_error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "The requested resource was not found.",
+        ),
+        Err(OwnerApiBackendError::ValidationRejected) => api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "The draft version failed trusted validation.",
+        ),
+        Err(OwnerApiBackendError::Conflict) => api_error(
+            StatusCode::CONFLICT,
+            "conflict",
+            "The object changed or is not in a publishable state.",
+        ),
+        Err(OwnerApiBackendError::Internal) => api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "An unexpected internal error occurred.",
+        ),
     }
 }
 
@@ -448,7 +486,13 @@ mod tests {
             _: String,
             _: ObjectId,
             _: ObjectVersionId,
-        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>> + Send + '_>> {
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
             Box::pin(async { panic!("backend must not be called for invalid transport input") })
         }
 
