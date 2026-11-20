@@ -287,3 +287,49 @@ async fn one_thousand_identical_configuration_creations_reuse_one_snapshot() {
     assert_eq!(counts, (1, 1));
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn changed_tool_binding_produces_a_new_immutable_snapshot() {
+    let (pool, repository, scope, object_id) = setup().await;
+    let original = br#"{\"tools\":[{\"tool_id\":\"11111111-0000-0000-0000-000000000001\",\"tool_version_id\":\"11111111-0000-0000-0000-0000000000a1\"}]}"#;
+    let changed = br#"{\"tools\":[{\"tool_id\":\"11111111-0000-0000-0000-000000000001\",\"tool_version_id\":\"11111111-0000-0000-0000-0000000000a2\"}]}"#;
+
+    let (first_version, first_snapshot) = draft(scope.tenant_id(), object_id, 1, original);
+    let first = repository
+        .create_draft_version_with_snapshot(&scope, &first_version, &first_snapshot)
+        .await
+        .expect("initial ToolVersion binding should create a snapshot");
+    let (first_snapshot_id, first_version_id) = match first {
+        DraftCreation::Created {
+            version_id,
+            snapshot_id,
+        } => (snapshot_id, version_id),
+        other => panic!("initial configuration must be new, got {other:?}"),
+    };
+
+    let (second_version, second_snapshot) = draft(scope.tenant_id(), object_id, 2, changed);
+    let second = repository
+        .create_draft_version_with_snapshot(&scope, &second_version, &second_snapshot)
+        .await
+        .expect("changed ToolVersion binding should create a new snapshot");
+    let second_snapshot_id = match second {
+        DraftCreation::Created { snapshot_id, .. } => snapshot_id,
+        other => panic!("changed binding must not reuse old snapshot, got {other:?}"),
+    };
+
+    assert_ne!(first_snapshot_id, second_snapshot_id);
+    let stored: (Vec<u8>, Vec<u8>) = sqlx::query_as(
+        "SELECT s1.canonical_json, s2.canonical_json FROM snapshots s1 CROSS JOIN snapshots s2 WHERE s1.tenant_id=$1::uuid AND s1.snapshot_id=$2::uuid AND s2.tenant_id=$1::uuid AND s2.snapshot_id=$3::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(first_snapshot_id.to_string())
+    .bind(second_snapshot_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("both immutable snapshots should remain persisted");
+    assert_eq!(stored.0, original);
+    assert_eq!(stored.1, changed);
+    assert_ne!(first_version_id, second_version.id());
+    pool.close().await;
+}
