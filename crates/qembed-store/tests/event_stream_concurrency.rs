@@ -96,7 +96,6 @@ async fn concurrent_independent_invocation_streams_get_gapless_versions_without_
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn runtime_can_append_events_but_cannot_forge_stream_counters() {
     let pool = common::connect().await;
@@ -148,9 +147,15 @@ async fn runtime_can_append_events_but_cannot_forge_stream_counters() {
     .await
     .expect_err("runtime must not directly mutate the allocator's counter");
     assert_eq!(
-        error.as_database_error().and_then(|error| error.code()).as_deref(),
+        error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
         Some("42501")
     );
-    transaction.rollback().await.expect("denied update transaction rolls back");
+    transaction
+        .rollback()
+        .await
+        .expect("denied update transaction rolls back");
     pool.close().await;
 }
