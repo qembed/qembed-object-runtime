@@ -450,9 +450,7 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
         ),
         (
             _,
-            OwnerApiBackendError::ValidationRejected
-            | OwnerApiBackendError::Conflict
-            | OwnerApiBackendError::Internal,
+            OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Internal,
         ) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
