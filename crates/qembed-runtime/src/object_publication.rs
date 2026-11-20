@@ -228,7 +228,9 @@ mod tests {
         let service = ObjectPublicationService::new(store);
         let scope = scope_for_tenant(tenant_id);
 
-        service.publish(&scope, object_id, version_id).await
+        service
+            .publish(&scope, object_id, version_id)
+            .await
             .expect("valid first publication succeeds");
 
         assert!(service.store.began.load(Ordering::SeqCst));
@@ -247,7 +249,9 @@ mod tests {
         let service = ObjectPublicationService::new(store);
         let scope = scope_for_tenant(tenant_id);
 
-        service.publish(&scope, object_id, version_id).await
+        service
+            .publish(&scope, object_id, version_id)
+            .await
             .expect("valid replacement succeeds");
 
         assert!(!service.store.began.load(Ordering::SeqCst));
