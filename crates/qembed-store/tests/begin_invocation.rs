@@ -395,7 +395,7 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
 async fn any_failure_after_idempotency_claim_rolls_back_the_entire_begin() {
     // Snapshot validation fails after the key has been reserved.
     let fixture = setup(None).await;
-    let mut invalid = command(&fixture, "missing-snapshot");
+    let invalid = command(&fixture, "missing-snapshot");
     sqlx::query("UPDATE objects SET published_version_id = NULL WHERE tenant_id = $1::uuid AND object_id = $2::uuid")
         .bind(fixture.scope.tenant_id().to_string())
         .bind(fixture.object_id.to_string())
