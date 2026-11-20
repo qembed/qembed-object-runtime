@@ -308,6 +308,11 @@ CREATE POLICY tenants_runtime_tenant ON tenants
 CREATE POLICY tenants_admin_all ON tenants
     TO qembed_admin USING (true) WITH CHECK (true);
 
+CREATE POLICY knowledge_revisions_admin_select ON knowledge_revisions
+    FOR SELECT TO qembed_admin USING (true);
+CREATE POLICY knowledge_revisions_admin_insert ON knowledge_revisions
+    FOR INSERT TO qembed_admin WITH CHECK (current_revision = 0);
+
 DO $rls$
 DECLARE
     table_name TEXT;
