@@ -353,9 +353,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - Одобренный HTTP authentication contract (2026-11-20): `Authorization: Bearer <owner-token>` + `X-Tenant-ID: <uuid>`. Tenant header — только недоверенный selector для credential lookup; `Scope` создаётся после успешной проверки persisted owner credential. Детали: [RUST-044 Owner API implementation](docs/RUST-044_OWNER_API_IMPLEMENTATION.md).
   - Реализованы Owner endpoints: create object, create version + Snapshot, publish version и start invocation; Inspect Invocation возвращает tenant-scoped минимизированную проекцию, missing и cross-tenant ID дают одинаковый 404.
   - DoD: handler-ы только валидируют transport input и вызывают runtime use cases; Store публикует только с доверенным доказательством validation. PostgreSQL/API integration и security tests проходят; stable и Rust 1.85 MSRV CI зелёные.
-- [ ] **RUST-045 (M)** Добавить полный walking-skeleton end-to-end test.
-  - Тесты: create → publish → invoke → retrieve result; duplicate idempotency key; process restart; cross-tenant denied.
-  - DoD: flow проходит через HTTP/API, runtime, PostgreSQL и Mock ChatProvider без внешнего сервиса.
+- [x] **RUST-045 (M)** Добавить полный walking-skeleton end-to-end test.
+  - Реализован `crates/qembed-api/tests/walking_skeleton_e2e.rs`: Owner HTTP create → create version/Snapshot → publish → invoke → retrieve result; реальный PostgreSQL и deterministic `MockChatProvider`.
+  - Проверены повторный idempotency key (тот же Invocation ID и ровно один набор durable side effects), teardown первого API/pool и reconnect со свежим Runtime worker, а также cross-tenant 404.
+  - Worker после restart адресно запускается по сохранённому Invocation ID; это не заявляет наличие outbox dispatcher или production process supervisor. Caller delegation и Object budget создаются тестовыми provisioning fixtures вне Owner API.
+  - DoD: flow проходит через HTTP/API, runtime, PostgreSQL и Mock ChatProvider без внешнего сервиса; stable и Rust 1.85 MSRV CI зелёные.
 - [ ] **RUST-046 (S)** Проверить DB-backed provenance constraints, относящиеся к M1a.
   - Тесты: integration — запрещённые provenance claims отвергаются; app-level verifier остаётся тестом M2.
   - DoD: тесты не заявляют наличие application-level retrieval/provenance до реализации M2.
