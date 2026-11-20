@@ -41,7 +41,7 @@ GRANT USAGE ON SCHEMA public TO qembed_runtime, qembed_dispatcher, qembed_admin,
 -- Start from an explicit deny baseline, including any grants that might have
 -- pre-existed on these role names or PUBLIC in a previously managed database.
 REVOKE ALL PRIVILEGES ON TABLE
-    objects, object_versions, snapshots, events, event_stream_counters, outbox_messages,
+    objects, object_versions, snapshots, events, outbox_messages,
     owner_principals, owner_credentials, event_stream_counters
 FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin, qembed_event_allocator;
 
@@ -84,10 +84,6 @@ CREATE POLICY snapshots_admin_tenant ON snapshots
     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 
 CREATE POLICY events_runtime_tenant ON events
-    FOR ALL TO qembed_runtime
-    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
-CREATE POLICY event_stream_counters_runtime_tenant ON event_stream_counters
     FOR ALL TO qembed_runtime
     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
