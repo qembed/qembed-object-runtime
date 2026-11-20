@@ -260,7 +260,7 @@ impl ObjectRepository {
 
         let candidate = row
             .map(
-                |(state, current, snapshot_id, tenant, object, version, schema, bytes, hash)| {
+                |(state, current, snapshot_id, tenant, object, version, schema, bytes, hash)| -> Result<PublicationCandidate, ObjectRepositoryError> {
                     let snapshot_id = snapshot_id
                         .parse()
                         .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
