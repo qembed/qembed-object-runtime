@@ -18,13 +18,19 @@ pub struct ObjectPublicationResult {
 
 impl ObjectPublicationResult {
     #[must_use]
-    pub const fn object_version_id(&self) -> ObjectVersionId { self.object_version_id }
+    pub const fn object_version_id(&self) -> ObjectVersionId {
+        self.object_version_id
+    }
 
     #[must_use]
-    pub const fn snapshot_id(&self) -> SnapshotId { self.snapshot_id }
+    pub const fn snapshot_id(&self) -> SnapshotId {
+        self.snapshot_id
+    }
 
     #[must_use]
-    pub const fn report(&self) -> &ValidationReport { &self.report }
+    pub const fn report(&self) -> &ValidationReport {
+        &self.report
+    }
 }
 
 /// Publishes Owner-selected Draft versions only after trusted validation.
@@ -35,7 +41,9 @@ pub struct ObjectPublicationService<S> {
 
 impl<S: ObjectPublicationStore> ObjectPublicationService<S> {
     #[must_use]
-    pub const fn new(store: S) -> Self { Self { store } }
+    pub const fn new(store: S) -> Self {
+        Self { store }
+    }
 
     /// Validates the exact persisted snapshot and atomically publishes its version.
     ///
@@ -49,7 +57,8 @@ impl<S: ObjectPublicationStore> ObjectPublicationService<S> {
         object_id: ObjectId,
         version_id: ObjectVersionId,
     ) -> Result<ObjectPublicationResult, ObjectPublicationError<S::Error>> {
-        let candidate = self.store
+        let candidate = self
+            .store
             .load_publication_candidate(scope, object_id, version_id)
             .await
             .map_err(ObjectPublicationError::Store)?
@@ -62,7 +71,8 @@ impl<S: ObjectPublicationStore> ObjectPublicationService<S> {
         };
 
         if first_publication {
-            self.store.begin_validation(scope, object_id)
+            self.store
+                .begin_validation(scope, object_id)
                 .await
                 .map_err(ObjectPublicationError::Store)?;
         }
@@ -72,7 +82,8 @@ impl<S: ObjectPublicationStore> ObjectPublicationService<S> {
             Ok(outcome) => outcome,
             Err(error) => {
                 if first_publication {
-                    self.store.reject_validation(scope, object_id)
+                    self.store
+                        .reject_validation(scope, object_id)
                         .await
                         .map_err(ObjectPublicationError::Store)?;
                 }
@@ -81,17 +92,22 @@ impl<S: ObjectPublicationStore> ObjectPublicationService<S> {
         };
         let (evidence, report) = outcome.into_parts();
 
-        if let Err(error) = self.store.publish_version(
-            scope,
-            object_id,
-            version_id,
-            candidate.expected_current(),
-            &evidence,
-        ).await {
+        if let Err(error) = self
+            .store
+            .publish_version(
+                scope,
+                object_id,
+                version_id,
+                candidate.expected_current(),
+                &evidence,
+            )
+            .await
+        {
             if first_publication {
                 // Best-effort lifecycle recovery. The failed publication
                 // transaction has already rolled back before this operation.
-                self.store.reject_validation(scope, object_id)
+                self.store
+                    .reject_validation(scope, object_id)
                     .await
                     .map_err(ObjectPublicationError::Store)?;
             }
@@ -114,7 +130,6 @@ pub enum ObjectPublicationError<E> {
     ValidationRejected(ObjectValidationError),
     Store(E),
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -154,7 +169,8 @@ mod tests {
             _: &Scope,
             _: ObjectId,
             _: ObjectVersionId,
-        ) -> impl Future<Output = Result<Option<PublicationCandidate>, Self::Error>> + Send {
+        ) -> impl Future<Output = Result<Option<PublicationCandidate>, Self::Error>> + Send
+        {
             let candidate = self.candidate.lock().expect("candidate lock").take();
             ready(Ok(candidate))
         }
@@ -204,14 +220,8 @@ mod tests {
         } else {
             br#"{"limits":{}}"#.to_vec()
         };
-        let snapshot = Snapshot::new(
-            SnapshotId::new(),
-            tenant_id,
-            object_id,
-            version_id,
-            1,
-            json,
-        ).expect("snapshot bytes are canonical");
+        let snapshot = Snapshot::new(SnapshotId::new(), tenant_id, object_id, version_id, 1, json)
+            .expect("snapshot bytes are canonical");
         (
             PublicationCandidate::new(snapshot, state, expected_current),
             object_id,
