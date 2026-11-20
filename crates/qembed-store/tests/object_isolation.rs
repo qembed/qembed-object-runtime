@@ -48,6 +48,15 @@ async fn same_tenant_objects_cannot_cross_reference_versions_or_snapshots() {
         .await
         .expect("Object B version and snapshot should be created");
 
+    let candidate = repository
+        .load_publication_candidate(&scope, object_a, version_b_id)
+        .await
+        .expect("Object A query should be tenant-scoped and object-scoped");
+    assert!(
+        candidate.is_none(),
+        "Object A must not resolve Object B's version even within the same tenant"
+    );
+
     // Tenant equality is not sufficient: the published-version pointer is
     // also bound to its owning Object by the composite foreign key.
     let pointer_error = sqlx::query(
@@ -70,7 +79,7 @@ async fn same_tenant_objects_cannot_cross_reference_versions_or_snapshots() {
     // The same rule applies to snapshot provenance, even when both Objects
     // belong to the same tenant.
     let snapshot_error = sqlx::query(
-        "INSERT INTO snapshots          (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection)          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7::jsonb)",
+        "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7::jsonb)",
     )
     .bind(tenant_id.to_string())
     .bind(SnapshotId::new().to_string())
