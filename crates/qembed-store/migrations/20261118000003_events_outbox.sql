@@ -26,7 +26,7 @@ CREATE TABLE events (
 -- version. The counter row is scoped to one aggregate; unrelated streams do
 -- not contend on a global sequence or lock.
 CREATE FUNCTION assign_event_stream_version() RETURNS trigger
-LANGUAGE plpgsql SET search_path = pg_catalog, public AS $event_stream_version$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $event_stream_version$
 BEGIN
     IF NEW.stream_version IS NOT NULL THEN
         RAISE EXCEPTION 'event stream_version is database-assigned'
