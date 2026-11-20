@@ -122,6 +122,10 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         .expect("object_version_id")
         .parse::<ObjectVersionId>()
         .expect("valid version ID");
+    let first_snapshot_id = version_json["snapshot_id"]
+        .as_str()
+        .expect("snapshot_id")
+        .to_owned();
 
     let publish_uri = format!("/owner/objects/{object_id}/versions/{version_id}/publish");
     let publish_response = test::call_service(&app, headers(&publish_uri).to_request()).await;
@@ -280,7 +284,89 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     .await
     .expect("retention deadlines should be queryable");
     assert!((86_390..=86_410).contains(&retention.0));
+
     assert!((2_591_990..=2_592_010).contains(&retention.1));
+
+    // Race a replacement publication against another invocation start. The
+    // Store row-lock protocol permits either committed Snapshot, never a Draft
+    // or an unrelated Snapshot.
+    let replacement_uri = format!("/owner/objects/{object_id}/versions");
+    let replacement = test::call_service(
+        &app,
+        headers(&replacement_uri)
+            .set_json(serde_json::json!({
+                "schema_version": 1,
+                "config": {
+                    "limits": { "max_tokens_per_invocation": 2048 },
+                    "revision": "concurrent-replacement"
+                }
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(replacement.status(), StatusCode::CREATED);
+    let replacement_json: serde_json::Value =
+        serde_json::from_slice(&test::read_body(replacement).await).expect("replacement JSON");
+    let replacement_version_id = replacement_json["object_version_id"]
+        .as_str()
+        .expect("replacement version ID")
+        .parse::<ObjectVersionId>()
+        .expect("valid replacement version ID");
+    let replacement_snapshot_id = replacement_json["snapshot_id"]
+        .as_str()
+        .expect("replacement snapshot ID")
+        .to_owned();
+
+    let publish_uri = format!(
+        "/owner/objects/{object_id}/versions/{replacement_version_id}/publish"
+    );
+    let race_invoke_uri = format!("/owner/objects/{object_id}/invocations");
+    let publish_request = headers(&publish_uri).to_request();
+    let invoke_request = headers(&race_invoke_uri)
+        .set_json(serde_json::json!({
+            "caller_id": caller_id,
+            "idempotency_key": "owner-invoke-publish-race",
+            "input": { "question": "race publication and invocation" }
+        }))
+        .to_request();
+    let (publish_race, invoke_race) = tokio::join!(
+        test::call_service(&app, publish_request),
+        test::call_service(&app, invoke_request)
+    );
+    assert_eq!(publish_race.status(), StatusCode::OK);
+    assert_eq!(invoke_race.status(), StatusCode::ACCEPTED);
+    let race_invocation_json: serde_json::Value =
+        serde_json::from_slice(&test::read_body(invoke_race).await)
+            .expect("race invocation response JSON");
+    let race_invocation_id = race_invocation_json["invocation_id"]
+        .as_str()
+        .expect("race invocation ID");
+    let pinned_snapshot: String = sqlx::query_scalar(
+        "SELECT snapshot_id::text FROM object_invocations WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(race_invocation_id)
+    .fetch_one(&pool)
+    .await
+    .expect("racing invocation should persist");
+    assert!(
+        pinned_snapshot == first_snapshot_id || pinned_snapshot == replacement_snapshot_id,
+        "invocation must pin either the prior published Snapshot or the replacement Snapshot"
+    );
+    let pinned_version_status: String = sqlx::query_scalar(
+        "SELECT ov.status::text FROM snapshots s JOIN object_versions ov USING (tenant_id, object_id, object_version_id) WHERE s.tenant_id=$1::uuid AND s.object_id=$2::uuid AND s.snapshot_id=$3::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(&pinned_snapshot)
+    .fetch_one(&pool)
+    .await
+    .expect("pinned snapshot must resolve to its version");
+    assert!(
+        pinned_version_status == "published" || pinned_version_status == "superseded",
+        "invocation must not pin a Draft Snapshot"
+    );
 
     drop(app);
     pool.close().await;
