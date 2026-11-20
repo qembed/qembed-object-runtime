@@ -57,7 +57,7 @@ This report maps every M1a acceptance ID in the canonical `qembed/qembed-sql/acc
 
 All seven previously open M1a gaps now have focused implementation and passing regression coverage in Rust PR #71 and canonical SQL PR #19.
 
-- Canonical SQL smoke: **358/358 assertions passed on PostgreSQL 15 and 358/358 on PostgreSQL 16**, both with pgvector 0.8.7, on SQL PR #19 HEAD `eb29da924624c486162ecc04c622b6c99266453f` (run [#44807249016](https://github.com/qembed/qembed-sql/actions/runs/44807249016)).
+- Canonical SQL smoke: **359/359 assertions passed on PostgreSQL 15 and 359/359 on PostgreSQL 16**, both with pgvector 0.8.7, on SQL PR #19 HEAD `538ba933eec07d9ffab554a2c9673464f413fe11` (run [#44807264847](https://github.com/qembed/qembed-sql/actions/runs/44807264847)).
 - Rust CI: stable workspace, integration and PostgreSQL tests passed on PostgreSQL 15.10 and 16.4; Rust 1.85 MSRV workspace and PostgreSQL tests passed on Rust PR #71 HEAD `500a053d7051ca5f21d05c81b8e8caca3b11f3af` (run [#44807132778](https://github.com/qembed/qembed-object-runtime/actions/runs/44807132778)).
 - The PostgreSQL 15 run initially caught a stale test assertion hard-coded to version 16; the harness now accepts both supported majors, and the corrected matrix is green.
 
