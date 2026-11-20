@@ -333,9 +333,7 @@ struct InvokeObjectRequest {
     input: serde_json::Value,
 }
 
-fn parse_invoke_body(
-    body: &[u8],
-) -> Result<(CallerId, String, serde_json::Value), ()> {
+fn parse_invoke_body(body: &[u8]) -> Result<(CallerId, String, serde_json::Value), ()> {
     canonicalize_json(body).map_err(|_| ())?;
     let request: InvokeObjectRequest = serde_json::from_slice(body).map_err(|_| ())?;
     let caller_id = request.caller_id.parse::<CallerId>().map_err(|_| ())?;
@@ -361,21 +359,48 @@ async fn invoke_object(
 ) -> Response {
     let object_id = match object_id.parse::<ObjectId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The object ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object ID is invalid.",
+            );
+        }
     };
     let (caller_id, idempotency_key, input) = match parse_invoke_body(&body) {
         Ok(request) => request,
-        Err(()) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The invocation request body is invalid."),
+        Err(()) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The invocation request body is invalid.",
+            );
+        }
     };
     let (tenant_id, token) = match owner_credentials(&headers) {
         Ok(v) => v,
         Err(error) => return credential_error(error),
     };
-    match state.backend.invoke(tenant_id, token, object_id, caller_id, idempotency_key, input).await {
+    match state
+        .backend
+        .invoke(
+            tenant_id,
+            token,
+            object_id,
+            caller_id,
+            idempotency_key,
+            input,
+        )
+        .await
+    {
         Ok(invocation_id) => (
             StatusCode::ACCEPTED,
-            Json(InvocationStartResponse { invocation_id: invocation_id.to_string(), status: "received" }),
-        ).into_response(),
+            Json(InvocationStartResponse {
+                invocation_id: invocation_id.to_string(),
+                status: "received",
+            }),
+        )
+            .into_response(),
         Err(error) => backend_error(error, BackendErrorContext::Ordinary),
     }
 }
@@ -448,10 +473,7 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "conflict",
             "The invocation conflicts with the current object or idempotency state.",
         ),
-        (
-            _,
-            OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Internal,
-        ) => api_error(
+        (_, OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
             "An unexpected internal error occurred.",
