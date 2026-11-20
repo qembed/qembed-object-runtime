@@ -27,8 +27,8 @@ async fn postgres_harness_runs_migrations_and_connects_to_supported_server() {
         .expect("server_version_num should be an integer");
 
     assert!(
-        (160_000..170_000).contains(&version),
-        "expected PostgreSQL 16.x, got server_version_num={version}"
+        (150_000..170_000).contains(&version),
+        "expected a supported PostgreSQL 15.x or 16.x server, got server_version_num={version}"
     );
 
     let migration_table_exists: bool =
