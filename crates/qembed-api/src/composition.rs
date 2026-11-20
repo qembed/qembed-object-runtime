@@ -232,7 +232,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
                         qembed_store::caller::CallerResolutionError::NotDelegated,
                     ),
-                )) => Err(OwnerApiBackendError::Forbidden),
+                )) => Err(OwnerApiBackendError::NotFound),
                 Err(InvocationStartError::Store(
                     qembed_store::begin_invocation::BeginInvocationError::Idempotency(
                         qembed_store::idempotency::IdempotencyReservationError::PayloadMismatch,
