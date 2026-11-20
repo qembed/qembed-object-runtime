@@ -364,6 +364,7 @@ pub async fn begin_invocation(
         EventId::new(),
         invocation_id,
         &command,
+        snapshot_id,
         caller,
         knowledge_revision,
     )
@@ -391,6 +392,7 @@ async fn append_invocation_received(
     event_id: EventId,
     invocation_id: InvocationId,
     command: &BeginInvocationCommand,
+    snapshot_id: SnapshotId,
     caller: ResolvedCaller,
     knowledge_revision: u64,
 ) -> Result<(), sqlx::Error> {
