@@ -247,7 +247,7 @@ async fn snapshot_must_match_the_supplied_version_and_tenant() {
 #[tokio::test]
 async fn one_thousand_identical_configuration_creations_reuse_one_snapshot() {
     let (pool, repository, scope, object_id) = setup().await;
-    let bytes = br#"{\"limits\":{\"max_tokens_per_invocation\":1024},\"tools\":[{\"tool_id\":\"11111111-0000-0000-0000-000000000001\",\"tool_version_id\":\"11111111-0000-0000-0000-0000000000a1\"}]}"#;
+    let bytes = br#"{"limits":{"max_tokens_per_invocation":1024},"tools":[{"tool_id":"11111111-0000-0000-0000-000000000001","tool_version_id":"11111111-0000-0000-0000-0000000000a1"}]}"#;
     let mut canonical_snapshot_id = None;
     let mut canonical_version_id = None;
 
