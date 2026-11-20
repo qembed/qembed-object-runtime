@@ -107,6 +107,7 @@ pub fn map_begin_invocation_error(error: &BeginInvocationError) -> ApiError {
             RuntimeError::BudgetExceeded
         }
         BeginInvocationError::ObjectNotActive
+        | BeginInvocationError::NoPublishedVersion
         | BeginInvocationError::SnapshotIsNotCurrentPublishedVersion => RuntimeError::Conflict,
         BeginInvocationError::CallerResolution(_)
         | BeginInvocationError::Idempotency(_)
@@ -217,6 +218,7 @@ mod tests {
                 "budget_exceeded",
             ),
             (BeginInvocationError::ObjectNotActive, 409, "conflict"),
+            (BeginInvocationError::NoPublishedVersion, 409, "conflict"),
             (
                 BeginInvocationError::InvalidInputMessage,
                 400,
