@@ -358,13 +358,16 @@ SQLX_OFFLINE=true cargo check --workspace
   - Проверены повторный idempotency key (тот же Invocation ID и ровно один набор durable side effects), teardown первого API/pool и reconnect со свежим Runtime worker, а также cross-tenant 404.
   - Worker после restart адресно запускается по сохранённому Invocation ID; это не заявляет наличие outbox dispatcher или production process supervisor. Caller delegation и Object budget создаются тестовыми provisioning fixtures вне Owner API.
   - DoD: flow проходит через HTTP/API, runtime, PostgreSQL и Mock ChatProvider без внешнего сервиса; stable и Rust 1.85 MSRV CI зелёные.
-- [ ] **RUST-046 (S)** Проверить DB-backed provenance constraints, относящиеся к M1a.
-  - Тесты: integration — запрещённые provenance claims отвергаются; app-level verifier остаётся тестом M2.
-  - DoD: тесты не заявляют наличие application-level retrieval/provenance до реализации M2.
+- [x] **RUST-046 (S)** Проверить DB-backed provenance constraints, относящиеся к M1a.
+  - T-04/T-21: прямые PostgreSQL INSERT probes отвергают запрещённые provenance claims; Tool/Observed служит положительным контролем.
+  - T-27: PostgreSQL RLS probes проверяют Caller A/B isolation для episodic memories, embeddings и conflict edges, fail-closed без Caller context и очистку transaction-local Caller context после commit.
+  - Evidence: [RUST-046 DB provenance report](docs/RUST-046_DB_PROVENANCE_EVIDENCE.md); canonical SQL smoke run #44801382870 на PostgreSQL 16 + pgvector 0.8.7, SQL HEAD `bfa5d885ecd3ee96e59b57e4b2d17d172c532e6b`.
+  - Граница: application-level retrieval/provenance verifier не реализован и остаётся M2; SQL GUC trust model не защищает от произвольного SQL под runtime DB role.
 
-- [ ] **RUST-047 (S)** Добавить failure-injection tests для M1a crash boundaries.
-  - Тесты: crash до/после transaction commit; provider timeout; restart worker; outbox rollback.
-  - DoD: доказана атомарность persistence и restart durability mock-only flow.
+- [x] **RUST-047 (S)** Добавить failure-injection tests для M1a crash boundaries.
+  - Реализованы PostgreSQL integration tests: termination backend до COMMIT с атомарным rollback всех invocation side effects; commit + teardown/reconnect; provider timeout → durable OutcomeUnknown; worker restart не повторяет неоднозначный provider call.
+  - Evidence: [RUST-047 failure-injection report](docs/RUST-047_FAILURE_INJECTION.md); PR #69 merged as `3f49d5847c0273caa7efc63aa73160fac896156f`, stable и Rust 1.85 MSRV jobs passed.
+  - Граница: не заявлены production outbox dispatcher/redelivery, process supervisor, provider-side idempotency или external outcome reconciliation.
 
 - [ ] **RUST-048 (M)** Прогнать M1a acceptance suite.
   - Тесты: все M1a cases из `acceptance_T-01_to_T-64.md`, включая tenant isolation, idempotency, snapshots, events, API и capability compile-fail.
