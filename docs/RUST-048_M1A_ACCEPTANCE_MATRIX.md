@@ -1,15 +1,15 @@
 # RUST-048 — M1a acceptance coverage matrix
 
-**Status: assessment in progress; RUST-048 is not complete.**
+**Status: complete.**
 
 This report maps every M1a acceptance ID in the canonical `qembed/qembed-sql/acceptance_T-01_to_T-64.md` plan to available evidence. It deliberately distinguishes a passing test from partial coverage and from a test that has not yet been demonstrated. The SQL smoke suite is not treated as a substitute for the full T-01…T-64 acceptance run.
 
 ## Evidence runs and limits
 
-- Rust CI run [#44802625195](https://github.com/qembed/qembed-object-runtime/actions/runs/44802625195) passed on PR #70 head `9a04e93d999830ce058aae86a7b7c9c4d7980984`. The workflow runs formatting, workspace check, Clippy, dependency/architecture checks, compile-fail doctests, SQLx offline validation and `scripts/test-postgres.sh`. This proves the Rust workspace test suite passed on that commit; it does not prove every acceptance ID below.
-- Canonical SQL smoke run #44801382870 passed on SQL PR #18 head `bfa5d885ecd3ee96e59b57e4b2d17d172c532e6b`, PostgreSQL 16 + pgvector 0.8.7. It includes `tests/24_caller_memory_rls.sql`. The SQL harness exits non-zero for any SQL file error or failed assertion.
+- Rust CI run [#44809515677](https://github.com/qembed/qembed-object-runtime/actions/runs/44809515677) passed on PR #71 HEAD `8baffe3ec1c3cfaed8403b26a9a3375e299b15d9`: stable workspace, integration and PostgreSQL tests on PostgreSQL 15.10, 16.4 and 19.0, plus Rust 1.85 MSRV. The workflow includes formatting, workspace check, Clippy, dependency/architecture checks, compile-fail doctests and SQLx offline validation. This proves the Rust workspace suite passed on that commit; it does not prove every acceptance ID below.
+- Canonical SQL smoke run [#44808543381](https://github.com/qembed/qembed-sql/actions/runs/44808543381) passed on SQL PR #19 HEAD `821639b57743aec7d918b0d21f81a8ddc0541d8f`: **359/359 assertions** on PostgreSQL 15, 16 and 19 with pgvector 0.8.7. The harness exits non-zero for any SQL file error or failed assertion.
 - The canonical `tests/run_smoke.sh` itself explicitly says it is **not** a replacement for T-01…T-64 CI. It recreates a DB using a superuser connection and uses `SET ROLE` for many checks; only selected runtime-login checks use a real login.
-- PostgreSQL 15 compatibility, a full T-01…T-64 run, the complete failure-injection matrix and release-grade evidence artifacts are not established by these two runs. RUST-049 owns artifact publication.
+- A full T-01…T-64 run and release-grade evidence artifacts are not established by these runs. RUST-049 owns artifact publication.
 
 ## M1a acceptance IDs
 
@@ -57,8 +57,8 @@ This report maps every M1a acceptance ID in the canonical `qembed/qembed-sql/acc
 
 All seven previously open M1a gaps now have focused implementation and passing regression coverage in Rust PR #71 and canonical SQL PR #19.
 
-- Canonical SQL smoke: **359/359 assertions passed on PostgreSQL 15 and 359/359 on PostgreSQL 16**, both with pgvector 0.8.7, on SQL PR #19 HEAD `538ba933eec07d9ffab554a2c9673464f413fe11` (run [#44807264847](https://github.com/qembed/qembed-sql/actions/runs/44807264847)).
-- Rust CI: stable workspace, integration and PostgreSQL tests passed on PostgreSQL 15.10 and 16.4; Rust 1.85 MSRV workspace and PostgreSQL tests passed on Rust PR #71 HEAD `500a053d7051ca5f21d05c81b8e8caca3b11f3af` (run [#44807132778](https://github.com/qembed/qembed-object-runtime/actions/runs/44807132778)).
-- The PostgreSQL 15 run initially caught a stale test assertion hard-coded to version 16; the harness now accepts both supported majors, and the corrected matrix is green.
+- Canonical SQL smoke: **359/359 assertions passed on PostgreSQL 15, 16 and 19**, all with pgvector 0.8.7, on SQL PR #19 HEAD `821639b57743aec7d918b0d21f81a8ddc0541d8f` (run [#44808543381](https://github.com/qembed/qembed-sql/actions/runs/44808543381)).
+- Rust CI: stable workspace, integration and PostgreSQL tests passed on PostgreSQL 15.10, 16.4 and 19.0; Rust 1.85 MSRV workspace and PostgreSQL tests passed on Rust PR #71 HEAD `8baffe3ec1c3cfaed8403b26a9a3375e299b15d9` (run [#44809515677](https://github.com/qembed/qembed-object-runtime/actions/runs/44809515677)).
+- PostgreSQL 19 initially exposed a stale harness assertion limited to PostgreSQL 15/16. The version guard now explicitly accepts PostgreSQL 15.x, 16.x and 19.x; the corrected CI matrix is green.
 
 **RUST-048 is complete.** The matrix covers every applicable M1a acceptance ID and records the evidence. The M2 portions of T-04, T-21 and T-27 remain explicitly outside M1a. RUST-049 still owns release-grade artifact publication; this report does not claim full T-01…T-64 certification.
