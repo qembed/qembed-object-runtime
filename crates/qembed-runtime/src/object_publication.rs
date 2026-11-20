@@ -114,3 +114,163 @@ pub enum ObjectPublicationError<E> {
     ValidationRejected(ObjectValidationError),
     Store(E),
 }
+
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        convert::Infallible,
+        future::ready,
+        sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+
+    use qembed_domain::{
+        ids::{ObjectVersionId, SnapshotId, TenantId},
+        object::ObjectState,
+        ports::{ObjectPublicationStore, PublicationCandidate},
+        scope::Scope,
+        snapshot::Snapshot,
+        test_support::scope_for_tenant,
+    };
+
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingStore {
+        candidate: Mutex<Option<PublicationCandidate>>,
+        began: AtomicBool,
+        rejected: AtomicBool,
+        published: AtomicBool,
+    }
+
+    impl ObjectPublicationStore for RecordingStore {
+        type Error = Infallible;
+
+        fn load_publication_candidate(
+            &self,
+            _: &Scope,
+            _: ObjectId,
+            _: ObjectVersionId,
+        ) -> impl Future<Output = Result<Option<PublicationCandidate>, Self::Error>> + Send {
+            let candidate = self.candidate.lock().expect("candidate lock").take();
+            ready(Ok(candidate))
+        }
+
+        fn begin_validation(
+            &self,
+            _: &Scope,
+            _: ObjectId,
+        ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+            self.began.store(true, Ordering::SeqCst);
+            ready(Ok(()))
+        }
+
+        fn reject_validation(
+            &self,
+            _: &Scope,
+            _: ObjectId,
+        ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+            self.rejected.store(true, Ordering::SeqCst);
+            ready(Ok(()))
+        }
+
+        fn publish_version(
+            &self,
+            _: &Scope,
+            _: ObjectId,
+            _: ObjectVersionId,
+            _: Option<ObjectVersionId>,
+            evidence: &qembed_domain::object_validation::ValidationEvidence,
+        ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+            assert!(evidence.max_tokens_per_invocation() > 0);
+            self.published.store(true, Ordering::SeqCst);
+            ready(Ok(()))
+        }
+    }
+
+    fn candidate(
+        state: ObjectState,
+        expected_current: Option<ObjectVersionId>,
+        valid: bool,
+    ) -> (PublicationCandidate, ObjectId, ObjectVersionId) {
+        let tenant_id = TenantId::new();
+        let object_id = ObjectId::new();
+        let version_id = ObjectVersionId::new();
+        let json = if valid {
+            br#"{"limits":{"max_tokens_per_invocation":128}}"#.to_vec()
+        } else {
+            br#"{"limits":{}}"#.to_vec()
+        };
+        let snapshot = Snapshot::new(
+            SnapshotId::new(),
+            tenant_id,
+            object_id,
+            version_id,
+            1,
+            json,
+        ).expect("snapshot bytes are canonical");
+        (
+            PublicationCandidate::new(snapshot, state, expected_current),
+            object_id,
+            version_id,
+        )
+    }
+
+    #[tokio::test]
+    async fn first_publication_enters_validation_then_publishes() {
+        let (candidate, object_id, version_id) = candidate(ObjectState::Draft, None, true);
+        let tenant_id = candidate.snapshot().tenant_id();
+        let store = RecordingStore::default();
+        *store.candidate.lock().expect("candidate lock") = Some(candidate);
+        let service = ObjectPublicationService::new(store);
+        let scope = scope_for_tenant(tenant_id);
+
+        service.publish(&scope, object_id, version_id).await
+            .expect("valid first publication succeeds");
+
+        assert!(service.store.began.load(Ordering::SeqCst));
+        assert!(service.store.published.load(Ordering::SeqCst));
+        assert!(!service.store.rejected.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn replacement_keeps_current_lifecycle_state_during_validation() {
+        let current = ObjectVersionId::new();
+        let (candidate, object_id, version_id) =
+            candidate(ObjectState::Active, Some(current), true);
+        let tenant_id = candidate.snapshot().tenant_id();
+        let store = RecordingStore::default();
+        *store.candidate.lock().expect("candidate lock") = Some(candidate);
+        let service = ObjectPublicationService::new(store);
+        let scope = scope_for_tenant(tenant_id);
+
+        service.publish(&scope, object_id, version_id).await
+            .expect("valid replacement succeeds");
+
+        assert!(!service.store.began.load(Ordering::SeqCst));
+        assert!(service.store.published.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn rejected_first_publication_returns_object_to_draft() {
+        let (candidate, object_id, version_id) = candidate(ObjectState::Draft, None, false);
+        let tenant_id = candidate.snapshot().tenant_id();
+        let store = RecordingStore::default();
+        *store.candidate.lock().expect("candidate lock") = Some(candidate);
+        let service = ObjectPublicationService::new(store);
+        let scope = scope_for_tenant(tenant_id);
+
+        assert!(matches!(
+            service.publish(&scope, object_id, version_id).await,
+            Err(ObjectPublicationError::ValidationRejected(
+                ObjectValidationError::MissingMaxTokensPerInvocation
+            ))
+        ));
+        assert!(service.store.began.load(Ordering::SeqCst));
+        assert!(service.store.rejected.load(Ordering::SeqCst));
+        assert!(!service.store.published.load(Ordering::SeqCst));
+    }
+}
