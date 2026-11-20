@@ -27,7 +27,6 @@ pub enum OwnerApiBackendError {
     NotFound,
     ValidationRejected,
     Conflict,
-    Forbidden,
     Internal,
 }
 
@@ -447,11 +446,6 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "Authentication is required.",
-        ),
-        (_, OwnerApiBackendError::Forbidden) => api_error(
-            StatusCode::FORBIDDEN,
-            "forbidden",
-            "The selected Caller is not delegated to this authenticated Principal.",
         ),
         (_, OwnerApiBackendError::NotFound) => api_error(
             StatusCode::NOT_FOUND,
