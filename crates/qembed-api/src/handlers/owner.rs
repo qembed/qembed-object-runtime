@@ -305,11 +305,13 @@ async fn create_object_version(
             "not_found",
             "The requested resource was not found.",
         ),
-        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "An unexpected internal error occurred.",
-        ),
+        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -430,11 +432,13 @@ async fn inspect_invocation(
             "not_found",
             "The requested resource was not found.",
         ),
-        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "An unexpected internal error occurred.",
-        ),
+        Err(OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Conflict) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
         Err(OwnerApiBackendError::Internal) => api_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -521,7 +525,13 @@ mod tests {
             _: String,
             _: ObjectId,
             _: ObjectVersionId,
-        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>> + Send + '_>> {
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>>
+                    + Send
+                    + '_,
+            >,
+        > {
             Box::pin(async { Err(OwnerApiBackendError::Internal) })
         }
 
