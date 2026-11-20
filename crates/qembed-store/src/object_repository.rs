@@ -17,7 +17,10 @@ use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
-use qembed_domain::ports::{DraftVersionCreation, ObjectCreationStore, ObjectPublicationStore, ObjectVersionCreationStore, PublicationCandidate};
+use qembed_domain::ports::{
+    DraftVersionCreation, ObjectCreationStore, ObjectPublicationStore, ObjectVersionCreationStore,
+    PublicationCandidate,
+};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
@@ -256,21 +259,49 @@ impl ObjectRepository {
         .map_err(ObjectRepositoryError::Database)?;
 
         let candidate = row
-            .map(|(state, current, snapshot_id, tenant, object, version, schema, bytes, hash)| {
-                let snapshot_id = snapshot_id.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                let tenant = tenant.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                let object = object.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                let version = version.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                let schema = u32::try_from(schema).map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
-                let hash: [u8; 32] = hash.try_into().map_err(|_| ObjectRepositoryError::InvalidHashLength)?;
-                let snapshot = Snapshot::from_persisted(
-                    snapshot_id, tenant, object, version, schema, bytes, hash,
-                ).map_err(ObjectRepositoryError::InvalidSnapshot)?;
-                let expected_current = current
-                    .map(|value| value.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier))
-                    .transpose()?;
-                Ok(PublicationCandidate::new(snapshot, parse_object_state(&state)?, expected_current))
-            })
+            .map(
+                |(state, current, snapshot_id, tenant, object, version, schema, bytes, hash)| {
+                    let snapshot_id = snapshot_id
+                        .parse()
+                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                    let tenant = tenant
+                        .parse()
+                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                    let object = object
+                        .parse()
+                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                    let version = version
+                        .parse()
+                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                    let schema = u32::try_from(schema)
+                        .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
+                    let hash: [u8; 32] = hash
+                        .try_into()
+                        .map_err(|_| ObjectRepositoryError::InvalidHashLength)?;
+                    let snapshot = Snapshot::from_persisted(
+                        snapshot_id,
+                        tenant,
+                        object,
+                        version,
+                        schema,
+                        bytes,
+                        hash,
+                    )
+                    .map_err(ObjectRepositoryError::InvalidSnapshot)?;
+                    let expected_current = current
+                        .map(|value| {
+                            value
+                                .parse()
+                                .map_err(|_| ObjectRepositoryError::InvalidIdentifier)
+                        })
+                        .transpose()?;
+                    Ok(PublicationCandidate::new(
+                        snapshot,
+                        parse_object_state(&state)?,
+                        expected_current,
+                    ))
+                },
+            )
             .transpose()?;
 
         transaction
@@ -568,11 +599,19 @@ impl ObjectPublicationStore for ObjectRepository {
         ObjectRepository::load_publication_candidate(self, scope, object_id, version_id).await
     }
 
-    async fn begin_validation(&self, scope: &Scope, object_id: ObjectId) -> Result<(), Self::Error> {
+    async fn begin_validation(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+    ) -> Result<(), Self::Error> {
         ObjectRepository::begin_validation(self, scope, object_id).await
     }
 
-    async fn reject_validation(&self, scope: &Scope, object_id: ObjectId) -> Result<(), Self::Error> {
+    async fn reject_validation(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+    ) -> Result<(), Self::Error> {
         ObjectRepository::reject_validation(self, scope, object_id).await
     }
 
@@ -584,7 +623,15 @@ impl ObjectPublicationStore for ObjectRepository {
         expected_current: Option<ObjectVersionId>,
         evidence: &ValidationEvidence,
     ) -> Result<(), Self::Error> {
-        ObjectRepository::publish_version(self, scope, object_id, version_id, expected_current, evidence).await
+        ObjectRepository::publish_version(
+            self,
+            scope,
+            object_id,
+            version_id,
+            expected_current,
+            evidence,
+        )
+        .await
     }
 }
 
@@ -701,7 +748,9 @@ impl fmt::Display for ObjectRepositoryError {
                 write!(formatter, "snapshot construction failed: {error:?}")
             }
             Self::InvalidIdentifier => formatter.write_str("persisted identifier is invalid"),
-            Self::InvalidHashLength => formatter.write_str("persisted snapshot hash is not 32 bytes"),
+            Self::InvalidHashLength => {
+                formatter.write_str("persisted snapshot hash is not 32 bytes")
+            }
             Self::DeduplicationRowMissing => {
                 formatter.write_str("snapshot content conflict has no matching row")
             }
