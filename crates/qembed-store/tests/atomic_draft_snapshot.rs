@@ -242,3 +242,48 @@ async fn snapshot_must_match_the_supplied_version_and_tenant() {
     ));
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn one_thousand_identical_configuration_creations_reuse_one_snapshot() {
+    let (pool, repository, scope, object_id) = setup().await;
+    let bytes = br#"{\"limits\":{\"max_tokens_per_invocation\":1024},\"tools\":[{\"tool_id\":\"11111111-0000-0000-0000-000000000001\",\"tool_version_id\":\"11111111-0000-0000-0000-0000000000a1\"}]}"#;
+    let mut canonical_snapshot_id = None;
+    let mut canonical_version_id = None;
+
+    for number in 1..=1_000 {
+        let (version, snapshot) = draft(scope.tenant_id(), object_id, number, bytes);
+        let result = repository
+            .create_draft_version_with_snapshot(&scope, &version, &snapshot)
+            .await
+            .expect("identical immutable configuration must reuse its snapshot");
+        match result {
+            DraftCreation::Created {
+                version_id,
+                snapshot_id,
+            } => {
+                assert_eq!(number, 1, "only the first configuration can create rows");
+                canonical_version_id = Some(version_id);
+                canonical_snapshot_id = Some(snapshot_id);
+            }
+            DraftCreation::IdenticalContent {
+                version_id,
+                snapshot_id,
+            } => {
+                assert_eq!(canonical_version_id, Some(version_id));
+                assert_eq!(canonical_snapshot_id, Some(snapshot_id));
+            }
+        }
+    }
+
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM object_versions WHERE tenant_id = $1::uuid AND object_id = $2::uuid), (SELECT count(*) FROM snapshots WHERE tenant_id = $1::uuid AND object_id = $2::uuid)",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("deduplicated configuration should have one durable version and snapshot");
+    assert_eq!(counts, (1, 1));
+    pool.close().await;
+}
