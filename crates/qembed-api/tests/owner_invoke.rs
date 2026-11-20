@@ -1,6 +1,8 @@
 use axum::http::StatusCode;
 mod support;
-use qembed_domain::ids::{CallerId, ObjectId, ObjectVersionId, PrincipalId, TenantId};
+use qembed_domain::ids::{
+    CallerId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId,
+};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
 use support::test;
@@ -19,14 +21,35 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         .expect("the test database migrations should be applied");
 
     let tenant_id = TenantId::new();
+    let other_tenant_id = TenantId::new();
+    let other_principal_id = PrincipalId::new();
+    let other_token = format!("owner-invoke-other-{}", PrincipalId::new());
     let principal_id = PrincipalId::new();
     let caller_id = CallerId::new();
     let token = format!("owner-invoke-{}", PrincipalId::new());
-    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid), ($2::uuid)")
         .bind(tenant_id.to_string())
+        .bind(other_tenant_id.to_string())
         .execute(&pool)
         .await
-        .expect("tenant fixture should be inserted");
+        .expect("tenant fixtures should be inserted");
+    sqlx::query(
+        "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
+    )
+    .bind(other_tenant_id.to_string())
+    .bind(other_principal_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("second tenant Owner fixture should be inserted");
+    sqlx::query(
+        "INSERT INTO owner_credentials (tenant_id, caller_id, token_hash) VALUES ($1::uuid, $2::uuid, $3)",
+    )
+    .bind(other_tenant_id.to_string())
+    .bind(other_principal_id.to_string())
+    .bind(Sha256::digest(other_token.as_bytes()).to_vec())
+    .execute(&pool)
+    .await
+    .expect("second tenant Owner credential should be inserted");
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )
@@ -101,6 +124,10 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         .expect("object_version_id")
         .parse::<ObjectVersionId>()
         .expect("valid version ID");
+    let first_snapshot_id = version_json["snapshot_id"]
+        .as_str()
+        .expect("snapshot_id")
+        .to_owned();
 
     let publish_uri = format!("/owner/objects/{object_id}/versions/{version_id}/publish");
     let publish_response = test::call_service(&app, headers(&publish_uri).to_request()).await;
@@ -158,7 +185,70 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     assert_eq!(replay.status(), StatusCode::ACCEPTED);
     let replay_json: serde_json::Value =
         serde_json::from_slice(&test::read_body(replay).await).expect("replay response JSON");
+
     assert_eq!(replay_json["invocation_id"], invocation_id);
+
+    // Owner inspection exposes only the minimized projection and keeps
+    // missing and cross-tenant invocation IDs indistinguishable.
+    let inspected = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/owner/invocations/{invocation_id}"))
+            .insert_header(("X-Tenant-ID", tenant_id.to_string()))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(inspected.status(), StatusCode::OK);
+    let inspected_json: serde_json::Value =
+        serde_json::from_slice(&test::read_body(inspected).await).expect("inspection JSON");
+    assert_eq!(inspected_json["invocation_id"], invocation_id);
+    assert_eq!(inspected_json["status"], "queued");
+    let inspected_fields = inspected_json.as_object().expect("inspection object");
+    assert_eq!(inspected_fields.len(), 5);
+    for forbidden in [
+        "tenant_id",
+        "caller_id",
+        "snapshot_id",
+        "trace_id",
+        "lease_owner",
+        "fencing_token",
+        "input",
+        "provider",
+    ] {
+        assert!(
+            !inspected_fields.contains_key(forbidden),
+            "leaked {forbidden}"
+        );
+    }
+
+    let missing_id = InvocationId::new();
+    let missing = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/owner/invocations/{missing_id}"))
+            .insert_header(("X-Tenant-ID", tenant_id.to_string()))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let cross_tenant = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/owner/invocations/{invocation_id}"))
+            .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
+            .insert_header((
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {other_token}"),
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(cross_tenant.status(), StatusCode::NOT_FOUND);
+    let missing_body = test::read_body(missing).await;
+    let cross_tenant_body = test::read_body(cross_tenant).await;
+    assert_eq!(missing_body, cross_tenant_body);
 
     let mismatch = test::call_service(
         &app,
@@ -208,7 +298,88 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     .await
     .expect("retention deadlines should be queryable");
     assert!((86_390..=86_410).contains(&retention.0));
+
     assert!((2_591_990..=2_592_010).contains(&retention.1));
+
+    // Race a replacement publication against another invocation start. The
+    // Store row-lock protocol permits either committed Snapshot, never a Draft
+    // or an unrelated Snapshot.
+    let replacement_uri = format!("/owner/objects/{object_id}/versions");
+    let replacement = test::call_service(
+        &app,
+        headers(&replacement_uri)
+            .set_json(serde_json::json!({
+                "schema_version": 1,
+                "config": {
+                    "limits": { "max_tokens_per_invocation": 2048 },
+                    "revision": "concurrent-replacement"
+                }
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(replacement.status(), StatusCode::CREATED);
+    let replacement_json: serde_json::Value =
+        serde_json::from_slice(&test::read_body(replacement).await).expect("replacement JSON");
+    let replacement_version_id = replacement_json["object_version_id"]
+        .as_str()
+        .expect("replacement version ID")
+        .parse::<ObjectVersionId>()
+        .expect("valid replacement version ID");
+    let replacement_snapshot_id = replacement_json["snapshot_id"]
+        .as_str()
+        .expect("replacement snapshot ID")
+        .to_owned();
+
+    let publish_uri =
+        format!("/owner/objects/{object_id}/versions/{replacement_version_id}/publish");
+    let race_invoke_uri = format!("/owner/objects/{object_id}/invocations");
+    let publish_request = headers(&publish_uri).to_request();
+    let invoke_request = headers(&race_invoke_uri)
+        .set_json(serde_json::json!({
+            "caller_id": caller_id,
+            "idempotency_key": "owner-invoke-publish-race",
+            "input": { "question": "race publication and invocation" }
+        }))
+        .to_request();
+    let (publish_race, invoke_race) = tokio::join!(
+        test::call_service(&app, publish_request),
+        test::call_service(&app, invoke_request)
+    );
+    assert_eq!(publish_race.status(), StatusCode::OK);
+    assert_eq!(invoke_race.status(), StatusCode::ACCEPTED);
+    let race_invocation_json: serde_json::Value =
+        serde_json::from_slice(&test::read_body(invoke_race).await)
+            .expect("race invocation response JSON");
+    let race_invocation_id = race_invocation_json["invocation_id"]
+        .as_str()
+        .expect("race invocation ID");
+    let pinned_snapshot: String = sqlx::query_scalar(
+        "SELECT snapshot_id::text FROM object_invocations WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(race_invocation_id)
+    .fetch_one(&pool)
+    .await
+    .expect("racing invocation should persist");
+    assert!(
+        pinned_snapshot == first_snapshot_id || pinned_snapshot == replacement_snapshot_id,
+        "invocation must pin either the prior published Snapshot or the replacement Snapshot"
+    );
+    let pinned_version_status: String = sqlx::query_scalar(
+        "SELECT ov.status::text FROM snapshots s JOIN object_versions ov USING (tenant_id, object_id, object_version_id) WHERE s.tenant_id=$1::uuid AND s.object_id=$2::uuid AND s.snapshot_id=$3::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(&pinned_snapshot)
+    .fetch_one(&pool)
+    .await
+    .expect("pinned snapshot must resolve to its version");
+    assert!(
+        pinned_version_status == "published" || pinned_version_status == "superseded",
+        "invocation must not pin a Draft Snapshot"
+    );
 
     drop(app);
     pool.close().await;
