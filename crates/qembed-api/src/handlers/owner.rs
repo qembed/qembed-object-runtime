@@ -15,7 +15,7 @@ use axum::{
     routing::{get, post},
 };
 use qembed_domain::{
-    ids::{InvocationId, ObjectId, ObjectVersionId, TenantId},
+    ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
     jcs::canonicalize_json,
 };
 
@@ -27,6 +27,7 @@ pub enum OwnerApiBackendError {
     NotFound,
     ValidationRejected,
     Conflict,
+    Forbidden,
     Internal,
 }
 
@@ -86,6 +87,15 @@ pub trait OwnerApiBackend: Send + Sync {
                 + '_,
         >,
     >;
+    fn invoke(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        caller_id: CallerId,
+        idempotency_key: String,
+        input: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>>;
     fn inspect(
         &self,
         tenant_id: TenantId,
@@ -125,6 +135,10 @@ pub fn owner_router(backend: impl OwnerApiBackend + 'static) -> Router {
         .route(
             "/owner/objects/{object_id}/versions/{version_id}/publish",
             post(publish_object_version),
+        )
+        .route(
+            "/owner/objects/{object_id}/invocations",
+            post(invoke_object),
         )
         .route(
             "/owner/invocations/{invocation_id}",
@@ -311,6 +325,61 @@ async fn publish_object_version(
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InvokeObjectRequest {
+    caller_id: String,
+    idempotency_key: String,
+    input: serde_json::Value,
+}
+
+fn parse_invoke_body(
+    body: &[u8],
+) -> Result<(CallerId, String, serde_json::Value), ()> {
+    canonicalize_json(body).map_err(|_| ())?;
+    let request: InvokeObjectRequest = serde_json::from_slice(body).map_err(|_| ())?;
+    let caller_id = request.caller_id.parse::<CallerId>().map_err(|_| ())?;
+    let input_bytes = serde_json::to_vec(&request.input).map_err(|_| ())?;
+    let canonical_input = canonicalize_json(&input_bytes).map_err(|_| ())?;
+    if canonical_input.len() > 65_536 {
+        return Err(());
+    }
+    Ok((caller_id, request.idempotency_key, request.input))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct InvocationStartResponse {
+    pub invocation_id: String,
+    pub status: &'static str,
+}
+
+async fn invoke_object(
+    State(state): State<OwnerApiState>,
+    Path(object_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let object_id = match object_id.parse::<ObjectId>() {
+        Ok(id) => id,
+        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The object ID is invalid."),
+    };
+    let (caller_id, idempotency_key, input) = match parse_invoke_body(&body) {
+        Ok(request) => request,
+        Err(()) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The invocation request body is invalid."),
+    };
+    let (tenant_id, token) = match owner_credentials(&headers) {
+        Ok(v) => v,
+        Err(error) => return credential_error(error),
+    };
+    match state.backend.invoke(tenant_id, token, object_id, caller_id, idempotency_key, input).await {
+        Ok(invocation_id) => (
+            StatusCode::ACCEPTED,
+            Json(InvocationStartResponse { invocation_id: invocation_id.to_string(), status: "received" }),
+        ).into_response(),
+        Err(error) => backend_error(error, BackendErrorContext::Ordinary),
+    }
+}
+
 async fn inspect_invocation(
     State(state): State<OwnerApiState>,
     Path(invocation_id): Path<String>,
@@ -353,6 +422,16 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "Authentication is required.",
+        ),
+        (_, OwnerApiBackendError::Forbidden) => api_error(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "The selected Caller is not delegated to this authenticated Principal.",
+        ),
+        (_, OwnerApiBackendError::Conflict) => api_error(
+            StatusCode::CONFLICT,
+            "conflict",
+            "The invocation conflicts with the current object or idempotency state.",
         ),
         (_, OwnerApiBackendError::NotFound) => api_error(
             StatusCode::NOT_FOUND,
