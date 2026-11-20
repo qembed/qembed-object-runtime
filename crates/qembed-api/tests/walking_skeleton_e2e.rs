@@ -22,7 +22,7 @@ use support::test;
 
 use qembed_api::composition::configure_owner_routes;
 
-const OWNER_TOKEN_PREFIX: &str = "walking-skeleton-owner-";
+const OWNER_TOKEN_PREFIX: &str = "SECRET_SENTINEL_DO_NOT_LOG_";
 const MOCK_MODEL: &str = "test-chat";
 const USER_INPUT: &str = r#"{"question":"hello from the walking skeleton","sequence":1}"#;
 const MOCK_OUTPUT: &str = "deterministic walking-skeleton answer";
@@ -187,8 +187,13 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     )
     .await;
     assert_eq!(accepted.status(), StatusCode::ACCEPTED);
+    let accepted_body = test::read_body(accepted).await;
+    assert!(
+        !String::from_utf8_lossy(&accepted_body).contains(&owner_token),
+        "Owner credential must never appear in an API response"
+    );
     let accepted_json: serde_json::Value =
-        serde_json::from_slice(&test::read_body(accepted).await).expect("accepted JSON");
+        serde_json::from_slice(&accepted_body).expect("accepted JSON");
     assert_eq!(accepted_json["status"], "received");
     let invocation_id = accepted_json["invocation_id"]
         .as_str()
@@ -291,8 +296,13 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     )
     .await;
     assert_eq!(inspected.status(), StatusCode::OK);
+    let inspected_body = test::read_body(inspected).await;
+    assert!(
+        !String::from_utf8_lossy(&inspected_body).contains(&owner_token),
+        "Owner credential must never appear in invocation inspection"
+    );
     let inspected_json: serde_json::Value =
-        serde_json::from_slice(&test::read_body(inspected).await).expect("inspection JSON");
+        serde_json::from_slice(&inspected_body).expect("inspection JSON");
     assert_eq!(inspected_json["status"], "succeeded");
     assert_eq!(inspected_json["result"], MOCK_OUTPUT);
     assert_eq!(inspected_json["degraded"], false);
@@ -323,6 +333,51 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     assert_eq!(persisted.0, "Completed");
     assert_eq!(persisted.1, "ResponseReceived");
     assert_eq!(persisted.2, 19);
+
+    let credential_hash: Vec<u8> = sqlx::query_scalar(
+        "SELECT token_hash FROM owner_credentials WHERE tenant_id=$1::uuid AND caller_id=$2::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(principal_id.to_string())
+    .fetch_one(&second_pool)
+    .await
+    .expect("only the credential digest should be persisted");
+    assert_eq!(credential_hash, Sha256::digest(owner_token.as_bytes()).to_vec());
+
+    let event_payloads: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(payload::text, ''), '') FROM events WHERE tenant_id=$1::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .fetch_one(&second_pool)
+    .await
+    .expect("event payloads should be inspectable");
+    let outbox_payloads: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(payload::text, ''), '') FROM outbox_messages WHERE tenant_id=$1::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .fetch_one(&second_pool)
+    .await
+    .expect("outbox payloads should be inspectable");
+    let persisted_messages: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(content, ''), '') FROM interaction_messages WHERE tenant_id=$1::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .fetch_one(&second_pool)
+    .await
+    .expect("persisted conversation should be inspectable");
+    for (surface, value) in [
+        ("event", &event_payloads),
+        ("outbox", &outbox_payloads),
+        ("conversation/prompt source", &persisted_messages),
+    ] {
+        assert!(
+            !value.contains(&owner_token),
+            "Owner credential leaked into {surface}"
+        );
+    }
+
+    // This API/runtime slice emits no tracing/log records and does not depend on
+    // a logging facade; request credentials are never passed to a logger.
 
     drop(second_app);
     second_pool.close().await;
