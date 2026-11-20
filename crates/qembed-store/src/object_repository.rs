@@ -652,6 +652,8 @@ pub enum ObjectRepositoryError {
     InvalidSnapshot(SnapshotError),
     /// A persisted identifier could not be parsed.
     InvalidIdentifier,
+    /// A persisted snapshot hash is not exactly 32 bytes.
+    InvalidHashLength,
     /// A content-hash conflict had no corresponding snapshot row.
     DeduplicationRowMissing,
     /// Equal SHA-256 values were found for different canonical byte sequences.
@@ -699,6 +701,7 @@ impl fmt::Display for ObjectRepositoryError {
                 write!(formatter, "snapshot construction failed: {error:?}")
             }
             Self::InvalidIdentifier => formatter.write_str("persisted identifier is invalid"),
+            Self::InvalidHashLength => formatter.write_str("persisted snapshot hash is not 32 bytes"),
             Self::DeduplicationRowMissing => {
                 formatter.write_str("snapshot content conflict has no matching row")
             }
