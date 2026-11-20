@@ -517,9 +517,10 @@ mod tests {
             "idempotency_key": "k",
             "input": "x".repeat(65_537),
         });
-        assert!(parse_invoke_body(
-            &serde_json::to_vec(&oversized).expect("request JSON serializes")
-        ).is_err());
+        assert!(
+            parse_invoke_body(&serde_json::to_vec(&oversized).expect("request JSON serializes"))
+                .is_err()
+        );
     }
 
     #[test]
