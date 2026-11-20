@@ -258,27 +258,12 @@ impl ObjectRepository {
         .await
         .map_err(ObjectRepositoryError::Database)?;
 
-        let candidate = row
-            .map(
-                |(state, current, snapshot_id, tenant, object, version, schema, bytes, hash)| -> Result<PublicationCandidate, ObjectRepositoryError> {
-                    let snapshot_id = snapshot_id
-                        .parse()
-                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                    let tenant = tenant
-                        .parse()
-                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                    let object = object
-                        .parse()
-                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                    let version = version
-                        .parse()
-                        .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
-                    let schema = u32::try_from(schema)
-                        .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
-                    let hash: [u8; 32] = hash
-                        .try_into()
-                        .map_err(|_| ObjectRepositoryError::InvalidHashLength)?;
-                    let snapshot = Snapshot::from_persisted(
+        let candidate =
+            row
+                .map(
+                    |(
+                        state,
+                        current,
                         snapshot_id,
                         tenant,
                         object,
@@ -286,23 +271,49 @@ impl ObjectRepository {
                         schema,
                         bytes,
                         hash,
-                    )
-                    .map_err(ObjectRepositoryError::InvalidSnapshot)?;
-                    let expected_current = current
-                        .map(|value| {
-                            value
-                                .parse()
-                                .map_err(|_| ObjectRepositoryError::InvalidIdentifier)
-                        })
-                        .transpose()?;
-                    Ok(PublicationCandidate::new(
-                        snapshot,
-                        parse_object_state(&state)?,
-                        expected_current,
-                    ))
-                },
-            )
-            .transpose()?;
+                    )| -> Result<PublicationCandidate, ObjectRepositoryError> {
+                        let snapshot_id = snapshot_id
+                            .parse()
+                            .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                        let tenant = tenant
+                            .parse()
+                            .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                        let object = object
+                            .parse()
+                            .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                        let version = version
+                            .parse()
+                            .map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                        let schema = u32::try_from(schema)
+                            .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
+                        let hash: [u8; 32] = hash
+                            .try_into()
+                            .map_err(|_| ObjectRepositoryError::InvalidHashLength)?;
+                        let snapshot = Snapshot::from_persisted(
+                            snapshot_id,
+                            tenant,
+                            object,
+                            version,
+                            schema,
+                            bytes,
+                            hash,
+                        )
+                        .map_err(ObjectRepositoryError::InvalidSnapshot)?;
+                        let expected_current = current
+                            .map(|value| {
+                                value
+                                    .parse()
+                                    .map_err(|_| ObjectRepositoryError::InvalidIdentifier)
+                            })
+                            .transpose()?;
+                        Ok(PublicationCandidate::new(
+                            snapshot,
+                            parse_object_state(&state)?,
+                            expected_current,
+                        ))
+                    },
+                )
+                .transpose()?;
 
         transaction
             .commit()
