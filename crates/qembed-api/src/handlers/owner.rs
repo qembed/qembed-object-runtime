@@ -506,6 +506,29 @@ fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> R
 mod tests {
     use super::*;
     #[test]
+    fn invoke_body_rejects_duplicate_keys_unknown_fields_and_oversized_input() {
+        let caller_id = CallerId::new();
+        let duplicate = format!(
+            r#"{{"caller_id":"{caller_id}","idempotency_key":"k","input":{{"a":1,"a":2}}}}"#
+        );
+        assert!(parse_invoke_body(duplicate.as_bytes()).is_err());
+
+        let unknown = format!(
+            r#"{{"caller_id":"{caller_id}","idempotency_key":"k","input":null,"extra":true}}"#
+        );
+        assert!(parse_invoke_body(unknown.as_bytes()).is_err());
+
+        let oversized = serde_json::json!({
+            "caller_id": caller_id.to_string(),
+            "idempotency_key": "k",
+            "input": "x".repeat(65_537),
+        });
+        assert!(parse_invoke_body(
+            &serde_json::to_vec(&oversized).expect("request JSON serializes")
+        ).is_err());
+    }
+
+    #[test]
     fn create_version_body_rejects_duplicate_keys_and_invalid_schema_versions() {
         assert!(
             parse_create_object_version_body(br#"{"schema_version":1,"config":{"a":1,"a":2}}"#)
