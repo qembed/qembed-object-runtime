@@ -243,7 +243,6 @@ async fn snapshot_must_match_the_supplied_version_and_tenant() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn one_thousand_identical_configuration_creations_reuse_one_snapshot() {
     let (pool, repository, scope, object_id) = setup().await;
@@ -287,7 +286,6 @@ async fn one_thousand_identical_configuration_creations_reuse_one_snapshot() {
     assert_eq!(counts, (1, 1));
     pool.close().await;
 }
-
 
 #[tokio::test]
 async fn changed_tool_binding_produces_a_new_immutable_snapshot() {
