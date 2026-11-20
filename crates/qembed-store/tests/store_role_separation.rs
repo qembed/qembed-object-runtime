@@ -104,6 +104,14 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     let delivery_a = Uuid::new_v4();
     let delivery_b = Uuid::new_v4();
 
+    for tenant in [tenant_a, tenant_b] {
+        sqlx::query("INSERT INTO tenants (id) VALUES ($1)")
+            .bind(tenant)
+            .execute(&owner)
+            .await
+            .expect("owner should seed tenant fixtures");
+    }
+
     for (tenant, object, version, event, delivery) in [
         (tenant_a, object_a, version_a, event_a, delivery_a),
         (tenant_b, object_b, version_b, event_b, delivery_b),
@@ -146,7 +154,50 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .expect("owner should seed outbox fixtures");
     }
 
+    let caller_a = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO callers (id, tenant_id, token_hash, caller_kind)
+         VALUES ($1, $2, $3, 'Authenticated')",
+    )
+    .bind(caller_a)
+    .bind(tenant_a)
+    .bind(caller_a.as_bytes().to_vec())
+    .execute(&owner)
+    .await
+    .expect("owner should seed a Caller for the invocation fixture");
+
+    let snapshot_a = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO snapshots
+            (tenant_id, snapshot_id, object_id, object_version_id, schema_version,
+             canonical_json, content_hash, json_projection)
+         VALUES ($1, $2, $3, $4, 1, convert_to('{}', 'UTF8'), decode(repeat('00', 32), 'hex'), '{}'::jsonb)",
+    )
+    .bind(tenant_a)
+    .bind(snapshot_a)
+    .bind(object_a)
+    .bind(version_a)
+    .execute(&owner)
+    .await
+    .expect("owner should seed a snapshot for the invocation fixture");
+
     let attempt_invocation = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO object_invocations
+            (id, tenant_id, object_id, caller_id, snapshot_id, knowledge_revision,
+             pool, status, trace_id)
+         VALUES ($1, $2, $3, $4, $5, 0, 'authenticated', 'Received', $6)",
+    )
+    .bind(attempt_invocation)
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(caller_a)
+    .bind(snapshot_a)
+    .bind(Uuid::new_v4())
+    .execute(&owner)
+    .await
+    .expect("owner should seed an invocation for the reservation fixture");
+
     sqlx::query(
         "INSERT INTO budget_reservations
             (id, tenant_id, object_id, invocation_id, pool, usage_date,
