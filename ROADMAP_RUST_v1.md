@@ -369,9 +369,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Evidence: [RUST-047 failure-injection report](docs/RUST-047_FAILURE_INJECTION.md); PR #69 merged as `3f49d5847c0273caa7efc63aa73160fac896156f`, stable и Rust 1.85 MSRV jobs passed.
   - Граница: не заявлены production outbox dispatcher/redelivery, process supervisor, provider-side idempotency или external outcome reconciliation.
 
-- [ ] **RUST-048 (M)** Прогнать M1a acceptance suite.
-  - Тесты: все M1a cases из `acceptance_T-01_to_T-64.md`, включая tenant isolation, idempotency, snapshots, events, API и capability compile-fail.
-  - DoD: тестовый отчёт содержит результат каждого применимого M1a test ID.
+- [x] **RUST-048 (M)** Прогнать M1a acceptance suite.
+  - Тесты: все применимые M1a cases из `acceptance_T-01_to_T-64.md`, включая tenant/Object isolation, idempotency, snapshots/ToolVersion pinning, ordered event streams, secret hygiene, RLS catalog guard, composite claim integrity, API и capability compile-fail.
+  - Evidence: [M1a acceptance matrix](docs/RUST-048_M1A_ACCEPTANCE_MATRIX.md); Rust stable + Rust 1.85 MSRV на PostgreSQL 15.10/16.4 — run [#44807132778](https://github.com/qembed/qembed-object-runtime/actions/runs/44807132778); canonical SQL 358/358 на PostgreSQL 15/16 + pgvector 0.8.7 — run [#44807249016](https://github.com/qembed/qembed-sql/actions/runs/44807249016).
+  - DoD: результат каждого применимого M1a test ID зафиксирован; все обязательные Rust/DB CI jobs зелёные. M2 verifier/retrieval остаются вне M1a.
 
 - [ ] **RUST-049 (S)** Подготовить M1a test evidence.
   - Тесты: CI публикует JUnit/nextest report, DB version, pgvector version, test logs и concurrency test results.
