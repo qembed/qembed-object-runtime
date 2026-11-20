@@ -375,7 +375,8 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: результат каждого применимого M1a test ID зафиксирован; все обязательные Rust/DB CI jobs зелёные. M2 verifier/retrieval остаются вне M1a.
 
 - [ ] **RUST-049 (S)** Подготовить M1a test evidence.
-  - Тесты: CI публикует JUnit/nextest report, DB version, pgvector version, test logs и concurrency test results.
+  - Реализация: [evidence artifact contract](docs/RUST-049_M1A_TEST_EVIDENCE.md); stable CI публикует отдельный artifact для PostgreSQL 15/16/19 с JUnit/nextest report, DB/pgvector versions, test logs и concurrency test results.
+  - Тесты: проверить содержимое artifacts из каждого matrix job и воспроизводимость локальным `scripts/test-postgres.sh`.
   - DoD: результаты воспроизводимы из CI artifacts.
 
 - [ ] **RUST-050 (XS)** Зафиксировать M1a completion и обновить roadmap.
