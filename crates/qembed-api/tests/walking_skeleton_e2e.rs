@@ -342,7 +342,10 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     .fetch_one(&second_pool)
     .await
     .expect("only the credential digest should be persisted");
-    assert_eq!(credential_hash, Sha256::digest(owner_token.as_bytes()).to_vec());
+    assert_eq!(
+        credential_hash,
+        Sha256::digest(owner_token.as_bytes()).to_vec()
+    );
 
     let event_payloads: String = sqlx::query_scalar(
         "SELECT COALESCE(string_agg(payload::text, ''), '') FROM events WHERE tenant_id=$1::uuid",
