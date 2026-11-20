@@ -169,6 +169,53 @@ async fn owner_publication_validates_first_version_and_replacement() {
         .expect("rejected version state should be queryable");
     assert_eq!(invalid_state, ("active".to_owned(), "draft".to_owned(), Some(second.to_string())));
 
+    // A failed first-publication validation must restore the object to Draft.
+    let rejected_object_response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/owner/objects")
+            .insert_header(("X-Tenant-ID", tenant_id.to_string()))
+            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .to_request(),
+    ).await;
+    assert_eq!(rejected_object_response.status(), StatusCode::CREATED);
+    let rejected_object_json: serde_json::Value = serde_json::from_slice(&test::read_body(rejected_object_response).await)
+        .expect("object response is JSON");
+    let rejected_object = rejected_object_json["object_id"].as_str().expect("object ID")
+        .parse::<ObjectId>().expect("valid object ID");
+
+    let rejected_version_response = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/owner/objects/{rejected_object}/versions"))
+            .insert_header(("X-Tenant-ID", tenant_id.to_string()))
+            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .set_payload(r#"{"schema_version":1,"config":{"limits":{}}}"#)
+            .to_request(),
+    ).await;
+    assert_eq!(rejected_version_response.status(), StatusCode::CREATED);
+    let rejected_version_json: serde_json::Value = serde_json::from_slice(&test::read_body(rejected_version_response).await)
+        .expect("version response is JSON");
+    let rejected_version = rejected_version_json["object_version_id"].as_str().expect("version ID")
+        .parse::<ObjectVersionId>().expect("valid version ID");
+
+    let rejected_first_publish = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/owner/objects/{rejected_object}/versions/{rejected_version}/publish"))
+            .insert_header(("X-Tenant-ID", tenant_id.to_string()))
+            .insert_header((actix_web::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .to_request(),
+    ).await;
+    assert_eq!(rejected_first_publish.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let rejected_first_state: (String, Option<String>, String) = sqlx::query_as(
+        "SELECT o.state, o.published_version_id::text, v.status FROM objects o JOIN object_versions v USING (tenant_id, object_id) WHERE o.tenant_id = $1::uuid AND o.object_id = $2::uuid AND v.object_version_id = $3::uuid",
+    ).bind(tenant_id.to_string()).bind(rejected_object.to_string()).bind(rejected_version.to_string()).fetch_one(&pool).await
+        .expect("rejected first-publication state should be queryable");
+    assert_eq!(rejected_first_state, ("draft".to_owned(), None, "draft".to_owned()));
+
     let cross_tenant = test::call_service(
         &app,
         test::TestRequest::post()
