@@ -364,7 +364,7 @@ GRANT SELECT, INSERT, UPDATE ON
     object_invocations, invocation_idempotency, interaction_messages, knowledge_revisions
 TO qembed_runtime;
 GRANT DELETE ON interaction_messages TO qembed_runtime;
-GRANT SELECT ON tenants TO qembed_admin;
+GRANT SELECT, INSERT, UPDATE ON tenants TO qembed_admin;
 GRANT SELECT, INSERT ON knowledge_revisions TO qembed_admin;
 
 GRANT SELECT ON owner_principals, callers, object_invocations TO qembed_definer;
