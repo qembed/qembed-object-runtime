@@ -11,8 +11,11 @@ use qembed_runtime::invocation_worker::{
     InvocationWorker, InvocationWorkerConfig, InvocationWorkerOutcome,
 };
 use qembed_store::{
-    PgPoolConfig, auth::{OwnerAuthenticator, OwnerCredentials},
-    connect_pool, invocation_worker::PgExecutionStore, run_migrations,
+    PgPoolConfig,
+    auth::{OwnerAuthenticator, OwnerCredentials},
+    connect_pool,
+    invocation_worker::PgExecutionStore,
+    run_migrations,
 };
 use sha2::{Digest, Sha256};
 use support::test;
@@ -28,10 +31,7 @@ fn owner_request(uri: &str, tenant_id: TenantId, token: &str) -> test::TestReque
     test::TestRequest::post()
         .uri(uri)
         .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-        .insert_header((
-            axum::http::header::AUTHORIZATION,
-            format!("Bearer {token}"),
-        ))
+        .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
 }
 
 async fn seed_owner(
