@@ -2739,7 +2739,6 @@ async fn settlement_database_failure_rolls_back_both_counters_and_reservation() 
     teardown(fixture).await;
 }
 
-
 #[tokio::test]
 async fn one_thousand_invocations_of_one_configuration_pin_the_same_snapshot() {
     let fixture = setup(None).await;
