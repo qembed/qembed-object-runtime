@@ -215,12 +215,8 @@ fn provider_request() -> ChatRequest {
 }
 
 fn provider_response() -> ChatResponse {
-    ChatResponse::new(
-        OUTPUT,
-        ChatFinishReason::Stop,
-        Some(TokenUsage::new(12, 7)),
-    )
-    .expect("valid mock provider response")
+    ChatResponse::new(OUTPUT, ChatFinishReason::Stop, Some(TokenUsage::new(12, 7)))
+        .expect("valid mock provider response")
 }
 
 #[tokio::test]
@@ -297,7 +293,10 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
     assert!(terminated, "the pre-commit backend must be terminated");
 
     let result = task.await.expect("begin-invocation task should return");
-    assert!(result.is_err(), "a killed transaction must not report success");
+    assert!(
+        result.is_err(),
+        "a killed transaction must not report success"
+    );
 
     sqlx::query("DROP TRIGGER IF EXISTS rust047_pause_outbox ON outbox_messages")
         .execute(&fixture.pool)
@@ -338,7 +337,11 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
     let started = store
         .begin_invocation(
             &scope,
-            start_command(fixture.object_id, fixture.caller_id, "rust-047-timeout-restart"),
+            start_command(
+                fixture.object_id,
+                fixture.caller_id,
+                "rust-047-timeout-restart",
+            ),
         )
         .await
         .expect("begin-invocation should commit");
@@ -375,7 +378,10 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
         .process(&restarted_scope, invocation_id)
         .await
         .expect("ambiguous timeout should be persisted as unknown");
-    assert_eq!(outcome, InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
+    assert_eq!(
+        outcome,
+        InvocationWorkerOutcome::OutcomeUnknown { invocation_id }
+    );
 
     let state: (String, String, String, i64) = sqlx::query_as(
         "SELECT invocation.status, attempt.state, reservation.status, count(message.id)
@@ -427,7 +433,10 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
         .process(&recovered_scope, invocation_id)
         .await
         .expect("restart must preserve the ambiguous provider outcome");
-    assert_eq!(recovered, InvocationWorkerOutcome::OutcomeUnknown { invocation_id });
+    assert_eq!(
+        recovered,
+        InvocationWorkerOutcome::OutcomeUnknown { invocation_id }
+    );
 
     let final_state: (String, String, i64) = sqlx::query_as(
         "SELECT invocation.status, attempt.state,
