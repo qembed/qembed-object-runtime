@@ -118,7 +118,7 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
             .to_request(),
     )
     .await;
-    assert_eq!(undelegated.status(), StatusCode::FORBIDDEN);
+    assert_eq!(undelegated.status(), StatusCode::NOT_FOUND);
 
     let request = serde_json::json!({
         "caller_id": caller_id,
