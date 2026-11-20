@@ -12,6 +12,10 @@ async fn append_event(
     event_id: String,
 ) -> i64 {
     let mut transaction = pool.begin().await.expect("event transaction should begin");
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
+        .execute(&mut *transaction)
+        .await
+        .expect("test connection should assume the runtime role");
     sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
         .bind(&tenant_id)
         .execute(&mut *transaction)
@@ -89,5 +93,64 @@ async fn concurrent_independent_invocation_streams_get_gapless_versions_without_
     assert_eq!(versions_a, expected);
     assert_eq!(versions_b, expected);
 
+    pool.close().await;
+}
+
+
+#[tokio::test]
+async fn runtime_can_append_events_but_cannot_forge_stream_counters() {
+    let pool = common::connect().await;
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
+
+    let tenant_id = TenantId::new().to_string();
+    let aggregate_id = ObjectId::new().to_string();
+    let event_id = EventId::new().to_string();
+    let mut transaction = pool.begin().await.expect("runtime event transaction");
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
+        .execute(&mut *transaction)
+        .await
+        .expect("test connection should assume runtime role");
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(&tenant_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("tenant scope should be set");
+    let version: i64 = sqlx::query_scalar(
+        "INSERT INTO events (tenant_id,event_id,aggregate_type,aggregate_id,event_type,payload) VALUES ($1::uuid,$2::uuid,'invocation',$3::uuid,'accepted','{}'::jsonb) RETURNING stream_version",
+    )
+    .bind(&tenant_id)
+    .bind(&event_id)
+    .bind(&aggregate_id)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("runtime may append through the trusted database trigger");
+    assert_eq!(version, 1);
+    transaction.commit().await.expect("event should commit");
+
+    let mut transaction = pool.begin().await.expect("counter mutation transaction");
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
+        .execute(&mut *transaction)
+        .await
+        .expect("test connection should assume runtime role");
+    sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
+        .bind(&tenant_id)
+        .execute(&mut *transaction)
+        .await
+        .expect("tenant scope should be set");
+    let error = sqlx::query(
+        "UPDATE event_stream_counters SET last_stream_version=999 WHERE tenant_id=$1::uuid AND aggregate_type='invocation' AND aggregate_id=$2::uuid",
+    )
+    .bind(&tenant_id)
+    .bind(&aggregate_id)
+    .execute(&mut *transaction)
+    .await
+    .expect_err("runtime must not directly mutate the allocator's counter");
+    assert_eq!(
+        error.as_database_error().and_then(|error| error.code()).as_deref(),
+        Some("42501")
+    );
+    transaction.rollback().await.expect("denied update transaction rolls back");
     pool.close().await;
 }
