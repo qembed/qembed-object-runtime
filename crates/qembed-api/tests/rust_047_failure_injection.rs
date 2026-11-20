@@ -215,9 +215,17 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
     let fixture = fixture().await;
     let scope = authenticated_scope(&fixture.pool, &fixture).await;
 
+    sqlx::query("DROP TRIGGER IF EXISTS rust047_pause_outbox ON outbox_messages")
+        .execute(&fixture.pool)
+        .await
+        .expect("stale outbox trigger should be removed");
+    sqlx::query("DROP FUNCTION IF EXISTS rust047_pause_outbox_insert()")
+        .execute(&fixture.pool)
+        .await
+        .expect("stale outbox trigger function should be removed");
     sqlx::query(
         &format!(
-            "CREATE FUNCTION rust047_pause_outbox_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM set_config('application_name', '{}', false); PERFORM pg_sleep(30); RETURN NEW; END $$",
+            "CREATE FUNCTION rust047_pause_outbox_insert() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN PERFORM set_config('application_name', '{}', false); PERFORM pg_sleep(30); RETURN NEW; END; $",
             PAUSE_APPLICATION_NAME
         ),
     )
