@@ -1,7 +1,9 @@
-use actix_web::{App, http::StatusCode, test};
+use axum::http::StatusCode;
+mod support;
 use qembed_domain::ids::{ObjectId, PrincipalId, TenantId};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
+use support::test;
 
 use qembed_api::composition::configure_owner_routes;
 
@@ -27,7 +29,7 @@ async fn insert_owner(pool: &sqlx::PgPool, tenant_id: TenantId, token: &str) {
     .expect("owner credential fixture should be inserted");
 }
 
-#[actix_web::test]
+#[tokio::test]
 async fn owner_create_version_persists_canonical_draft_and_reuses_identical_content() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by the PostgreSQL integration-test job");
@@ -45,20 +47,14 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     insert_owner(&pool, tenant_id, &token).await;
     insert_owner(&pool, other_tenant_id, &other_token).await;
 
-    let app = test::init_service(
-        App::new().configure(|config| configure_owner_routes(config, pool.clone())),
-    )
-    .await;
+    let app = test::init_service(configure_owner_routes(pool.clone())).await;
 
     let object_response = test::call_service(
         &app,
         test::TestRequest::post()
             .uri("/owner/objects")
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
             .to_request(),
     )
     .await;
@@ -79,11 +75,8 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
-            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((axum::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"schema_version":1,"config":{"limits":{},"unvalidated":true}}"#)
             .to_request(),
     )
@@ -123,11 +116,8 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
-            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((axum::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"config":{"unvalidated":true,"limits":{}},"schema_version":1}"#)
             .to_request(),
     )
@@ -144,10 +134,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
             .set_payload(r#"{"schema_version":1,"config":{"x":1,"x":2}}"#)
             .to_request(),
     )
@@ -160,10 +147,10 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
             .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
             .insert_header((
-                actix_web::http::header::AUTHORIZATION,
+                axum::http::header::AUTHORIZATION,
                 format!("Bearer {other_token}"),
             ))
-            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .insert_header((axum::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"schema_version":1,"config":{}}"#)
             .to_request(),
     )
@@ -175,11 +162,8 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
         test::TestRequest::post()
             .uri(&format!("/owner/objects/{object_id}/versions"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
-            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
+            .insert_header((axum::http::header::CONTENT_TYPE, "application/json"))
             .set_payload(r#"{"schema_version":1,"config":{}}"#)
             .to_request(),
     )

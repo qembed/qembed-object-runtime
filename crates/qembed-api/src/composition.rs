@@ -6,7 +6,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use actix_web::web;
+use axum::Router;
 use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
     ids::{InvocationId, ObjectId, ObjectVersionId, TenantId},
@@ -27,14 +27,12 @@ use qembed_store::{
 use sqlx::PgPool;
 
 use crate::handlers::{
-    health::{
-        HealthState, ReadinessProbe, ReadinessStatus, configure_health_routes as configure_routes,
-    },
+    health::{ReadinessProbe, ReadinessStatus, health_router as configure_routes},
     invocation::{InvocationResponse, get_invocation},
     owner::{
         ObjectVersionCreationOutcome, ObjectVersionCreationResponse,
         ObjectVersionPublicationResponse, OwnerApiBackend, OwnerApiBackendError,
-        configure_owner_routes as configure_owner,
+        owner_router as configure_owner,
     },
 };
 
@@ -55,9 +53,8 @@ impl ReadinessProbe for StoreReadinessProbe {
 }
 
 /// Installs the store-backed readiness state and registers liveness/readiness routes.
-pub fn configure_health_routes(config: &mut web::ServiceConfig, probe: PgReadinessProbe) {
-    config.app_data(web::Data::new(HealthState::new(StoreReadinessProbe(probe))));
-    configure_routes(config);
+pub fn configure_health_routes(probe: PgReadinessProbe) -> Router {
+    configure_routes(StoreReadinessProbe(probe))
 }
 
 struct PgOwnerApiBackend {
@@ -220,6 +217,11 @@ impl OwnerApiBackend for PgOwnerApiBackend {
 
 /// Installs PostgreSQL-backed Owner routes. Authentication and SQL adapters are
 /// wired here, keeping concrete infrastructure out of HTTP handlers.
-pub fn configure_owner_routes(config: &mut web::ServiceConfig, pool: PgPool) {
-    configure_owner(config, PgOwnerApiBackend { pool });
+pub fn configure_owner_routes(pool: PgPool) -> Router {
+    configure_owner(PgOwnerApiBackend { pool })
+}
+
+/// Composes the HTTP surface without creating a listener or changing runtime lifecycle.
+pub fn api_router(pool: PgPool, probe: PgReadinessProbe) -> Router {
+    configure_health_routes(probe).merge(configure_owner_routes(pool))
 }

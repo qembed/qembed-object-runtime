@@ -1,11 +1,13 @@
-use actix_web::{App, http::StatusCode, test};
+use axum::http::StatusCode;
+mod support;
 use qembed_domain::ids::{ObjectId, PrincipalId, TenantId};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
+use support::test;
 
 use qembed_api::composition::configure_owner_routes;
 
-#[actix_web::test]
+#[tokio::test]
 async fn owner_create_object_authenticates_and_persists_a_server_generated_draft() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by the PostgreSQL integration-test job");
@@ -39,10 +41,24 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
     .await
     .expect("owner credential fixture should be inserted");
 
-    let app = test::init_service(
-        App::new().configure(|config| configure_owner_routes(config, pool.clone())),
+    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+
+    let oversized_body = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/owner/objects")
+            .set_payload(vec![0_u8; 256 * 1024 + 1])
+            .to_request(),
     )
     .await;
+    assert_eq!(oversized_body.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let missing_tenant = test::call_service(
+        &app,
+        test::TestRequest::post().uri("/owner/objects").to_request(),
+    )
+    .await;
+    assert_eq!(missing_tenant.status(), StatusCode::BAD_REQUEST);
 
     let missing_auth = test::call_service(
         &app,
@@ -59,10 +75,7 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
         test::TestRequest::post()
             .uri("/owner/objects")
             .insert_header(("X-Tenant-ID", TenantId::new().to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
             .to_request(),
     )
     .await;
@@ -73,10 +86,7 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
         test::TestRequest::post()
             .uri("/owner/objects")
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
             .set_json(serde_json::json!({ "object_id": ObjectId::new() }))
             .to_request(),
     )
@@ -88,10 +98,7 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
         test::TestRequest::post()
             .uri("/owner/objects")
             .insert_header(("X-Tenant-ID", tenant_id.to_string()))
-            .insert_header((
-                actix_web::http::header::AUTHORIZATION,
-                format!("Bearer {token}"),
-            ))
+            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {token}")))
             .to_request(),
     )
     .await;
