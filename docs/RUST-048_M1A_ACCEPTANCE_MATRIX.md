@@ -57,6 +57,6 @@ This report maps every M1a acceptance ID in the canonical `qembed/qembed-sql/acc
 
 The seven previously open M1a gaps now have focused implementation and regression coverage in this PR and canonical SQL PR #19. Exact CI is still pending for the newest Rust HEAD and for the PostgreSQL 15/16 matrix; do not mark RUST-048 complete until those runs pass.
 
-The canonical SQL smoke on PostgreSQL 16 / pgvector 0.8.7 passed **349/349 assertions** on SQL HEAD `39288e3906cd43ace93169f1dca4f2213379efe2` (run [#44805511368](https://github.com/qembed/qembed-sql/actions/runs/44805511368)). The workflow is now being expanded to PostgreSQL 15 and 16. Rust CI is likewise being expanded to PostgreSQL 15 and 16 for the stable workspace tests; the MSRV job remains on PostgreSQL 16.
+The canonical SQL smoke passed **349/349 assertions on both PostgreSQL 15 and PostgreSQL 16**, each with pgvector 0.8.7, on SQL PR #19 HEAD `a3630447f47e10300c10c86926882260b1cb4c55` (run [#44805746763](https://github.com/qembed/qembed-sql/actions/runs/44805746763)). Rust stable CI is now running its PostgreSQL 15 and 16.4 matrix; the MSRV job remains on PostgreSQL 16.4.
 
 The M2 portions of T-04, T-21 and T-27 remain explicitly outside M1a. RUST-049 still owns release-grade artifact publication; no full T-01…T-64 certification is claimed by this matrix.
