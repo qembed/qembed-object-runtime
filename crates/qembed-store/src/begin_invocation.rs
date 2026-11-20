@@ -334,7 +334,7 @@ pub async fn begin_invocation(
         .bind(scope.tenant_id().to_string())
         .bind(command.object_id.to_string())
         .bind(caller.caller_id().to_string())
-        .bind(command.snapshot_id.to_string())
+        .bind(snapshot_id.to_string())
         .bind(i64::try_from(knowledge_revision).map_err(|_| BeginInvocationError::KnowledgeRevisionOutOfRange)?)
         .bind(command.invocation_pool.as_sql())
         .bind(command.trace_id.to_string()),
