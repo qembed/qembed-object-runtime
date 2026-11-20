@@ -103,8 +103,7 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         .expect("valid version ID");
 
     let publish_uri = format!("/owner/objects/{object_id}/versions/{version_id}/publish");
-    let publish_response =
-        test::call_service(&app, headers(&publish_uri).to_request()).await;
+    let publish_response = test::call_service(&app, headers(&publish_uri).to_request()).await;
     assert_eq!(publish_response.status(), StatusCode::OK);
 
     let invoke_uri = format!("/owner/objects/{object_id}/invocations");
