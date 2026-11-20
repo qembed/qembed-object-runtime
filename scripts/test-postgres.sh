@@ -50,10 +50,7 @@ pgvector_version="$(psql_in_test_db -Atc "SELECT extversion FROM pg_extension WH
 } > "$evidence_dir/database-metadata.txt"
 
 if cargo nextest --version >/dev/null 2>&1; then
-  cargo nextest run --workspace \
-    --message-format junit \
-    --junit-path "$evidence_dir/nextest-junit.xml" \
-    2>&1 | tee "$evidence_dir/nextest.log"
+  cargo nextest run --workspace --profile ci 2>&1 | tee "$evidence_dir/nextest.log"
   cargo test --workspace --doc 2>&1 | tee "$evidence_dir/doc-tests.log"
 else
   cargo test --workspace 2>&1 | tee "$evidence_dir/cargo-test.log"
