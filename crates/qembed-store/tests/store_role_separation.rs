@@ -171,7 +171,7 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         "INSERT INTO snapshots
             (tenant_id, snapshot_id, object_id, object_version_id, schema_version,
              canonical_json, content_hash, json_projection)
-         VALUES ($1, $2, $3, $4, 1, convert_to('{}', 'UTF8'), decode(repeat('00', 32), 'hex'), '{}'::jsonb)",
+         VALUES ($1, $2, $3, $4, 1, convert_to('{}', 'UTF8'), decode(repeat('01', 32), 'hex'), '{}'::jsonb)",
     )
     .bind(tenant_a)
     .bind(snapshot_a)
