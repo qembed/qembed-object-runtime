@@ -38,7 +38,7 @@ const PAUSE_APPLICATION_NAME: &str = "qembed_rust047_outbox_pause";
 // PostgreSQL triggers are database-wide, while Rust runs tests in this binary
 // concurrently. Serialize the failpoint test with the restart test so the
 // temporary outbox trigger cannot intercept another test's transaction.
-static POSTGRES_FAILPOINT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static POSTGRES_FAILPOINT_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 struct Fixture {
     pool: sqlx::PgPool,
@@ -226,9 +226,7 @@ fn provider_response() -> ChatResponse {
 
 #[tokio::test]
 async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atomically() {
-    let _serial = POSTGRES_FAILPOINT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = POSTGRES_FAILPOINT_TEST_LOCK.lock().await;
     let fixture = fixture().await;
     let scope = authenticated_scope(&fixture.pool, &fixture).await;
 
