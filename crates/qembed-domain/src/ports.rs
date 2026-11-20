@@ -14,9 +14,9 @@ use crate::ids::{InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId}
 use crate::invocation::{FencingToken, Invocation};
 use crate::object::ObjectState;
 use crate::object_validation::ValidationEvidence;
-use crate::snapshot::Snapshot;
 use crate::principal::PrincipalKind;
 use crate::scope::Scope;
+use crate::snapshot::Snapshot;
 
 /// Identity returned by a trusted authentication adapter after credential
 /// verification.
@@ -179,17 +179,27 @@ impl PublicationCandidate {
         object_state: ObjectState,
         expected_current: Option<ObjectVersionId>,
     ) -> Self {
-        Self { snapshot, object_state, expected_current }
+        Self {
+            snapshot,
+            object_state,
+            expected_current,
+        }
     }
 
     #[must_use]
-    pub const fn snapshot(&self) -> &Snapshot { &self.snapshot }
+    pub const fn snapshot(&self) -> &Snapshot {
+        &self.snapshot
+    }
 
     #[must_use]
-    pub const fn object_state(&self) -> ObjectState { self.object_state }
+    pub const fn object_state(&self) -> ObjectState {
+        self.object_state
+    }
 
     #[must_use]
-    pub const fn expected_current(&self) -> Option<ObjectVersionId> { self.expected_current }
+    pub const fn expected_current(&self) -> Option<ObjectVersionId> {
+        self.expected_current
+    }
 }
 
 /// Persistence boundary for trusted Owner publication.
