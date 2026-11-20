@@ -471,6 +471,16 @@ mod tests {
     struct FixedCreator(ObjectId);
 
     impl OwnerApiBackend for FixedCreator {
+        fn publish_version(
+            &self,
+            _: TenantId,
+            _: String,
+            _: ObjectId,
+            _: ObjectVersionId,
+        ) -> Pin<Box<dyn Future<Output = Result<ObjectVersionPublicationResponse, OwnerApiBackendError>> + Send + '_>> {
+            Box::pin(async { Err(OwnerApiBackendError::Internal) })
+        }
+
         fn create_object(
             &self,
             _: TenantId,
