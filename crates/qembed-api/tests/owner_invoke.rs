@@ -1,6 +1,8 @@
 use axum::http::StatusCode;
 mod support;
-use qembed_domain::ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId};
+use qembed_domain::ids::{
+    CallerId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId,
+};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
 use support::test;
@@ -205,10 +207,19 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     let inspected_fields = inspected_json.as_object().expect("inspection object");
     assert_eq!(inspected_fields.len(), 5);
     for forbidden in [
-        "tenant_id", "caller_id", "snapshot_id", "trace_id",
-        "lease_owner", "fencing_token", "input", "provider",
+        "tenant_id",
+        "caller_id",
+        "snapshot_id",
+        "trace_id",
+        "lease_owner",
+        "fencing_token",
+        "input",
+        "provider",
     ] {
-        assert!(!inspected_fields.contains_key(forbidden), "leaked {forbidden}");
+        assert!(
+            !inspected_fields.contains_key(forbidden),
+            "leaked {forbidden}"
+        );
     }
 
     let missing_id = InvocationId::new();
@@ -227,7 +238,10 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         test::TestRequest::get()
             .uri(&format!("/owner/invocations/{invocation_id}"))
             .insert_header(("X-Tenant-ID", other_tenant_id.to_string()))
-            .insert_header((axum::http::header::AUTHORIZATION, format!("Bearer {other_token}")))
+            .insert_header((
+                axum::http::header::AUTHORIZATION,
+                format!("Bearer {other_token}"),
+            ))
             .to_request(),
     )
     .await;
@@ -317,9 +331,8 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         .expect("replacement snapshot ID")
         .to_owned();
 
-    let publish_uri = format!(
-        "/owner/objects/{object_id}/versions/{replacement_version_id}/publish"
-    );
+    let publish_uri =
+        format!("/owner/objects/{object_id}/versions/{replacement_version_id}/publish");
     let race_invoke_uri = format!("/owner/objects/{object_id}/invocations");
     let publish_request = headers(&publish_uri).to_request();
     let invoke_request = headers(&race_invoke_uri)
