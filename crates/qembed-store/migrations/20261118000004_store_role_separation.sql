@@ -37,13 +37,14 @@ GRANT USAGE ON SCHEMA public TO qembed_runtime, qembed_dispatcher, qembed_admin;
 -- Start from an explicit deny baseline, including any grants that might have
 -- pre-existed on these role names or PUBLIC in a previously managed database.
 REVOKE ALL PRIVILEGES ON TABLE
-    objects, object_versions, snapshots, events, outbox_messages,
+    objects, object_versions, snapshots, events, event_stream_counters, outbox_messages,
     owner_principals, owner_credentials
 FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin;
 
 -- Runtime: mutable object state, but immutable snapshots/events are append-only.
 GRANT SELECT, INSERT, UPDATE ON objects, object_versions TO qembed_runtime;
 GRANT SELECT, INSERT ON snapshots, events TO qembed_runtime;
+GRANT SELECT, INSERT, UPDATE ON event_stream_counters TO qembed_runtime;
 GRANT INSERT ON outbox_messages TO qembed_runtime;
 GRANT SELECT ON owner_principals, owner_credentials TO qembed_runtime;
 
@@ -83,6 +84,10 @@ CREATE POLICY events_runtime_tenant ON events
     FOR ALL TO qembed_runtime
     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
     WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+CREATE POLICY event_stream_counters_runtime_tenant ON event_stream_counters
+    FOR ALL TO qembed_runtime
+    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 CREATE POLICY events_admin_tenant ON events
     FOR SELECT TO qembed_admin
     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
@@ -117,6 +122,8 @@ ALTER TABLE snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE snapshots FORCE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events FORCE ROW LEVEL SECURITY;
+ALTER TABLE event_stream_counters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_stream_counters FORCE ROW LEVEL SECURITY;
 ALTER TABLE outbox_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_messages FORCE ROW LEVEL SECURITY;
 ALTER TABLE owner_principals ENABLE ROW LEVEL SECURITY;
