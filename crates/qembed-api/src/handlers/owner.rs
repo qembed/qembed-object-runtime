@@ -473,11 +473,13 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "conflict",
             "The invocation conflicts with the current object or idempotency state.",
         ),
-        (_, OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Internal) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "An unexpected internal error occurred.",
-        ),
+        (_, OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Internal) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
     }
 }
 
