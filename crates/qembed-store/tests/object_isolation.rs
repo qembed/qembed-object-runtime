@@ -58,7 +58,10 @@ async fn same_tenant_objects_cannot_cross_reference_versions_or_snapshots() {
     .await
     .expect_err("Object A must not point at Object B's version");
     assert_eq!(
-        pointer_error.as_database_error().and_then(|error| error.code()).as_deref(),
+        pointer_error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
         Some("23503")
     );
 
@@ -78,7 +81,10 @@ async fn same_tenant_objects_cannot_cross_reference_versions_or_snapshots() {
     .await
     .expect_err("Object A snapshot must not claim Object B's version");
     assert_eq!(
-        snapshot_error.as_database_error().and_then(|error| error.code()).as_deref(),
+        snapshot_error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
         Some("23503")
     );
 
