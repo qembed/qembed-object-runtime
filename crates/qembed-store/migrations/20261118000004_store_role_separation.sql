@@ -131,9 +131,11 @@ ALTER TABLE event_stream_counters FORCE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE ON event_stream_counters TO qembed_event_allocator;
 CREATE POLICY event_stream_counters_allocator ON event_stream_counters
     FOR ALL TO qembed_event_allocator USING (true) WITH CHECK (true);
+GRANT qembed_event_allocator TO CURRENT_USER;
 GRANT CREATE ON SCHEMA public TO qembed_event_allocator;
 ALTER FUNCTION assign_event_stream_version() OWNER TO qembed_event_allocator;
 REVOKE CREATE ON SCHEMA public FROM qembed_event_allocator;
+REVOKE qembed_event_allocator FROM CURRENT_USER;
 REVOKE ALL ON FUNCTION assign_event_stream_version() FROM PUBLIC;
 ALTER TABLE outbox_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_messages FORCE ROW LEVEL SECURITY;
