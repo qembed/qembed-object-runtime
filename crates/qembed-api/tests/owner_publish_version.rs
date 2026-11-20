@@ -1,7 +1,9 @@
-use actix_web::{App, http::StatusCode, test};
+use axum::http::StatusCode;
+mod support;
 use qembed_domain::ids::{ObjectId, ObjectVersionId, PrincipalId, TenantId};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
+use support::test;
 
 use qembed_api::composition::configure_owner_routes;
 
@@ -36,7 +38,7 @@ macro_rules! owner_post {
                 .uri(&uri)
                 .insert_header(("X-Tenant-ID", $tenant.to_string()))
                 .insert_header((
-                    actix_web::http::header::AUTHORIZATION,
+                    axum::http::header::AUTHORIZATION,
                     format!("Bearer {}", $token),
                 ))
                 .to_request(),
@@ -51,10 +53,10 @@ macro_rules! owner_post {
                 .uri(&uri)
                 .insert_header(("X-Tenant-ID", $tenant.to_string()))
                 .insert_header((
-                    actix_web::http::header::AUTHORIZATION,
+                    axum::http::header::AUTHORIZATION,
                     format!("Bearer {}", $token),
                 ))
-                .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+                .insert_header((axum::http::header::CONTENT_TYPE, "application/json"))
                 .set_payload($body)
                 .to_request(),
         )
@@ -62,7 +64,7 @@ macro_rules! owner_post {
     }};
 }
 
-#[actix_web::test]
+#[tokio::test]
 async fn owner_publication_validates_first_version_and_replacement() {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by the PostgreSQL integration-test job");
@@ -80,10 +82,7 @@ async fn owner_publication_validates_first_version_and_replacement() {
     insert_owner(&pool, tenant_id, &token).await;
     insert_owner(&pool, other_tenant, &other_token).await;
 
-    let app = test::init_service(
-        App::new().configure(|config| configure_owner_routes(config, pool.clone())),
-    )
-    .await;
+    let app = test::init_service(configure_owner_routes(pool.clone())).await;
 
     let object_response = owner_post!(&app, "/owner/objects".to_owned(), tenant_id, &token);
     assert_eq!(object_response.status(), StatusCode::CREATED);
