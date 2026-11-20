@@ -35,6 +35,11 @@ const INPUT: &str = "RUST-047 durable failure injection input";
 const OUTPUT: &str = "RUST-047 deterministic mock output";
 const PAUSE_APPLICATION_NAME: &str = "qembed_rust047_outbox_pause";
 
+// PostgreSQL triggers are database-wide, while Rust runs tests in this binary
+// concurrently. Serialize the failpoint test with the restart test so the
+// temporary outbox trigger cannot intercept another test's transaction.
+static POSTGRES_FAILPOINT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct Fixture {
     pool: sqlx::PgPool,
     tenant_id: TenantId,
@@ -221,6 +226,9 @@ fn provider_response() -> ChatResponse {
 
 #[tokio::test]
 async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atomically() {
+    let _serial = POSTGRES_FAILPOINT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let fixture = fixture().await;
     let scope = authenticated_scope(&fixture.pool, &fixture).await;
 
@@ -293,11 +301,9 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
     assert!(terminated, "the pre-commit backend must be terminated");
 
     let result = task.await.expect("begin-invocation task should return");
-    assert!(
-        result.is_err(),
-        "a killed transaction must not report success"
-    );
 
+    // Remove the database-wide failpoint before assertions so even a failed
+    // assertion cannot leak it into later tests in this test process.
     sqlx::query("DROP TRIGGER IF EXISTS rust047_pause_outbox ON outbox_messages")
         .execute(&fixture.pool)
         .await
@@ -306,6 +312,11 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
         .execute(&fixture.pool)
         .await
         .expect("outbox trigger function should be removed");
+
+    assert!(
+        result.is_err(),
+        "a killed transaction must not report success"
+    );
 
     let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT
@@ -331,6 +342,9 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
 
 #[tokio::test]
 async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
+    let _serial = POSTGRES_FAILPOINT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let fixture = fixture().await;
     let scope = authenticated_scope(&fixture.pool, &fixture).await;
     let store = PgInvocationStartStore::new(fixture.pool.clone());
