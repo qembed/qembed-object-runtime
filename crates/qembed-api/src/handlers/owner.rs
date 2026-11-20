@@ -428,11 +428,6 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "forbidden",
             "The selected Caller is not delegated to this authenticated Principal.",
         ),
-        (_, OwnerApiBackendError::Conflict) => api_error(
-            StatusCode::CONFLICT,
-            "conflict",
-            "The invocation conflicts with the current object or idempotency state.",
-        ),
         (_, OwnerApiBackendError::NotFound) => api_error(
             StatusCode::NOT_FOUND,
             "not_found",
@@ -447,6 +442,11 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             StatusCode::CONFLICT,
             "conflict",
             "The object changed or is not in a publishable state.",
+        ),
+        (_, OwnerApiBackendError::Conflict) => api_error(
+            StatusCode::CONFLICT,
+            "conflict",
+            "The invocation conflicts with the current object or idempotency state.",
         ),
         (
             _,
