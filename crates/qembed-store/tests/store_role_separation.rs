@@ -104,6 +104,14 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     let delivery_a = Uuid::new_v4();
     let delivery_b = Uuid::new_v4();
 
+    for tenant in [tenant_a, tenant_b] {
+        sqlx::query("INSERT INTO tenants (id) VALUES ($1)")
+            .bind(tenant)
+            .execute(&owner)
+            .await
+            .expect("owner should seed tenant fixtures");
+    }
+
     for (tenant, object, version, event, delivery) in [
         (tenant_a, object_a, version_a, event_a, delivery_a),
         (tenant_b, object_b, version_b, event_b, delivery_b),
@@ -146,7 +154,50 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .expect("owner should seed outbox fixtures");
     }
 
+    let caller_a = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO callers (id, tenant_id, token_hash, caller_kind)
+         VALUES ($1, $2, $3, 'Authenticated')",
+    )
+    .bind(caller_a)
+    .bind(tenant_a)
+    .bind(caller_a.as_bytes().to_vec())
+    .execute(&owner)
+    .await
+    .expect("owner should seed a Caller for the invocation fixture");
+
+    let snapshot_a = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO snapshots
+            (tenant_id, snapshot_id, object_id, object_version_id, schema_version,
+             canonical_json, content_hash, json_projection)
+         VALUES ($1, $2, $3, $4, 1, convert_to('{}', 'UTF8'), decode(repeat('01', 32), 'hex'), '{}'::jsonb)",
+    )
+    .bind(tenant_a)
+    .bind(snapshot_a)
+    .bind(object_a)
+    .bind(version_a)
+    .execute(&owner)
+    .await
+    .expect("owner should seed a snapshot for the invocation fixture");
+
     let attempt_invocation = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO object_invocations
+            (id, tenant_id, object_id, caller_id, snapshot_id, knowledge_revision,
+             pool, status, trace_id)
+         VALUES ($1, $2, $3, $4, $5, 0, 'authenticated', 'Received', $6)",
+    )
+    .bind(attempt_invocation)
+    .bind(tenant_a)
+    .bind(object_a)
+    .bind(caller_a)
+    .bind(snapshot_a)
+    .bind(Uuid::new_v4())
+    .execute(&owner)
+    .await
+    .expect("owner should seed an invocation for the reservation fixture");
+
     sqlx::query(
         "INSERT INTO budget_reservations
             (id, tenant_id, object_id, invocation_id, pool, usage_date,
@@ -523,6 +574,67 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         authenticated.tenant_id().to_string(),
         auth_tenant.to_string()
     );
+
+    // The production delegation resolver must execute through its restricted
+    // SECURITY DEFINER owner and retain the exact Principal/Caller binding.
+    let principal_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind)
+         VALUES ($1, $2, 'tenant_owner')",
+    )
+    .bind(tenant_a)
+    .bind(principal_id)
+    .execute(&owner)
+    .await
+    .expect("delegating Principal fixture should be inserted");
+    sqlx::query(
+        "INSERT INTO principal_caller_delegations
+            (delegation_id, tenant_id, principal_id, caller_id)
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_a)
+    .bind(principal_id)
+    .bind(caller_a)
+    .execute(&owner)
+    .await
+    .expect("active Principal-to-Caller delegation should be inserted");
+
+    let mut delegation_tx = runtime
+        .begin()
+        .await
+        .expect("runtime delegation transaction should begin");
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true),
+                set_config('app.principal_id', $2, true)",
+    )
+    .bind(tenant_a.to_string())
+    .bind(principal_id.to_string())
+    .execute(&mut *delegation_tx)
+    .await
+    .expect("trusted tenant and Principal context should be set");
+    let resolved: (String, String) = sqlx::query_as(
+        "SELECT caller_id::text, caller_kind
+           FROM resolve_delegated_caller($1::uuid)",
+    )
+    .bind(caller_a)
+    .fetch_one(&mut *delegation_tx)
+    .await
+    .expect("runtime should resolve an active delegated Caller");
+    assert_eq!(resolved.0, caller_a.to_string());
+    assert_eq!(resolved.1, "Authenticated");
+
+    let missing_caller = Uuid::new_v4();
+    let error = sqlx::query("SELECT caller_id FROM resolve_delegated_caller($1::uuid)")
+        .bind(missing_caller)
+        .fetch_one(&mut *delegation_tx)
+        .await
+        .expect_err("resolver must reject a Caller without an active delegation");
+    assert_sqlstate(error, "42501");
+    delegation_tx
+        .rollback()
+        .await
+        .expect("delegation resolver transaction should roll back");
 
     runtime.close().await;
     dispatcher.close().await;
