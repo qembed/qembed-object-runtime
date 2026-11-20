@@ -17,7 +17,7 @@ use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId};
 use qembed_domain::object::{Object, ObjectError, ObjectState};
 use qembed_domain::object_validation::{OBJECT_VALIDATOR_VERSION, ValidationEvidence};
 use qembed_domain::object_version::{ObjectVersion, ObjectVersionError, ObjectVersionStatus};
-use qembed_domain::ports::{DraftVersionCreation, ObjectCreationStore, ObjectVersionCreationStore};
+use qembed_domain::ports::{DraftVersionCreation, ObjectCreationStore, ObjectPublicationStore, ObjectVersionCreationStore, PublicationCandidate};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
 use sqlx::PgPool;
@@ -227,6 +227,88 @@ impl ObjectRepository {
             version_id: existing_version_id,
             snapshot_id: existing_snapshot_id,
         })
+    }
+
+    /// Loads a Draft snapshot and captures the object's current publication pointer.
+    ///
+    /// The returned pointer is only a candidate: publish_version rechecks it
+    /// under the object row lock after validation has completed.
+    pub async fn load_publication_candidate(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+    ) -> Result<Option<PublicationCandidate>, ObjectRepositoryError> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        let row = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (String, Option<String>, String, String, String, String, i32, Vec<u8>, Vec<u8>)>(
+                "SELECT o.state, o.published_version_id::text, s.snapshot_id::text, s.tenant_id::text, s.object_id::text, s.object_version_id::text, s.schema_version, s.canonical_json, s.content_hash FROM objects o JOIN object_versions v ON v.tenant_id = o.tenant_id AND v.object_id = o.object_id JOIN snapshots s ON s.tenant_id = v.tenant_id AND s.object_id = v.object_id AND s.object_version_id = v.object_version_id WHERE o.tenant_id = $1::uuid AND o.object_id = $2::uuid AND v.object_version_id = $3::uuid AND v.status = 'draft'",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
+            .bind(version_id.to_string()),
+        )
+        .await
+        .map_err(ObjectRepositoryError::Database)?;
+
+        let candidate = row
+            .map(|(state, current, snapshot_id, tenant, object, version, schema, bytes, hash)| {
+                let snapshot_id = snapshot_id.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                let tenant = tenant.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                let object = object.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                let version = version.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier)?;
+                let schema = u32::try_from(schema).map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
+                let hash: [u8; 32] = hash.try_into().map_err(|_| ObjectRepositoryError::InvalidHashLength)?;
+                let snapshot = Snapshot::from_persisted(
+                    snapshot_id, tenant, object, version, schema, bytes, hash,
+                ).map_err(ObjectRepositoryError::InvalidSnapshot)?;
+                let expected_current = current
+                    .map(|value| value.parse().map_err(|_| ObjectRepositoryError::InvalidIdentifier))
+                    .transpose()?;
+                Ok(PublicationCandidate::new(snapshot, parse_object_state(&state)?, expected_current))
+            })
+            .transpose()?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        Ok(candidate)
+    }
+
+    /// Returns a first-publication candidate from Validating to Draft.
+    ///
+    /// This is used when trusted validation rejects the candidate or the
+    /// publication transaction fails. It never changes an already-active object.
+    pub async fn reject_validation(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+    ) -> Result<(), ObjectRepositoryError> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+            .await
+            .map_err(ObjectRepositoryError::Database)?;
+
+        execute_cas(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE objects SET state = 'draft' WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND state = 'validating' AND published_version_id IS NULL",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string()),
+        )
+        .await
+        .map_err(|error| map_cas_error(error, ObjectRepositoryError::InvalidObjectState))?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(ObjectRepositoryError::Database)
     }
 
     /// Moves a Draft object into Validating before external validation begins.
@@ -471,6 +553,38 @@ impl ObjectCreationStore for ObjectRepository {
 
     async fn create_object(&self, scope: &Scope, object: &Object) -> Result<(), Self::Error> {
         ObjectRepository::create_object(self, scope, object).await
+    }
+}
+
+impl ObjectPublicationStore for ObjectRepository {
+    type Error = ObjectRepositoryError;
+
+    async fn load_publication_candidate(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+    ) -> Result<Option<PublicationCandidate>, Self::Error> {
+        ObjectRepository::load_publication_candidate(self, scope, object_id, version_id).await
+    }
+
+    async fn begin_validation(&self, scope: &Scope, object_id: ObjectId) -> Result<(), Self::Error> {
+        ObjectRepository::begin_validation(self, scope, object_id).await
+    }
+
+    async fn reject_validation(&self, scope: &Scope, object_id: ObjectId) -> Result<(), Self::Error> {
+        ObjectRepository::reject_validation(self, scope, object_id).await
+    }
+
+    async fn publish_version(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        version_id: ObjectVersionId,
+        expected_current: Option<ObjectVersionId>,
+        evidence: &ValidationEvidence,
+    ) -> Result<(), Self::Error> {
+        ObjectRepository::publish_version(self, scope, object_id, version_id, expected_current, evidence).await
     }
 }
 
