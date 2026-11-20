@@ -292,8 +292,8 @@ async fn one_thousand_identical_configuration_creations_reuse_one_snapshot() {
 #[tokio::test]
 async fn changed_tool_binding_produces_a_new_immutable_snapshot() {
     let (pool, repository, scope, object_id) = setup().await;
-    let original = br#"{\"tools\":[{\"tool_id\":\"11111111-0000-0000-0000-000000000001\",\"tool_version_id\":\"11111111-0000-0000-0000-0000000000a1\"}]}"#;
-    let changed = br#"{\"tools\":[{\"tool_id\":\"11111111-0000-0000-0000-000000000001\",\"tool_version_id\":\"11111111-0000-0000-0000-0000000000a2\"}]}"#;
+    let original = br#"{"tools":[{"tool_id":"11111111-0000-0000-0000-000000000001","tool_version_id":"11111111-0000-0000-0000-0000000000a1"}]}"#;
+    let changed = br#"{"tools":[{"tool_id":"11111111-0000-0000-0000-000000000001","tool_version_id":"11111111-0000-0000-0000-0000000000a2"}]}"#;
 
     let (first_version, first_snapshot) = draft(scope.tenant_id(), object_id, 1, original);
     let first = repository
