@@ -32,7 +32,6 @@ pub struct BeginInvocationCommand {
     pub object_id: ObjectId,
     pub requested_caller_id: CallerId,
     pub invocation_pool: InvocationPool,
-    pub snapshot_id: SnapshotId,
     pub idempotency_key: String,
     pub payload_hash: Vec<u8>,
     /// Original user input, persisted before the invocation is dispatched.
@@ -69,6 +68,7 @@ pub enum BeginInvocationError {
     ObjectNotFound,
     ObjectNotActive,
     SnapshotNotFound,
+    NoPublishedVersion,
     SnapshotIsNotCurrentPublishedVersion,
     KnowledgeRevisionNotFound,
     KnowledgeRevisionOutOfRange,
@@ -93,6 +93,7 @@ impl fmt::Display for BeginInvocationError {
             Self::SnapshotNotFound => {
                 formatter.write_str("snapshot does not belong to this object and tenant")
             }
+            Self::NoPublishedVersion => formatter.write_str("object has no published version"),
             Self::SnapshotIsNotCurrentPublishedVersion => {
                 formatter.write_str("snapshot is not for the current published object version")
             }
@@ -250,23 +251,31 @@ pub async fn begin_invocation(
         return Err(BeginInvocationError::ObjectNotActive);
     }
 
-    let snapshot_version = fetch_optional(
+    let published_version_id = object
+        .1
+        .as_deref()
+        .ok_or(BeginInvocationError::NoPublishedVersion)?;
+
+    let snapshot = fetch_optional(
         &mut transaction,
         sqlx::query_as::<_, (String, String)>(
-            "SELECT snapshot.object_version_id::text, version.status FROM snapshots AS snapshot INNER JOIN object_versions AS version ON version.tenant_id = snapshot.tenant_id AND version.object_id = snapshot.object_id AND version.object_version_id = snapshot.object_version_id WHERE snapshot.tenant_id = $1::uuid AND snapshot.object_id = $2::uuid AND snapshot.snapshot_id = $3::uuid",
+            "SELECT snapshot.snapshot_id::text, version.status FROM snapshots AS snapshot INNER JOIN object_versions AS version ON version.tenant_id = snapshot.tenant_id AND version.object_id = snapshot.object_id AND version.object_version_id = snapshot.object_version_id WHERE snapshot.tenant_id = $1::uuid AND snapshot.object_id = $2::uuid AND snapshot.object_version_id = $3::uuid",
         )
         .bind(scope.tenant_id().to_string())
         .bind(command.object_id.to_string())
-        .bind(command.snapshot_id.to_string()),
+        .bind(published_version_id),
     )
     .await
     .map_err(BeginInvocationError::Database)?
     .ok_or(BeginInvocationError::SnapshotNotFound)?;
 
-    if object.1.as_deref() != Some(snapshot_version.0.as_str()) || snapshot_version.1 != "published"
-    {
+    if snapshot.1 != "published" {
         return Err(BeginInvocationError::SnapshotIsNotCurrentPublishedVersion);
     }
+    let snapshot_id = snapshot
+        .0
+        .parse::<SnapshotId>()
+        .map_err(|_| BeginInvocationError::SnapshotNotFound)?;
 
     // FOR SHARE pins the current revision against concurrent knowledge commits
     // until this invocation transaction commits.
@@ -291,7 +300,7 @@ pub async fn begin_invocation(
     )
     .bind(scope.tenant_id().to_string())
     .bind(command.object_id.to_string())
-    .bind(command.snapshot_id.to_string())
+    .bind(snapshot_id.to_string())
     .fetch_one(transaction.connection())
     .await
     .map_err(BeginInvocationError::Database)?;
@@ -326,7 +335,7 @@ pub async fn begin_invocation(
         .bind(scope.tenant_id().to_string())
         .bind(command.object_id.to_string())
         .bind(caller.caller_id().to_string())
-        .bind(command.snapshot_id.to_string())
+        .bind(snapshot_id.to_string())
         .bind(i64::try_from(knowledge_revision).map_err(|_| BeginInvocationError::KnowledgeRevisionOutOfRange)?)
         .bind(command.invocation_pool.as_sql())
         .bind(command.trace_id.to_string()),
@@ -352,12 +361,15 @@ pub async fn begin_invocation(
 
     append_invocation_received(
         &mut transaction,
-        scope,
-        EventId::new(),
-        invocation_id,
-        &command,
-        caller,
-        knowledge_revision,
+        InvocationReceivedContext {
+            scope,
+            event_id: EventId::new(),
+            invocation_id,
+            command: &command,
+            snapshot_id,
+            caller,
+            knowledge_revision,
+        },
     )
     .await
     .map_err(BeginInvocationError::Database)?;
@@ -371,26 +383,40 @@ pub async fn begin_invocation(
         invocation_id,
         caller_id: caller.caller_id(),
         caller_kind: caller.kind(),
-        snapshot_id: command.snapshot_id,
+        snapshot_id,
         knowledge_revision,
         invocation_pool: command.invocation_pool,
     })
 }
 
-async fn append_invocation_received(
-    transaction: &mut TenantTransaction,
-    scope: &Scope,
+struct InvocationReceivedContext<'a> {
+    scope: &'a Scope,
     event_id: EventId,
     invocation_id: InvocationId,
-    command: &BeginInvocationCommand,
+    command: &'a BeginInvocationCommand,
+    snapshot_id: SnapshotId,
     caller: ResolvedCaller,
     knowledge_revision: u64,
+}
+
+async fn append_invocation_received(
+    transaction: &mut TenantTransaction,
+    context: InvocationReceivedContext<'_>,
 ) -> Result<(), sqlx::Error> {
+    let InvocationReceivedContext {
+        scope,
+        event_id,
+        invocation_id,
+        command,
+        snapshot_id,
+        caller,
+        knowledge_revision,
+    } = context;
     let payload = serde_json::to_string(&InvocationReceivedPayload::new(
         invocation_id,
         command.object_id,
         caller,
-        command.snapshot_id,
+        snapshot_id,
         knowledge_revision,
         command.invocation_pool,
     ))

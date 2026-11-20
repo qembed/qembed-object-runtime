@@ -3,6 +3,7 @@
 pub mod error;
 pub mod invocation_cancellation;
 pub mod invocation_query;
+pub mod invocation_start;
 pub mod invocation_worker;
 pub mod object_creation;
 pub mod object_publication;

@@ -247,7 +247,6 @@ fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
         object_id: fixture.object_id,
         requested_caller_id: fixture.caller_id,
         invocation_pool: InvocationPool::Authenticated,
-        snapshot_id: fixture.snapshot_id,
         idempotency_key: key.to_owned(),
         payload_hash: b"request-digest".to_vec(),
         input_message: "hello from durable invocation input".to_owned(),
@@ -396,12 +395,17 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
 async fn any_failure_after_idempotency_claim_rolls_back_the_entire_begin() {
     // Snapshot validation fails after the key has been reserved.
     let fixture = setup(None).await;
-    let mut invalid = command(&fixture, "missing-snapshot");
-    invalid.snapshot_id = SnapshotId::new();
+    let invalid = command(&fixture, "missing-snapshot");
+    sqlx::query("UPDATE objects SET published_version_id = NULL WHERE tenant_id = $1::uuid AND object_id = $2::uuid")
+        .bind(fixture.scope.tenant_id().to_string())
+        .bind(fixture.object_id.to_string())
+        .execute(&fixture.pool)
+        .await
+        .expect("published pointer should be cleared");
     let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
         .await
-        .expect_err("missing snapshot must fail");
-    assert!(matches!(error, BeginInvocationError::SnapshotNotFound));
+        .expect_err("object without a published version must fail");
+    assert!(matches!(error, BeginInvocationError::NoPublishedVersion));
     assert_eq!(counts(&fixture).await, (0, 0, 0, 0, 0));
     teardown(fixture).await;
 }

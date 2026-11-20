@@ -9,11 +9,12 @@ use std::pin::Pin;
 use axum::Router;
 use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
-    ids::{InvocationId, ObjectId, ObjectVersionId, TenantId},
+    ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
     ports::DraftVersionCreation,
 };
 use qembed_runtime::{
     invocation_query::InvocationQueryService,
+    invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
     object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
@@ -22,6 +23,7 @@ use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
     auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
     invocation_query::PgInvocationQueryStore,
+    invocation_start::PgInvocationStartStore,
     object_repository::ObjectRepository,
 };
 use sqlx::PgPool;
@@ -189,6 +191,61 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     | qembed_store::object_repository::ObjectRepositoryError::CurrentVersionNotPublished,
                 )) => Err(OwnerApiBackendError::Conflict),
                 Err(ObjectPublicationError::Store(_)) => Err(OwnerApiBackendError::Internal),
+            }
+        })
+    }
+
+    fn invoke(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        caller_id: CallerId,
+        idempotency_key: String,
+        input: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>> {
+        Box::pin(async move {
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            let service =
+                InvocationStartService::new(PgInvocationStartStore::new(self.pool.clone()));
+            match service
+                .start(
+                    &scope,
+                    InvocationStartRequest {
+                        object_id,
+                        caller_id,
+                        idempotency_key,
+                        input,
+                    },
+                )
+                .await
+            {
+                Ok(result) => match result {
+                    qembed_runtime::invocation_start::InvocationStartResult::Accepted {
+                        invocation_id,
+                    }
+                    | qembed_runtime::invocation_start::InvocationStartResult::Replayed {
+                        invocation_id,
+                    } => Ok(invocation_id),
+                },
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
+                        qembed_store::caller::CallerResolutionError::NotDelegated,
+                    ),
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::Idempotency(
+                        qembed_store::idempotency::IdempotencyReservationError::PayloadMismatch,
+                    ),
+                )) => Err(OwnerApiBackendError::Conflict),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::NoPublishedVersion
+                    | qembed_store::begin_invocation::BeginInvocationError::ObjectNotActive,
+                )) => Err(OwnerApiBackendError::Conflict),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::ObjectNotFound,
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(_) => Err(OwnerApiBackendError::Internal),
             }
         })
     }

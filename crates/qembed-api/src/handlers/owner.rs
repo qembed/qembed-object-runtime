@@ -15,7 +15,7 @@ use axum::{
     routing::{get, post},
 };
 use qembed_domain::{
-    ids::{InvocationId, ObjectId, ObjectVersionId, TenantId},
+    ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
     jcs::canonicalize_json,
 };
 
@@ -86,6 +86,15 @@ pub trait OwnerApiBackend: Send + Sync {
                 + '_,
         >,
     >;
+    fn invoke(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        object_id: ObjectId,
+        caller_id: CallerId,
+        idempotency_key: String,
+        input: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>>;
     fn inspect(
         &self,
         tenant_id: TenantId,
@@ -125,6 +134,10 @@ pub fn owner_router(backend: impl OwnerApiBackend + 'static) -> Router {
         .route(
             "/owner/objects/{object_id}/versions/{version_id}/publish",
             post(publish_object_version),
+        )
+        .route(
+            "/owner/objects/{object_id}/invocations",
+            post(invoke_object),
         )
         .route(
             "/owner/invocations/{invocation_id}",
@@ -311,6 +324,86 @@ async fn publish_object_version(
     }
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InvokeObjectRequest {
+    caller_id: String,
+    idempotency_key: String,
+    input: serde_json::Value,
+}
+
+fn parse_invoke_body(body: &[u8]) -> Result<(CallerId, String, serde_json::Value), ()> {
+    canonicalize_json(body).map_err(|_| ())?;
+    let request: InvokeObjectRequest = serde_json::from_slice(body).map_err(|_| ())?;
+    let caller_id = request.caller_id.parse::<CallerId>().map_err(|_| ())?;
+    let input_bytes = serde_json::to_vec(&request.input).map_err(|_| ())?;
+    let canonical_input = canonicalize_json(&input_bytes).map_err(|_| ())?;
+    if canonical_input.len() > 65_536 {
+        return Err(());
+    }
+    Ok((caller_id, request.idempotency_key, request.input))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct InvocationStartResponse {
+    pub invocation_id: String,
+    pub status: &'static str,
+}
+
+async fn invoke_object(
+    State(state): State<OwnerApiState>,
+    Path(object_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let object_id = match object_id.parse::<ObjectId>() {
+        Ok(id) => id,
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object ID is invalid.",
+            );
+        }
+    };
+    let (caller_id, idempotency_key, input) = match parse_invoke_body(&body) {
+        Ok(request) => request,
+        Err(()) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The invocation request body is invalid.",
+            );
+        }
+    };
+    let (tenant_id, token) = match owner_credentials(&headers) {
+        Ok(v) => v,
+        Err(error) => return credential_error(error),
+    };
+    match state
+        .backend
+        .invoke(
+            tenant_id,
+            token,
+            object_id,
+            caller_id,
+            idempotency_key,
+            input,
+        )
+        .await
+    {
+        Ok(invocation_id) => (
+            StatusCode::ACCEPTED,
+            Json(InvocationStartResponse {
+                invocation_id: invocation_id.to_string(),
+                status: "received",
+            }),
+        )
+            .into_response(),
+        Err(error) => backend_error(error, BackendErrorContext::Ordinary),
+    }
+}
+
 async fn inspect_invocation(
     State(state): State<OwnerApiState>,
     Path(invocation_id): Path<String>,
@@ -369,16 +462,18 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "conflict",
             "The object changed or is not in a publishable state.",
         ),
-        (
-            _,
-            OwnerApiBackendError::ValidationRejected
-            | OwnerApiBackendError::Conflict
-            | OwnerApiBackendError::Internal,
-        ) => api_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            "An unexpected internal error occurred.",
+        (_, OwnerApiBackendError::Conflict) => api_error(
+            StatusCode::CONFLICT,
+            "conflict",
+            "The invocation conflicts with the current object or idempotency state.",
         ),
+        (_, OwnerApiBackendError::ValidationRejected | OwnerApiBackendError::Internal) => {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An unexpected internal error occurred.",
+            )
+        }
     }
 }
 
@@ -404,6 +499,30 @@ fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn invoke_body_rejects_duplicate_keys_unknown_fields_and_oversized_input() {
+        let caller_id = CallerId::new();
+        let duplicate = format!(
+            r#"{{"caller_id":"{caller_id}","idempotency_key":"k","input":{{"a":1,"a":2}}}}"#
+        );
+        assert!(parse_invoke_body(duplicate.as_bytes()).is_err());
+
+        let unknown = format!(
+            r#"{{"caller_id":"{caller_id}","idempotency_key":"k","input":null,"extra":true}}"#
+        );
+        assert!(parse_invoke_body(unknown.as_bytes()).is_err());
+
+        let oversized = serde_json::json!({
+            "caller_id": caller_id.to_string(),
+            "idempotency_key": "k",
+            "input": "x".repeat(65_537),
+        });
+        assert!(
+            parse_invoke_body(&serde_json::to_vec(&oversized).expect("request JSON serializes"))
+                .is_err()
+        );
+    }
+
     #[test]
     fn create_version_body_rejects_duplicate_keys_and_invalid_schema_versions() {
         assert!(
