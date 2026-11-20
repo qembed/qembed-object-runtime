@@ -7,7 +7,7 @@ The Rust stable CI matrix publishes one artifact per PostgreSQL major version. E
 ## Artifact contents
 
 - `database-metadata.txt`: commit SHA, Rust compiler version, PostgreSQL server version and numeric version, and installed pgvector extension version.
-- `nextest-junit.xml`: JUnit report for the workspace unit and integration test binaries.
+- `ci/nextest-junit.xml`: JUnit report for the workspace unit and integration test binaries (Nextest writes it under `target/test-evidence/ci/`).
 - `nextest.log`: complete nextest output, including test names and pass/fail results.
 - `doc-tests.log`: workspace rustdoc/compile-fail test output, run separately because nextest does not execute doctests.
 - `concurrency-results.txt`: focused log lines for the independent event-stream concurrency test and the 1,000-invocation / 1,000-snapshot-deduplication regression tests.
