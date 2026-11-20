@@ -361,13 +361,15 @@ pub async fn begin_invocation(
 
     append_invocation_received(
         &mut transaction,
-        scope,
-        EventId::new(),
-        invocation_id,
-        &command,
-        snapshot_id,
-        caller,
-        knowledge_revision,
+        InvocationReceivedContext {
+            scope,
+            event_id: EventId::new(),
+            invocation_id,
+            command: &command,
+            snapshot_id,
+            caller,
+            knowledge_revision,
+        },
     )
     .await
     .map_err(BeginInvocationError::Database)?;
@@ -387,16 +389,29 @@ pub async fn begin_invocation(
     })
 }
 
-async fn append_invocation_received(
-    transaction: &mut TenantTransaction,
-    scope: &Scope,
+struct InvocationReceivedContext<'a> {
+    scope: &'a Scope,
     event_id: EventId,
     invocation_id: InvocationId,
-    command: &BeginInvocationCommand,
+    command: &'a BeginInvocationCommand,
     snapshot_id: SnapshotId,
     caller: ResolvedCaller,
     knowledge_revision: u64,
+}
+
+async fn append_invocation_received(
+    transaction: &mut TenantTransaction,
+    context: InvocationReceivedContext<'_>,
 ) -> Result<(), sqlx::Error> {
+    let InvocationReceivedContext {
+        scope,
+        event_id,
+        invocation_id,
+        command,
+        snapshot_id,
+        caller,
+        knowledge_revision,
+    } = context;
     let payload = serde_json::to_string(&InvocationReceivedPayload::new(
         invocation_id,
         command.object_id,
