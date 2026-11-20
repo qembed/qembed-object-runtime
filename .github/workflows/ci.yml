@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["15.10-alpine", "16.4-alpine"]
+        postgres: ["15.10-alpine", "16.4-alpine", "19.0-bookworm"]
     env:
       POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
     runs-on: ubuntu-latest
