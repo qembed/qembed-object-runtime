@@ -9,7 +9,13 @@ permissions:
 
 jobs:
   rust:
-    name: Format, check, lint, dependency audit, and test (stable)
+    name: Format, check, lint, dependency audit, and test (stable / PostgreSQL ${{ matrix.postgres }})
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["15.10-alpine", "16.4-alpine", "19.0-bookworm"]
+    env:
+      POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

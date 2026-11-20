@@ -2738,3 +2738,50 @@ async fn settlement_database_failure_rolls_back_both_counters_and_reservation() 
     assert_eq!(reservation, ("Reserved".to_owned(), None));
     teardown(fixture).await;
 }
+
+#[tokio::test]
+async fn one_thousand_invocations_of_one_configuration_pin_the_same_snapshot() {
+    let fixture = setup(None).await;
+    sqlx::query(
+        "UPDATE object_budgets SET daily_token_limit=10000000, per_caller_daily_token_limit=10000000, max_concurrent_invocations=2000, max_llm_calls=2000 WHERE tenant_id=$1::uuid AND object_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .execute(&fixture.pool)
+    .await
+    .expect("acceptance fixture should permit the full 1,000-invocation batch");
+
+    for index in 0..1_000 {
+        let outcome = begin_invocation(
+            &fixture.pool,
+            &fixture.scope,
+            command(&fixture, &format!("t30-same-config-{index}")),
+        )
+        .await
+        .expect("every invocation should reuse the already-published configuration");
+        match outcome {
+            BeginInvocationOutcome::Created { snapshot_id, .. } => {
+                assert_eq!(
+                    snapshot_id, fixture.snapshot_id,
+                    "every invocation must pin the exact same immutable snapshot"
+                );
+            }
+            BeginInvocationOutcome::Replay { .. } => {
+                panic!("each T-30 invocation uses a distinct idempotency key");
+            }
+        }
+    }
+
+    let pinned_snapshots: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT snapshot_id) FROM object_invocations WHERE tenant_id=$1::uuid AND object_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("invocation snapshot pins should be queryable");
+    assert_eq!(pinned_snapshots, 1);
+    assert_eq!(counts(&fixture).await, (1_000, 1_000, 1_000, 1_000, 1_000));
+
+    teardown(fixture).await;
+}

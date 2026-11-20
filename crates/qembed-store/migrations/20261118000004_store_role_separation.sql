@@ -25,21 +25,27 @@ BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'qembed_admin') THEN
         CREATE ROLE qembed_admin NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
     END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'qembed_event_allocator') THEN
+        CREATE ROLE qembed_event_allocator NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    END IF;
 END
 $roles$;
 
 ALTER ROLE qembed_runtime NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 ALTER ROLE qembed_dispatcher NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 ALTER ROLE qembed_admin NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE qembed_event_allocator NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 
-GRANT USAGE ON SCHEMA public TO qembed_runtime, qembed_dispatcher, qembed_admin;
+GRANT USAGE ON SCHEMA public TO qembed_runtime, qembed_dispatcher, qembed_admin, qembed_event_allocator;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin, qembed_event_allocator;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM qembed_event_allocator;
 
 -- Start from an explicit deny baseline, including any grants that might have
 -- pre-existed on these role names or PUBLIC in a previously managed database.
 REVOKE ALL PRIVILEGES ON TABLE
     objects, object_versions, snapshots, events, outbox_messages,
-    owner_principals, owner_credentials
-FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin;
+    owner_principals, owner_credentials, event_stream_counters
+FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin, qembed_event_allocator;
 
 -- Runtime: mutable object state, but immutable snapshots/events are append-only.
 GRANT SELECT, INSERT, UPDATE ON objects, object_versions TO qembed_runtime;
@@ -117,6 +123,20 @@ ALTER TABLE snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE snapshots FORCE ROW LEVEL SECURITY;
 ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE events FORCE ROW LEVEL SECURITY;
+ALTER TABLE event_stream_counters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_stream_counters FORCE ROW LEVEL SECURITY;
+
+-- Only the trigger's NOLOGIN owner can mutate stream counters. Runtime may
+-- append an event but cannot forge or skip a stream version directly.
+GRANT SELECT, INSERT, UPDATE ON event_stream_counters TO qembed_event_allocator;
+CREATE POLICY event_stream_counters_allocator ON event_stream_counters
+    FOR ALL TO qembed_event_allocator USING (true) WITH CHECK (true);
+GRANT qembed_event_allocator TO CURRENT_USER;
+GRANT CREATE ON SCHEMA public TO qembed_event_allocator;
+ALTER FUNCTION assign_event_stream_version() OWNER TO qembed_event_allocator;
+REVOKE CREATE ON SCHEMA public FROM qembed_event_allocator;
+REVOKE qembed_event_allocator FROM CURRENT_USER;
+REVOKE ALL ON FUNCTION assign_event_stream_version() FROM PUBLIC;
 ALTER TABLE outbox_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_messages FORCE ROW LEVEL SECURITY;
 ALTER TABLE owner_principals ENABLE ROW LEVEL SECURITY;
