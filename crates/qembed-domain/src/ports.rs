@@ -10,7 +10,8 @@ use std::future::Future;
 use crate::chat::{
     ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse, ProviderRequestContext,
 };
-use crate::ids::{InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId};
+use crate::ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId, TraceId};
+use crate::caller::InvocationPool;
 use crate::invocation::{FencingToken, Invocation};
 use crate::object::ObjectState;
 use crate::object_validation::ValidationEvidence;
@@ -252,6 +253,40 @@ pub trait InvocationReadStore: Send + Sync {
     ) -> impl Future<
         Output = Result<Option<crate::invocation_read::InvocationReadModel>, Self::Error>,
     > + Send;
+}
+
+
+/// Server-prepared inputs for the atomic begin-invocation persistence operation.
+/// The Store resolves the selected Caller and current published Snapshot inside
+/// one tenant-scoped transaction; transport input never supplies a Snapshot ID.
+#[derive(Clone, Debug)]
+pub struct InvocationStartCommand {
+    pub object_id: ObjectId,
+    pub requested_caller_id: CallerId,
+    pub invocation_pool: InvocationPool,
+    pub idempotency_key: String,
+    pub payload_hash: Vec<u8>,
+    pub input_message: String,
+    pub message_expires_at: std::time::SystemTime,
+    pub idempotency_expires_at: std::time::SystemTime,
+    pub trace_id: TraceId,
+}
+
+/// The durable result of starting an invocation. Replays return the original ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvocationStartOutcome {
+    Created { invocation_id: InvocationId },
+    Replay { invocation_id: InvocationId },
+}
+
+/// Persistence boundary for the atomic begin-invocation transaction.
+pub trait InvocationStartStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+    fn begin_invocation(
+        &self,
+        scope: &Scope,
+        command: InvocationStartCommand,
+    ) -> impl Future<Output = Result<InvocationStartOutcome, Self::Error>> + Send;
 }
 
 /// Result of an idempotent invocation cancellation request.
