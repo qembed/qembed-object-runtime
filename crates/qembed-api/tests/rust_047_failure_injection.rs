@@ -20,8 +20,12 @@ use qembed_runtime::invocation_worker::{
     InvocationWorker, InvocationWorkerConfig, InvocationWorkerOutcome,
 };
 use qembed_store::{
-    PgPoolConfig, auth::{OwnerAuthenticator, OwnerCredentials}, connect_pool,
-    invocation_start::PgInvocationStartStore, invocation_worker::PgExecutionStore, run_migrations,
+    PgPoolConfig,
+    auth::{OwnerAuthenticator, OwnerCredentials},
+    connect_pool,
+    invocation_start::PgInvocationStartStore,
+    invocation_worker::PgExecutionStore,
+    run_migrations,
 };
 use sha2::{Digest, Sha256};
 use support::test;
@@ -166,10 +170,19 @@ async fn fixture() -> Fixture {
     .await
     .expect("Object budget should be provisioned");
 
-    Fixture { pool, tenant_id, owner_token, caller_id, object_id }
+    Fixture {
+        pool,
+        tenant_id,
+        owner_token,
+        caller_id,
+        object_id,
+    }
 }
 
-async fn authenticated_scope(pool: &sqlx::PgPool, fixture: &Fixture) -> qembed_domain::scope::Scope {
+async fn authenticated_scope(
+    pool: &sqlx::PgPool,
+    fixture: &Fixture,
+) -> qembed_domain::scope::Scope {
     authenticate_owner(
         &OwnerAuthenticator::new(pool.clone()),
         OwnerCredentials::new(fixture.tenant_id, fixture.owner_token.clone()),
@@ -225,7 +238,7 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
         .expect("stale outbox trigger function should be removed");
     sqlx::query(
         &format!(
-            "CREATE FUNCTION rust047_pause_outbox_insert() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN PERFORM set_config('application_name', '{}', false); PERFORM pg_sleep(30); RETURN NEW; END; $",
+            "CREATE FUNCTION rust047_pause_outbox_insert() RETURNS trigger LANGUAGE plpgsql AS $rust047$ BEGIN PERFORM set_config('application_name', '{}', false); PERFORM pg_sleep(30); RETURN NEW; END; $rust047$",
             PAUSE_APPLICATION_NAME
         ),
     )
@@ -240,7 +253,11 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
     .expect("outbox pause trigger should be created");
 
     let store = PgInvocationStartStore::new(fixture.pool.clone());
-    let command = start_command(fixture.object_id, fixture.caller_id, "rust-047-precommit-crash");
+    let command = start_command(
+        fixture.object_id,
+        fixture.caller_id,
+        "rust-047-precommit-crash",
+    );
     let task = tokio::spawn(async move { store.begin_invocation(&scope, command).await });
 
     let mut backend_pid = None;
@@ -262,9 +279,13 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
         task.abort();
         let _ = task.await;
         sqlx::query("DROP TRIGGER IF EXISTS rust047_pause_outbox ON outbox_messages")
-            .execute(&fixture.pool).await.expect("trigger cleanup");
+            .execute(&fixture.pool)
+            .await
+            .expect("trigger cleanup");
         sqlx::query("DROP FUNCTION IF EXISTS rust047_pause_outbox_insert()")
-            .execute(&fixture.pool).await.expect("function cleanup");
+            .execute(&fixture.pool)
+            .await
+            .expect("function cleanup");
         panic!("begin-invocation did not reach the outbox write failpoint");
     };
 
@@ -323,7 +344,9 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
         .expect("begin-invocation should commit");
     let invocation_id = match started {
         InvocationStartOutcome::Created { invocation_id } => invocation_id,
-        InvocationStartOutcome::Replay { .. } => panic!("fresh test key must create a new invocation"),
+        InvocationStartOutcome::Replay { .. } => {
+            panic!("fresh test key must create a new invocation")
+        }
     };
 
     // Process teardown after commit: only PostgreSQL retains the pending work.
@@ -368,7 +391,15 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
     .fetch_one(&restarted_pool)
     .await
     .expect("timeout lifecycle state should be durable");
-    assert_eq!(state, ("Processing".to_owned(), "OutcomeUnknown".to_owned(), "Reserved".to_owned(), 0));
+    assert_eq!(
+        state,
+        (
+            "Processing".to_owned(),
+            "OutcomeUnknown".to_owned(),
+            "Reserved".to_owned(),
+            0
+        )
+    );
 
     drop(timeout_worker);
     restarted_pool.close().await;
@@ -412,7 +443,10 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
     .fetch_one(&recovered_pool)
     .await
     .expect("recovered state should remain durable");
-    assert_eq!(final_state, ("Processing".to_owned(), "OutcomeUnknown".to_owned(), 0));
+    assert_eq!(
+        final_state,
+        ("Processing".to_owned(), "OutcomeUnknown".to_owned(), 0)
+    );
 
     recovered_pool.close().await;
 }
