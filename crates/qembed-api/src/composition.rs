@@ -14,10 +14,10 @@ use qembed_domain::{
 };
 use qembed_runtime::{
     invocation_query::InvocationQueryService,
+    invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
     object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
-    invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
 };
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
@@ -228,12 +228,16 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                         invocation_id,
                     } => Ok(invocation_id),
                 },
-                Err(InvocationStartError::Store(qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
-                    qembed_store::caller::CallerResolutionError::NotDelegated,
-                ))) => Err(OwnerApiBackendError::Forbidden),
-                Err(InvocationStartError::Store(qembed_store::begin_invocation::BeginInvocationError::Idempotency(
-                    qembed_store::idempotency::IdempotencyReservationError::PayloadMismatch,
-                ))) => Err(OwnerApiBackendError::Conflict),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
+                        qembed_store::caller::CallerResolutionError::NotDelegated,
+                    ),
+                )) => Err(OwnerApiBackendError::Forbidden),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::Idempotency(
+                        qembed_store::idempotency::IdempotencyReservationError::PayloadMismatch,
+                    ),
+                )) => Err(OwnerApiBackendError::Conflict),
                 Err(InvocationStartError::Store(
                     qembed_store::begin_invocation::BeginInvocationError::NoPublishedVersion
                     | qembed_store::begin_invocation::BeginInvocationError::ObjectNotActive,
