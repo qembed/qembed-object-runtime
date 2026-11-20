@@ -106,6 +106,17 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     let publish_response = test::call_service(&app, headers(&publish_uri).to_request()).await;
     assert_eq!(publish_response.status(), StatusCode::OK);
 
+    // Budget policy is provisioned independently from object creation. The
+    // invocation path deliberately fails closed when this configuration is absent.
+    sqlx::query(
+        "INSERT INTO object_budgets (tenant_id, object_id, daily_token_limit, daily_cost_limit_micros, per_caller_daily_token_limit, max_concurrent_invocations, max_llm_calls, max_tool_calls, max_tokens_per_invocation, max_duration_ms) VALUES ($1::uuid, $2::uuid, 100000, 0, 100000, 10, 10, 0, 4096, 60000)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("object budget policy should be provisioned for invocation");
+
     let invoke_uri = format!("/owner/objects/{object_id}/invocations");
     let undelegated = test::call_service(
         &app,
