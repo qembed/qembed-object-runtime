@@ -13,7 +13,8 @@ use qembed_domain::{
     ports::DraftVersionCreation,
 };
 use qembed_runtime::{
-    invocation_query::InvocationQueryService, object_creation::ObjectCreationService,
+    invocation_query::InvocationQueryService,
+    object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
 };
@@ -31,8 +32,9 @@ use crate::handlers::{
     },
     invocation::{InvocationResponse, get_invocation},
     owner::{
-        ObjectVersionCreationOutcome, ObjectVersionCreationResponse, ObjectVersionPublicationResponse, OwnerApiBackend,
-        OwnerApiBackendError, configure_owner_routes as configure_owner,
+        ObjectVersionCreationOutcome, ObjectVersionCreationResponse,
+        ObjectVersionPublicationResponse, OwnerApiBackend, OwnerApiBackendError,
+        configure_owner_routes as configure_owner,
     },
 };
 
