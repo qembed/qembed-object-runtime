@@ -206,16 +206,27 @@ impl OwnerApiBackend for PgOwnerApiBackend {
     ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>> {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
-            let service = InvocationStartService::new(PgInvocationStartStore::new(self.pool.clone()));
-            match service.start(&scope, InvocationStartRequest {
-                object_id,
-                caller_id,
-                idempotency_key,
-                input,
-            }).await {
+            let service =
+                InvocationStartService::new(PgInvocationStartStore::new(self.pool.clone()));
+            match service
+                .start(
+                    &scope,
+                    InvocationStartRequest {
+                        object_id,
+                        caller_id,
+                        idempotency_key,
+                        input,
+                    },
+                )
+                .await
+            {
                 Ok(result) => match result {
-                    qembed_runtime::invocation_start::InvocationStartResult::Accepted { invocation_id }
-                    | qembed_runtime::invocation_start::InvocationStartResult::Replayed { invocation_id } => Ok(invocation_id),
+                    qembed_runtime::invocation_start::InvocationStartResult::Accepted {
+                        invocation_id,
+                    }
+                    | qembed_runtime::invocation_start::InvocationStartResult::Replayed {
+                        invocation_id,
+                    } => Ok(invocation_id),
                 },
                 Err(InvocationStartError::Store(qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
                     qembed_store::caller::CallerResolutionError::NotDelegated,
@@ -227,7 +238,9 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     qembed_store::begin_invocation::BeginInvocationError::NoPublishedVersion
                     | qembed_store::begin_invocation::BeginInvocationError::ObjectNotActive,
                 )) => Err(OwnerApiBackendError::Conflict),
-                Err(InvocationStartError::Store(qembed_store::begin_invocation::BeginInvocationError::ObjectNotFound)) => Err(OwnerApiBackendError::NotFound),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::ObjectNotFound,
+                )) => Err(OwnerApiBackendError::NotFound),
                 Err(_) => Err(OwnerApiBackendError::Internal),
             }
         })
