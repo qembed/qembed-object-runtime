@@ -169,9 +169,8 @@ async fn owner_publication_validates_first_version_and_replacement() {
         &token
     );
     assert_eq!(second_publish.status(), StatusCode::OK);
-    let _: serde_json::Value =
-        serde_json::from_slice(&test::read_body(second_publish).await)
-            .expect("replacement response is JSON");
+    let _: serde_json::Value = serde_json::from_slice(&test::read_body(second_publish).await)
+        .expect("replacement response is JSON");
 
     let final_state: (String, Option<String>) = sqlx::query_as(
         "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
