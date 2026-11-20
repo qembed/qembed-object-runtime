@@ -272,7 +272,8 @@ pub async fn begin_invocation(
     if snapshot.1 != "published" {
         return Err(BeginInvocationError::SnapshotIsNotCurrentPublishedVersion);
     }
-    let snapshot_id = snapshot.0
+    let snapshot_id = snapshot
+        .0
         .parse::<SnapshotId>()
         .map_err(|_| BeginInvocationError::SnapshotNotFound)?;
 
