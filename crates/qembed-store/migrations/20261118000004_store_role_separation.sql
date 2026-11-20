@@ -38,6 +38,7 @@ ALTER ROLE qembed_event_allocator NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREAT
 
 GRANT USAGE ON SCHEMA public TO qembed_runtime, qembed_dispatcher, qembed_admin, qembed_event_allocator;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC, qembed_runtime, qembed_dispatcher, qembed_admin, qembed_event_allocator;
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM qembed_event_allocator;
 
 -- Start from an explicit deny baseline, including any grants that might have
 -- pre-existed on these role names or PUBLIC in a previously managed database.
