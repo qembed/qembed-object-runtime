@@ -26,8 +26,7 @@ async fn postgres_harness_runs_migrations_and_connects_to_supported_server() {
         .parse()
         .expect("server_version_num should be an integer");
 
-    let supported = (150_000..170_000).contains(&version)
-        || (190_000..200_000).contains(&version);
+    let supported = (150_000..170_000).contains(&version) || (190_000..200_000).contains(&version);
     assert!(
         supported,
         "expected a supported PostgreSQL 15.x, 16.x, or 19.x server, got server_version_num={version}"
