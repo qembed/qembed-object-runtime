@@ -107,6 +107,19 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     assert_eq!(publish_response.status(), StatusCode::OK);
 
     let invoke_uri = format!("/owner/objects/{object_id}/invocations");
+    let undelegated = test::call_service(
+        &app,
+        headers(&invoke_uri)
+            .set_json(serde_json::json!({
+                "caller_id": CallerId::new(),
+                "idempotency_key": "undelegated-caller",
+                "input": { "question": "must be denied" }
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(undelegated.status(), StatusCode::FORBIDDEN);
+
     let request = serde_json::json!({
         "caller_id": caller_id,
         "idempotency_key": "owner-invoke-key-1",
