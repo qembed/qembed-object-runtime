@@ -1,0 +1,8 @@
+[profile.ci]
+# CI runs all test binaries and emits a machine-readable JUnit report.
+fail-fast = false
+
+[profile.ci.junit]
+path = "target/test-evidence/nextest-junit.xml"
+store-success-output = false
+store-failure-output = true
