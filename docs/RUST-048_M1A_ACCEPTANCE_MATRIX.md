@@ -21,8 +21,8 @@ This report maps every M1a acceptance ID in the canonical `qembed/qembed-sql/acc
 | T-06 | PASS | Rust `invocation_idempotency.rs` covers concurrency, payload mismatch, rollback and tenant/Object/effective-Caller namespace; `owner_invoke.rs` and walking-skeleton E2E cover HTTP replay. |
 | T-09 | PASS — covered immutable rows | Rust `snapshot_repository.rs`, `transactional_outbox.rs` and `restricted_immutable_access.rs` verify snapshot/event immutability and runtime-role restrictions. Published-version immutability is also part of canonical SQL lifecycle/role checks. |
 | T-11 | PASS — bounded M1a path | `walking_skeleton_e2e.rs` reconstructs a fresh pool/worker after teardown; `rust_047_failure_injection.rs` covers pre-commit rollback and durable Unknown after timeout/restart. This does not imply production process supervision or outbox dispatch. |
-| T-12 | NOT YET EVIDENCED | No dedicated test was identified that captures prompt, event, API and log outputs and asserts secrets are absent across all four surfaces. |
-| T-14 | NOT YET EVIDENCED | The provider contract/structured-output implementation exists, but a named acceptance test covering both JsonOnly and None modes was not identified in the inspected test inventory. |
+| T-12 | PARTIAL | `event_outbox.rs` unit tests assert typed Object event payloads contain only allowlisted fields and no secret/token/raw-payload/arguments/credentials keys. A cross-surface capture test covering prompt, event, API response and logs is not identified. |
+| T-14 | PASS — provider contract | `qembed-llm/src/structured_output.rs` tests JsonOnly acceptance/rejection, None plain-text behavior, capability negotiation and rejection before provider completion; `qembed-domain/src/chat.rs` tests mode serialization/defaulting. |
 | T-19 | PASS | Rust `snapshot_repository.rs` verifies exact canonical bytes/hash and rejects mutation; `atomic_draft_snapshot.rs` covers immutable content reuse and collision fail-closed behavior. |
 | T-20 | NOT YET EVIDENCED | No Rust ToolVersion snapshot-resolution test was identified. The current Rust `qembed-tools` crate has no execution implementation; do not treat this acceptance case as passed. |
 | T-21 | PASS — DB level | Canonical SQL `tests/20_invocations_memory_tools.sql` covers invalid source/provenance combinations. The application verifier remains M2. |
@@ -55,6 +55,6 @@ This report maps every M1a acceptance ID in the canonical `qembed/qembed-sql/acc
 
 ## Current conclusion
 
-RUST-048 is **not ready to close**. Passing Rust CI and the canonical SQL smoke run provide useful evidence, but the matrix still has explicit gaps/partial cases: **T-02, T-12, T-14, T-20, T-29, T-30, T-53 and T-55**. The M2 portions of T-04, T-21 and T-27 are intentionally outside M1a and must not be pulled forward as M1a requirements.
+RUST-048 is **not ready to close**. Passing Rust CI and the canonical SQL smoke run provide useful evidence, but the matrix still has explicit gaps/partial cases: **T-02, T-12, T-20, T-29, T-30, T-53 and T-55**. The M2 portions of T-04, T-21 and T-27 are intentionally outside M1a and must not be pulled forward as M1a requirements.
 
 Next work should add focused regression coverage for these M1a gaps (or document an explicit scope decision where the acceptance plan's phase assignment is stale), then rerun the applicable Rust/PostgreSQL and SQL acceptance jobs. Do not mark RUST-048 or M1a complete until those gaps are resolved and the report is updated with exact run evidence.
