@@ -341,8 +341,7 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
 #[tokio::test]
 async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
     let _serial = POSTGRES_FAILPOINT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+        .lock().await;
     let fixture = fixture().await;
     let scope = authenticated_scope(&fixture.pool, &fixture).await;
     let store = PgInvocationStartStore::new(fixture.pool.clone());
