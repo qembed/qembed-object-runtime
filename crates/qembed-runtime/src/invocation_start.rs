@@ -57,16 +57,16 @@ impl<S: InvocationStartStore> InvocationStartService<S> {
     ) -> Result<InvocationStartResult, InvocationStartError<S::Error>> {
         let input_bytes = serde_json::to_vec(&request.input)
             .map_err(|_| InvocationStartError::InputSerialization)?;
-        let canonical_input = canonicalize_json(&input_bytes)
-            .map_err(InvocationStartError::InvalidInput)?;
+        let canonical_input =
+            canonicalize_json(&input_bytes).map_err(InvocationStartError::InvalidInput)?;
         let input_message = String::from_utf8(canonical_input)
             .map_err(|_| InvocationStartError::InputSerialization)?;
 
         let envelope = serde_json::json!({ "input": request.input });
-        let envelope_bytes = serde_json::to_vec(&envelope)
-            .map_err(|_| InvocationStartError::InputSerialization)?;
-        let canonical_envelope = canonicalize_json(&envelope_bytes)
-            .map_err(InvocationStartError::InvalidInput)?;
+        let envelope_bytes =
+            serde_json::to_vec(&envelope).map_err(|_| InvocationStartError::InputSerialization)?;
+        let canonical_envelope =
+            canonicalize_json(&envelope_bytes).map_err(InvocationStartError::InvalidInput)?;
         let payload_hash = Sha256::digest(canonical_envelope).to_vec();
 
         let now = SystemTime::now();
@@ -89,8 +89,12 @@ impl<S: InvocationStartStore> InvocationStartService<S> {
             trace_id: TraceId::new(),
         };
 
-        match self.store.begin_invocation(scope, command).await
-            .map_err(InvocationStartError::Store)? {
+        match self
+            .store
+            .begin_invocation(scope, command)
+            .await
+            .map_err(InvocationStartError::Store)?
+        {
             InvocationStartOutcome::Created { invocation_id } => {
                 Ok(InvocationStartResult::Accepted { invocation_id })
             }
