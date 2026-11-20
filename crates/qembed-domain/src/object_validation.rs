@@ -40,7 +40,8 @@ use crate::snapshot::Snapshot;
 pub const OBJECT_VALIDATOR_VERSION: &str = "m0-r3-bounded-budget-v1";
 
 /// Semantic areas whose current validation status is reported explicitly.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ValidationArea {
     InvocationBudget,
     ObjectSchema,
@@ -52,7 +53,8 @@ pub enum ValidationArea {
 }
 
 /// Whether this validator implements a verified rule for an area.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CoverageStatus {
     /// At least the identified rule is implemented and backed by a verified source.
     Validated,
@@ -63,7 +65,7 @@ pub enum CoverageStatus {
 }
 
 /// One stable, documented statement about validator coverage.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ValidationCoverage {
     area: ValidationArea,
     status: CoverageStatus,
@@ -139,7 +141,7 @@ const VALIDATION_COVERAGE: &[ValidationCoverage] = &[
 ];
 
 /// Informational, immutable description of the validator's actual rule coverage.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ValidationReport {
     validator_version: &'static str,
     coverage: &'static [ValidationCoverage],
