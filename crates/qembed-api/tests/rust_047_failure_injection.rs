@@ -12,7 +12,7 @@ use qembed_domain::{
         ChatFinishReason, ChatMessage, ChatProviderError, ChatRequest, ChatResponse, ChatRole,
         TokenUsage,
     },
-    ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId, TraceId},
+    ids::{CallerId, ObjectId, ObjectVersionId, PrincipalId, TenantId, TraceId},
     ports::{InvocationStartCommand, InvocationStartOutcome, InvocationStartStore},
 };
 use qembed_llm::mock::MockChatProvider;
@@ -238,7 +238,7 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
     let mut backend_pid = None;
     for _ in 0..200 {
         backend_pid = sqlx::query_scalar::<_, i32>(
-            "SELECT pid FROM pg_stat_activity WHERE application_name=$1 AND state='active' AND wait_event='PgSleep' LIMIT 1",
+            "SELECT pid FROM pg_stat_activity WHERE application_name=$1 AND state='active' AND query LIKE '%INSERT INTO outbox_messages%' LIMIT 1",
         )
         .bind(PAUSE_APPLICATION_NAME)
         .fetch_optional(&fixture.pool)
@@ -251,6 +251,8 @@ async fn terminating_backend_before_commit_rolls_back_invocation_and_outbox_atom
     }
 
     let Some(backend_pid) = backend_pid else {
+        task.abort();
+        let _ = task.await;
         sqlx::query("DROP TRIGGER IF EXISTS rust047_pause_outbox ON outbox_messages")
             .execute(&fixture.pool).await.expect("trigger cleanup");
         sqlx::query("DROP FUNCTION IF EXISTS rust047_pause_outbox_insert()")
