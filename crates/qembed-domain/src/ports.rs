@@ -257,7 +257,6 @@ pub trait InvocationReadStore: Send + Sync {
     > + Send;
 }
 
-
 /// Server-prepared inputs for the atomic begin-invocation persistence operation.
 /// The Store resolves the selected Caller and current published Snapshot inside
 /// one tenant-scoped transaction; transport input never supplies a Snapshot ID.
