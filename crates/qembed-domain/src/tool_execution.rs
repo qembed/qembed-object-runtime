@@ -511,6 +511,45 @@ mod tests {
     }
 
     #[test]
+    fn reconciliation_accepts_only_confirmed_outcomes_from_unknown() {
+        use crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome as R;
+
+        let mut succeeded = execution();
+        succeeded.claim("worker").expect("claim succeeds");
+        succeeded.mark_unknown_after_expiry().expect("expiry becomes Unknown");
+        let token = succeeded.fencing_token();
+        succeeded.reconcile(R::ConfirmedSucceeded {
+            output: None,
+            output_ttl_seconds: None,
+        }).expect("confirmed success is accepted");
+        assert_eq!(succeeded.status(), ToolExecutionStatus::Succeeded);
+        assert_eq!(succeeded.version(), 3);
+        assert_eq!(succeeded.fencing_token(), token);
+
+        let mut failed = execution();
+        failed.claim("worker").expect("claim succeeds");
+        failed.mark_unknown_after_expiry().expect("expiry becomes Unknown");
+        failed.reconcile(R::ConfirmedFailed { evidence: None })
+            .expect("confirmed failure is accepted");
+        assert_eq!(failed.status(), ToolExecutionStatus::Failed);
+    }
+
+    #[test]
+    fn unresolved_reconciliation_cannot_make_execution_terminal() {
+        use crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome as R;
+
+        let mut execution = execution();
+        execution.claim("worker").expect("claim succeeds");
+        execution.mark_unknown_after_expiry().expect("expiry becomes Unknown");
+        assert_eq!(
+            execution.reconcile(R::Unresolved),
+            Err(ToolExecutionError::UnresolvedReconciliation)
+        );
+        assert_eq!(execution.status(), ToolExecutionStatus::Unknown);
+        assert_eq!(execution.version(), 2);
+    }
+
+    #[test]
     fn empty_lease_owner_is_rejected() {
         let mut execution = execution();
 
