@@ -1,0 +1,13 @@
+[store]
+dir = "target/test-evidence"
+
+[profile.ci]
+# CI runs all test binaries regardless of failures and emits a JUnit report.
+fail-fast = false
+# Database integration tests share a single PostgreSQL instance; serialize test cases.
+test-threads = 1
+
+[profile.ci.junit]
+path = "nextest-junit.xml"
+store-success-output = false
+store-failure-output = true

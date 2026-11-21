@@ -374,9 +374,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Evidence: [M1a acceptance matrix](docs/RUST-048_M1A_ACCEPTANCE_MATRIX.md); Rust stable + Rust 1.85 MSRV на PostgreSQL 15.10/16.4/19.0 — run [#44809515677](https://github.com/qembed/qembed-object-runtime/actions/runs/44809515677); canonical SQL 359/359 на PostgreSQL 15/16/19 + pgvector 0.8.7 — run [#44808543381](https://github.com/qembed/qembed-sql/actions/runs/44808543381).
   - DoD: результат каждого применимого M1a test ID зафиксирован; все обязательные Rust/DB CI jobs зелёные. M2 verifier/retrieval остаются вне M1a.
 
-- [ ] **RUST-049 (S)** Подготовить M1a test evidence.
-  - Тесты: CI публикует JUnit/nextest report, DB version, pgvector version, test logs и concurrency test results.
-  - DoD: результаты воспроизводимы из CI artifacts.
+- [x] **RUST-049 (S)** Подготовить M1a test evidence.
+  - Реализация: [evidence artifact contract](docs/RUST-049_M1A_TEST_EVIDENCE.md); stable CI публикует отдельный artifact для PostgreSQL 15/16/19 с JUnit/nextest report, DB/pgvector versions, test logs и concurrency test results.
+  - Evidence: run [#44811246397](https://github.com/qembed/qembed-object-runtime/actions/runs/44811246397), exact HEAD `1304b9c99096c7251c43edaca6623ab933d05db0`; PostgreSQL 15.20/16.16/19.0 + pgvector 0.8.7; 212/212 workspace tests passed per version; Rust 1.85 MSRV passed. Artifacts are linked in `docs/RUST-049_M1A_TEST_EVIDENCE.md`.
+  - DoD: JUnit/nextest reports, DB/pgvector metadata, full logs and concurrency results are reproducible from CI artifacts.
 
 - [ ] **RUST-050 (XS)** Зафиксировать M1a completion и обновить roadmap.
   - Тесты: повторный полный CI run на release commit.

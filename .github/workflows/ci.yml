@@ -9,13 +9,13 @@ permissions:
 
 jobs:
   rust:
-    name: Format, check, lint, dependency audit, and test (stable / PostgreSQL ${{ matrix.postgres }})
+    name: Format, check, lint, dependency audit, and test (stable / PostgreSQL ${{ matrix.postgres }} / pgvector 0.8.7)
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["15.10-alpine", "16.4-alpine", "19.0-bookworm"]
+        postgres: ["15", "16", "19"]
     env:
-      POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+      POSTGRES_IMAGE: pgvector/pgvector:0.8.7-pg${{ matrix.postgres }}-bookworm
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -63,8 +63,20 @@ jobs:
           SQLX_OFFLINE: "true"
         run: cargo check --workspace --all-targets
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run workspace tests with PostgreSQL
         run: bash scripts/test-postgres.sh
+
+      - name: Upload M1a test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m1a-test-evidence-postgres-${{ matrix.postgres }}
+          path: target/test-evidence/
+          if-no-files-found: error
+          retention-days: 90
 
   msrv:
     name: Minimum supported Rust version (1.85.0)
