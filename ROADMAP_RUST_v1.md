@@ -434,8 +434,9 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: mock reconciler для confirmed success, confirmed failure и unresolved outcome; stale fencing token rejected.
   - DoD: terminal outcome фиксируется только через актуальный reconciliation result.
 
-- [ ] **RUST-056 (M)** Реализовать стабильный command_id = UUIDv5(invocation_id, step_index, action_hash).
-  - Тесты: deterministic vectors; restart test; uniqueness tests.
+- [x] **RUST-056 (M)** Реализовать стабильный command_id = UUIDv5(invocation_id, step_index, action_hash).
+  - Реализация: invocation UUID используется как UUIDv5 namespace; имя состоит из `qembed.command-id.v1\\0`, `step_index` (`u32`, big-endian) и 32-байтового SHA-256 `action_hash`. `AllowedCommand` получает ID только через этот генератор.
+  - Тесты: фиксированный UUIDv5 vector; восстановление входов после restart; различие ID для разных invocation, step и action.
   - DoD: один и тот же logical command получает одинаковый ID после рестарта.
 
 - [ ] **RUST-057 (M)** Реализовать конкурентные budget reservations.
