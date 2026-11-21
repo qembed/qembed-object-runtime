@@ -2,6 +2,8 @@ use std::{
     error::Error,
     fmt,
     io,
+    process::Command,
+    thread,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -329,28 +331,74 @@ async fn puback_before_postgres_receipt_failure_replays_same_delivery_id() {
 }
 
 #[tokio::test]
-async fn independent_relays_claim_disjoint_rows_and_publish_both() {
+async fn child_process_relay_entrypoint() {
+    let Ok(topic) = std::env::var("RUST_051C_CHILD_TOPIC") else {
+        return;
+    };
+    let owner = std::env::var("RUST_051C_CHILD_OWNER").expect("child owner is provided");
     let pool = database().await;
-    let (publisher, stream, subject) = jetstream().await;
-    enqueue(&pool, &subject).await;
-    enqueue(&pool, &subject).await;
-
-    let relay_a = OutboxRelay::new(
-        PgOutboxDispatcher::new(pool.clone()),
-        publisher.clone(),
-        relay_config("relay-a", &subject, 1, 30),
-    );
-    let relay_b = OutboxRelay::new(
+    let url = std::env::var("NATS_URL").expect("NATS_URL is provided");
+    let publisher = NatsJetStreamPublisher::connect(&url)
+        .await
+        .expect("child process connects to JetStream");
+    let relay = OutboxRelay::new(
         PgOutboxDispatcher::new(pool.clone()),
         publisher,
-        relay_config("relay-b", &subject, 1, 30),
+        relay_config(&owner, &topic, 1, 30),
+    );
+    let outcome = relay.run_once().await.expect("child relay batch succeeds");
+    assert_eq!(outcome.claimed, 1);
+    assert_eq!(outcome.published, 1);
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn independent_relay_processes_claim_disjoint_rows_and_publish_both() {
+    let pool = database().await;
+    let (publisher, stream, subject) = jetstream().await;
+    drop(publisher);
+    enqueue(&pool, &subject).await;
+    enqueue(&pool, &subject).await;
+
+    let executable = std::env::current_exe().expect("test executable path is available");
+    let spawn_child = |owner: &'static str| {
+        let executable = executable.clone();
+        let topic = subject.clone();
+        thread::spawn(move || {
+            Command::new(executable)
+                .args(["--exact", "child_process_relay_entrypoint", "--nocapture"])
+                .env("RUST_051C_CHILD_TOPIC", topic)
+                .env("RUST_051C_CHILD_OWNER", owner)
+                .output()
+                .expect("child relay process starts")
+        })
+    };
+
+    let child_a = spawn_child("relay-process-a");
+    let child_b = spawn_child("relay-process-b");
+    let output_a = child_a.join().expect("child A joins");
+    let output_b = child_b.join().expect("child B joins");
+    assert!(
+        output_a.status.success(),
+        "child A failed: {}{}",
+        String::from_utf8_lossy(&output_a.stdout),
+        String::from_utf8_lossy(&output_a.stderr)
+    );
+    assert!(
+        output_b.status.success(),
+        "child B failed: {}{}",
+        String::from_utf8_lossy(&output_b.stdout),
+        String::from_utf8_lossy(&output_b.stderr)
     );
 
-    let (a, b) = tokio::join!(relay_a.run_once(), relay_b.run_once());
-    let a = a.expect("relay A succeeds");
-    let b = b.expect("relay B succeeds");
-    assert_eq!(a.published + b.published, 2);
-    assert_eq!(a.claimed + b.claimed, 2);
+    let delivered: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox_messages WHERE topic = $1 AND delivered_at IS NOT NULL",
+    )
+    .bind(&subject)
+    .fetch_one(&pool)
+    .await
+    .expect("both rows are acknowledged in PostgreSQL");
+    assert_eq!(delivered, 2);
     assert_eq!(stream_message_count(&stream).await, 2);
     pool.close().await;
 }
