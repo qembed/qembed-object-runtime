@@ -4,8 +4,13 @@ use std::collections::HashSet;
 
 use qembed_store::outbox_dispatcher::PgOutboxDispatcher;
 use qembed_store::run_migrations;
+use qembed_domain::ports::PublicationReceipt;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+fn receipt() -> PublicationReceipt {
+    PublicationReceipt::new("QEMBED_EVENTS", 1, false)
+}
 
 async fn setup() -> PgPool {
     let pool = common::connect().await;
@@ -92,13 +97,13 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
 
     assert!(
         !dispatcher
-            .acknowledge(&first[0], "worker-a")
+            .acknowledge(&first[0], "worker-a", receipt())
             .await
             .expect("stale ack is rejected")
     );
     assert!(
         dispatcher
-            .acknowledge(&second[0], "worker-b")
+            .acknowledge(&second[0], "worker-b", receipt())
             .await
             .expect("current ack succeeds")
     );
@@ -110,8 +115,8 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
             .is_empty()
     );
 
-    let delivered: bool = sqlx::query_scalar(
-        "SELECT delivered_at IS NOT NULL FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
+    let (delivered, stream, sequence, duplicate): (bool, Option<String>, Option<i64>, Option<bool>) = sqlx::query_as(
+        "SELECT delivered_at IS NOT NULL, publication_stream, publication_sequence, publication_duplicate FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
     )
     .bind(tenant_id)
     .bind(delivery_id)
@@ -119,6 +124,9 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     .await
     .expect("delivery status should be readable by test owner");
     assert!(delivered);
+    assert_eq!(stream.as_deref(), Some("QEMBED_EVENTS"));
+    assert_eq!(sequence, Some(1));
+    assert_eq!(duplicate, Some(false));
     pool.close().await;
 }
 
@@ -190,8 +198,8 @@ async fn independent_dispatchers_claim_disjoint_rows() {
     assert_eq!(b.len(), 1);
     assert_ne!(a[0].delivery_id(), b[0].delivery_id());
 
-    assert!(first.acknowledge(&a[0], "worker-a").await.expect("ack A"));
-    assert!(second.acknowledge(&b[0], "worker-b").await.expect("ack B"));
+    assert!(first.acknowledge(&a[0], "worker-a", receipt()).await.expect("ack A"));
+    assert!(second.acknowledge(&b[0], "worker-b", receipt()).await.expect("ack B"));
     pool.close().await;
 }
 
