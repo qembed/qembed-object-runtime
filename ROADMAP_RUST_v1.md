@@ -25,6 +25,12 @@
 8. Invocation и ToolExecution имеют независимые leases/fencing tokens. Переходы состояния используют CAS по tenant, ID, token и version.
 9. `Unknown` не является основанием для автоматического retry: требуется reconciliation либо доказанная upstream idempotency со стабильным ключом.
 10. Новые архитектурные решения не вводятся молча: при необходимости отдельный ADR.
+11. PostgreSQL — единственный источник истины для Invocation, budgets, events, Outbox и результатов. NATS JetStream — транспорт доставки, а не authoritative store бизнес-состояния.
+12. Все асинхронные команды публикуются через Transactional Outbox; публикация в JetStream выполняется только после commit исходной PostgreSQL-транзакции.
+13. Доставка считается at-least-once. Relay, consumers и recovery обязаны быть идемпотентными; exactly-once для бизнес-операций не обещается.
+14. PubAck означает только принятие сообщения JetStream. Outbox сохраняется по retention policy, а потерянная/застрявшая доставка восстанавливается из PostgreSQL.
+15. NATS transport скрыт за domain ports. Бизнес-правила и Store не зависят от async-nats или конкретного broker API.
+16. Микросервисные границы вводятся через независимо запускаемые process modes и versioned message contracts; не добавлять crate или отдельный сервис без отдельного обоснования.
 
 ### Размер задач
 
@@ -41,14 +47,14 @@
 
 | Crate | Ответственность | Ограничения |
 |---|---|---|
-| `qembed-domain` | IDs, entities, `Scope`, `Principal`, state machines, policy contracts, ports, `AllowedCommand` | Без SQLx, Actix, provider SDK и сетевого I/O |
+| `qembed-domain` | IDs, entities, `Scope`, `Principal`, state machines, policy contracts (включая broker-neutral publish/consume contracts), ports, `AllowedCommand` | Без SQLx, Actix, provider SDK, async-nats и сетевого I/O |
 | `qembed-store` | SQLx repositories, transaction context, persistence, CAS/fencing | Без HTTP handlers и provider-specific logic |
 | `qembed-llm` | ChatProvider adapters, capability negotiation, structured output, usage/error mapping | Без orchestration и tool authorization |
 | `qembed-tools` | Tool registry adapter, executor/reconciler, SSRF-safe networking, encrypted payload handling | Не принимает policy verdict самостоятельно |
 | `qembed-runtime` | Orchestration, budgets, invocation/worker lifecycle, retrieval coordination | Без HTTP transport и SQL query details |
-| `qembed-api` | Axum handlers, auth boundary, DTO/OpenAPI, composition root | Handler-ы не содержат бизнес-правила |
+| `qembed-api` | Axum handlers, auth boundary, DTO/OpenAPI, composition root и concrete infrastructure wiring для API/relay/worker process modes | Handler-ы не содержат бизнес-правила; broker SDK не проникает в domain/runtime contracts |
 
-**Dependency rule:** domain не зависит от adapters; adapters реализуют domain ports; runtime координирует domain и ports; Axum handlers вызывают runtime. Package/binary `qembed-api` может зависеть от concrete adapter crates только в composition root для сборки приложения. Handler modules ограничиваются `qembed-domain` и `qembed-runtime`. Не добавлять седьмой crate. Tower используется как HTTP service/middleware abstraction; он не заменяет Axum и не переносит бизнес-логику в middleware.
+**Dependency rule:** domain не зависит от adapters; adapters реализуют domain ports; runtime координирует domain и ports; Axum handlers вызывают runtime. MessagePublisher/MessageConsumer остаются broker-neutral ports; async-nats и JetStream-specific types разрешены только в concrete infrastructure adapter/composition root внутри qembed-api. qembed-store отвечает за PostgreSQL Outbox и durable business state, но не вызывает NATS. Один и тот же Rust artifact может запускаться в режимах API, outbox-relay и worker; режимы должны быть независимо масштабируемыми процессами. Handler modules ограничиваются qembed-domain и qembed-runtime. Не добавлять седьмой crate. Tower используется как HTTP service/middleware abstraction; он не заменяет Axum и не переносит бизнес-логику в middleware.
 
 ---
 
@@ -238,7 +244,6 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: integration suite подключается под каждой тестируемой ролью, а не только DB owner.
 
 ---
-
 ## 7. Этап M1a — LLM adapter и Mock ChatProvider
 
 **Результат:** runtime работает с provider через стабильный контракт; тесты не зависят от внешнего API.
@@ -388,31 +393,45 @@ SQLX_OFFLINE=true cargo check --workspace
 
 ---
 
-## 9. Этап M1b — Durable workers, outbox, budgets и cancellation
+## 9. Этап M1b — JetStream delivery, durable workers, budgets и cancellation
 
-**Результат:** надёжная обработка конкурентных и длительных invocation. Внешние write-tools остаются выключенными до M3 gate.
+**Результат:** надёжная асинхронная обработка Invocation через NATS JetStream при сохранении PostgreSQL единственным источником истины. Внешние write-tools остаются выключенными до M3 gate.
 
-- [ ] **RUST-051 (M)** Реализовать outbox dispatcher.
-  - Тесты: DB integration — claim, delivery, ack; dispatcher видит только delivery projection; consumer deduplicates.
-  - DoD: доставка at-least-once с безопасной дедупликацией.
+**Архитектурное решение:** [ADR RT-048 — NATS JetStream transport with PostgreSQL source of truth](docs/ADR-RT-048_NATS_JETSTREAM_TRANSPORT.md).
 
-- [ ] **RUST-052 (M)** Реализовать retry/backoff и dead-letter handling.
-  - Тесты: deterministic clock tests; integration — повтор, max attempts, poison event, recovery.
-  - DoD: retry не теряет событие и не создаёт повторный side effect у consumer.
+### 9.1. Outbox → JetStream
+
+- [ ] **RUST-051 (L)** Реализовать PostgreSQL Outbox Relay для NATS JetStream. Задача разделена на независимые проверяемые части:
+  - [x] **RUST-051a (M) — PostgreSQL claim primitive.** Текущий PR #74 добавляет restricted delivery projection, короткую транзакцию claim через FOR UPDATE SKIP LOCKED, lease owner/expiry, monotonic fencing token, attempts, acknowledge/release и PostgreSQL tests на stale ack, competing relays и role isolation. Это только SQL-часть relay, не готовый NATS publisher и не завершённая RUST-051.
+  - [ ] **RUST-051b (M) — JetStream publisher adapter.** Добавить broker-neutral MessagePublisher port и concrete async-nats JetStream adapter в composition root; публиковать только committed Outbox deliveries; использовать стабильный delivery_id как Nats-Msg-Id; ждать PubAck; фиксировать результат публикации в PostgreSQL; сетевой I/O выполнять вне SQL-транзакции. Перед зависимостью — audit MSRV 1.85 и фиксация совместимой версии в Cargo.lock.
+  - [ ] **RUST-051c (M) — Relay failure semantics.** Проверить crash после claim/до publish, после publish/до PubAck, после PubAck/до PostgreSQL update, NATS outage/reconnect и параллельные relay processes. Повторная публикация сохраняет тот же logical delivery_id; bounded JetStream deduplication не заменяет consumer idempotency.
+  - Тесты: PostgreSQL integration + реальный JetStream test server; проверка PubAck, redelivery, stable message identity, lease fencing и отсутствия сетевого I/O внутри SQL-транзакции.
+  - DoD: Outbox Relay публикует committed messages в JetStream at-least-once; PostgreSQL остаётся источником восстановления; RUST-051a без RUST-051b не считается завершённой RUST-051.
+
+### 9.2. Durable consumers, retry и recovery
+
+- [ ] **RUST-052 (L)** Реализовать durable JetStream consumer lifecycle, retry policy и PostgreSQL-driven recovery. Задача разделена на:
+  - [ ] **RUST-052a (M) — Durable pull consumer.** Реализовать broker-neutral consumer port и JetStream durable pull consumer с explicit ACK; message ACK разрешён только после commit результата/состояния в PostgreSQL. На повторной доставке Worker сначала проверяет Invocation/ToolExecution state и leases/fencing.
+  - [ ] **RUST-052b (M) — Retry/backoff и poison-message policy.** Разделить transient transport/worker failures, permanent invalid envelopes и business-terminal/Unknown outcomes. Настроить bounded backoff, max delivery safety limit и DLQ/parking stream; бизнес retry state и причина terminal отказа фиксируются в PostgreSQL. DLQ не является источником истины.
+  - [ ] **RUST-052c (M) — PostgreSQL recovery sweeper.** Находит runnable/queued Invocation без активного lease и с просроченным progress deadline; проверяет terminal/Unknown state; повторно инициирует публикацию из сохранённого Outbox payload со стабильным logical delivery identity. Не делает auto-retry для Unknown и не обходит provider reconciliation.
+  - Тесты: deterministic clock; JetStream integration на ack/redelivery/consumer restart; PostgreSQL recovery integration; повтор после commit до ACK; broker message loss/replay simulation; poison event; max attempts; no duplicate business side effect.
+  - DoD: сообщение подтверждается только после DB commit; потерянная доставка восстанавливается из PostgreSQL; retries не обходят Invocation/ToolExecution state machine, budgets, cancellation, idempotency и reconciliation.
+
+### 9.3. Execution safety и budgets
 
 - [ ] **RUST-053 (M)** Реализовать независимую ToolExecution state machine и lease.
   - Тесты: unit transition matrix; DB integration на параллельные leases.
   - DoD: invocation lease и ToolExecution lease не используют общие token/version.
 
-- [ ] **RUST-054 (M)** Реализовать `Unknown` transition после неоднозначного execution timeout.
+- [ ] **RUST-054 (M)** Реализовать Unknown transition после неоднозначного execution timeout.
   - Тесты: unit и DB integration — timeout, expired lease, запрет auto-retry, попытка запрещённого перехода.
-  - DoD: `Unknown` не переходит в повторное выполнение автоматически.
+  - DoD: Unknown не переходит в повторное выполнение автоматически.
 
 - [ ] **RUST-055 (M)** Реализовать reconciliation port и workflow.
   - Тесты: mock reconciler для confirmed success, confirmed failure и unresolved outcome; stale fencing token rejected.
   - DoD: terminal outcome фиксируется только через актуальный reconciliation result.
 
-- [ ] **RUST-056 (M)** Реализовать стабильный `command_id = UUIDv5(invocation_id, step_index, action_hash)`.
+- [ ] **RUST-056 (M)** Реализовать стабильный command_id = UUIDv5(invocation_id, step_index, action_hash).
   - Тесты: deterministic vectors; restart test; uniqueness tests.
   - DoD: один и тот же logical command получает одинаковый ID после рестарта.
 
@@ -440,17 +459,15 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: deterministic clock; повторный запуск; параллельные sweeper; counters не обновляются дважды.
   - DoD: sweeper идемпотентен.
 
-- [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions.
-  - Тесты: stale CAS, lease reclaim, concurrent budget reservation, competing state transition.
-  - DoD: тесты запускаются в CI и воспроизводят гонки, а не используют один connection.
+- [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions и relay/consumer instances.
+  - Тесты: stale CAS, lease reclaim, concurrent budget reservation, competing state transition, competing relay claims и duplicate JetStream deliveries.
+  - DoD: тесты запускаются в CI и воспроизводят гонки на независимых PostgreSQL sessions и реальном JetStream, а не используют один connection или broker mocks.
 
 - [ ] **RUST-064 (S)** Добавить M1b failure-injection matrix.
-  - Тесты: crash до connect, после send до response, после response до DB commit, после event insert до outbox ack.
-  - DoD: для каждого crash point зафиксирован ожидаемый state и проверяемое восстановление.
+  - Тесты: crash до NATS connect, после claim до publish, после publish до PubAck, после PubAck до PostgreSQL publication receipt, после DB commit до JetStream ACK, broker message loss до/после consumer delivery, worker restart и PostgreSQL recovery replay.
+  - DoD: для каждого crash point зафиксирован ожидаемый PostgreSQL state, broker state и доказуемый recovery path; Unknown не переисполняется автоматически.
 
-**M1b Gate:** outbox redelivery, leases/fencing, cancellation, budgets, rate limits и recovery подтверждены автоматическими тестами.
-
----
+**M1b Gate:** Outbox → JetStream publication, durable pull consumers, explicit ACK-after-commit, idempotent redelivery, PostgreSQL-driven recovery, leases/fencing, cancellation, budgets, rate limits и failure-injection matrix подтверждены автоматическими PostgreSQL + JetStream tests. NATS availability/loss не может уничтожить единственную копию задания или бизнес-состояния.
 
 ## 10. Этап M2 — Knowledge, retrieval и verification
 
@@ -478,7 +495,6 @@ SQLX_OFFLINE=true cargo check --workspace
 - [ ] **RUST-070 (M)** Реализовать pgvector query paths.
   - Тесты: integration на IP/L2/cosine; проверка порядка результатов и размерностей.
   - DoD: IP similarity = `-dist`; `1-dist` применяется только к cosine.
-
 - [ ] **RUST-071 (M)** Реализовать HNSW index migration support.
   - Тесты: migration integration — `CREATE INDEX CONCURRENTLY` вне транзакции; повторный запуск и recovery после неудачи.
   - DoD: migrator корректно управляет non-transactional index operations.
