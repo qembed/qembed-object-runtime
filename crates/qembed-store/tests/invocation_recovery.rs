@@ -193,7 +193,7 @@ async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_pu
         .await
         .expect("relay claims the marked delivered row");
     assert_eq!(claimed.len(), 1);
-    assert_eq!(claimed[0].delivery_id(), &fixture.delivery_id.to_string());
+    assert_eq!(claimed[0].delivery_id(), fixture.delivery_id.to_string());
     assert_eq!(
         claimed[0].payload()["invocation_id"],
         fixture.invocation_id.to_string()
@@ -236,6 +236,39 @@ async fn recovery_fails_closed_for_unknown_provider_outcome() {
         .sweep_before(&fixture.scope, cutoff, 10)
         .await
         .expect("unknown provider outcomes are skipped, not retried");
+    assert!(replayed.is_empty());
+
+    let marker: Option<String> = sqlx::query_scalar(
+        "SELECT replay_requested_at::text FROM outbox_messages WHERE tenant_id=$1 AND delivery_id=$2",
+    )
+    .bind(fixture.tenant_id.into_uuid())
+    .bind(fixture.delivery_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("marker state is readable");
+    assert_eq!(marker, None);
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn recovery_does_not_replay_received_invocation_with_a_live_lease() {
+    let fixture = setup("NotStarted").await;
+    sqlx::query(
+        "UPDATE object_invocations SET lease_owner='active-worker', lease_until=now() + interval '30 minutes', heartbeat_at=now() - interval '2 hours' WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(fixture.tenant_id.into_uuid())
+    .bind(fixture.invocation_id.into_uuid())
+    .execute(&fixture.pool)
+    .await
+    .expect("a live invocation lease is established");
+
+    let sweeper = PgInvocationRecoverySweeper::new(fixture.pool.clone());
+    let cutoff = SystemTime::now() - Duration::from_secs(60);
+    let replayed = sweeper
+        .sweep_before(&fixture.scope, cutoff, 10)
+        .await
+        .expect("live leased invocation is excluded");
     assert!(replayed.is_empty());
 
     let marker: Option<String> = sqlx::query_scalar(
