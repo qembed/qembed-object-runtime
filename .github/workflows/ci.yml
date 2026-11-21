@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["15", "16", "19"]
+        postgres: ["19"]
     env:
       POSTGRES_IMAGE: pgvector/pgvector:0.8.7-pg${{ matrix.postgres }}-bookworm
     runs-on: ubuntu-latest
@@ -79,7 +79,7 @@ jobs:
           retention-days: 90
 
       - name: Upload resolved Cargo.lock for dependency review
-        if: matrix.postgres == '15'
+        if: matrix.postgres == '19'
         uses: actions/upload-artifact@v4
         with:
           name: resolved-cargo-lockfile
