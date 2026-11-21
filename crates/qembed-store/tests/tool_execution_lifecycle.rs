@@ -298,6 +298,19 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
             .await
             .expect("current owner heartbeat query succeeds")
     );
+    let heartbeat_state: (i64, i64, bool) = sqlx::query_as(
+        "SELECT version, fencing_token, lease_until < clock_timestamp() + interval '90 seconds' FROM tool_executions WHERE id=$1",
+    )
+    .bind(fixture.execution_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("heartbeat state is readable");
+    assert_eq!(heartbeat_state.0, 1);
+    assert_eq!(heartbeat_state.1, 1);
+    assert!(
+        heartbeat_state.2,
+        "repeated heartbeat must not add a full TTL to the previous expiry"
+    );
     assert!(
         !store
             .heartbeat_tool_execution(
