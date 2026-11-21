@@ -22,7 +22,7 @@ Delivery is **at-least-once**, not exactly-once. JetStream's message-ID deduplic
 
 ## PostgreSQL receipt
 
-The canonical schema stores `publication_stream`, `publication_sequence`, and `publication_duplicate`. A consistency constraint rejects partial receipts. Legacy rows that were delivered before PubAck receipts existed retain null publication metadata; no historical receipt is fabricated.
+The canonical schema stores the latest `publication_stream`, `publication_sequence`, and `publication_duplicate` on the Outbox row, and appends every acknowledged publication to the immutable `outbox_publication_receipts` ledger in the same transaction. A consistency constraint rejects partial latest receipts. Legacy rows that were delivered before PubAck receipts existed retain null publication metadata; no historical receipt is fabricated. The ledger lets later recovery replay the same logical delivery without overwriting prior PubAck history.
 
 The dispatcher role can read and update only the delivery projection, lease/fencing fields, and publication receipt. It cannot read `events` or `event_id`.
 
