@@ -81,7 +81,10 @@ impl NatsJetStreamConsumerConfig {
 
     fn retry_delay(&self, attempt: u32) -> Duration {
         self.initial_retry_delay
-            .saturating_mul(self.retry_multiplier.saturating_pow(attempt.saturating_sub(1)))
+            .saturating_mul(
+                self.retry_multiplier
+                    .saturating_pow(attempt.saturating_sub(1)),
+            )
             .min(self.max_retry_delay)
     }
 }
