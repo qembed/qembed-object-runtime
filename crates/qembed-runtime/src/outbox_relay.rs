@@ -177,7 +177,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::future::Future;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -196,14 +195,14 @@ mod tests {
         type Delivery = Delivery;
         type Error = Infallible;
 
-        fn claim_batch(
+        async fn claim_batch(
             &self,
             _: &str,
             _: &str,
             _: u16,
             _: u32,
-        ) -> impl Future<Output = Result<Vec<Self::Delivery>, Self::Error>> + Send {
-            async { Ok(vec![Delivery]) }
+        ) -> Result<Vec<Self::Delivery>, Self::Error> {
+            Ok(vec![Delivery])
         }
 
         fn outbound_message(&self, _: &Self::Delivery) -> OutboundMessage {
@@ -214,31 +213,25 @@ mod tests {
             )
         }
 
-        fn record_publication(
+        async fn record_publication(
             &self,
             _: &Self::Delivery,
             _: &str,
             receipt: PublicationReceipt,
-        ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-            let published = self.published.clone();
-            async move {
-                assert_eq!(receipt.stream(), "QEMBED_EVENTS");
-                assert_eq!(receipt.sequence(), 7);
-                published.fetch_add(1, Ordering::SeqCst);
-                Ok(true)
-            }
+        ) -> Result<bool, Self::Error> {
+            assert_eq!(receipt.stream(), "QEMBED_EVENTS");
+            assert_eq!(receipt.sequence(), 7);
+            self.published.fetch_add(1, Ordering::SeqCst);
+            Ok(true)
         }
 
-        fn release(
+        async fn release(
             &self,
             _: &Self::Delivery,
             _: &str,
-        ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-            let released = self.released.clone();
-            async move {
-                released.fetch_add(1, Ordering::SeqCst);
-                Ok(true)
-            }
+        ) -> Result<bool, Self::Error> {
+            self.released.fetch_add(1, Ordering::SeqCst);
+            Ok(true)
         }
     }
 
@@ -247,15 +240,13 @@ mod tests {
     impl MessagePublisher for TestPublisher {
         type Error = Infallible;
 
-        fn publish(
+        async fn publish(
             &self,
             message: OutboundMessage,
-        ) -> impl Future<Output = Result<PublicationReceipt, Self::Error>> + Send {
-            async move {
-                assert_eq!(message.delivery_id(), "stable-delivery-id");
-                assert_eq!(message.subject(), "qembed.events");
-                Ok(PublicationReceipt::new("QEMBED_EVENTS", 7, false))
-            }
+        ) -> Result<PublicationReceipt, Self::Error> {
+            assert_eq!(message.delivery_id(), "stable-delivery-id");
+            assert_eq!(message.subject(), "qembed.events");
+            Ok(PublicationReceipt::new("QEMBED_EVENTS", 7, false))
         }
     }
 
