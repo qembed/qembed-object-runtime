@@ -293,7 +293,11 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
         scope: &Scope,
         completion: ToolExecutionReconciliationCompletion,
     ) -> Result<bool, Self::Error> {
-        let ToolExecutionReconciliationCompletion { request, next, outcome } = completion;
+        let ToolExecutionReconciliationCompletion {
+            request,
+            next,
+            outcome,
+        } = completion;
         let execution_id = request.execution_id();
         let expected_version = request.expected_version();
         let expected_fencing_token = request.expected_fencing_token();
@@ -313,16 +317,23 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
         )?;
 
         let (reconciliation_state, output, ttl_seconds) = match outcome {
-            ToolExecutionReconciliationOutcome::ConfirmedSucceeded { output, output_ttl_seconds } => {
+            ToolExecutionReconciliationOutcome::ConfirmedSucceeded {
+                output,
+                output_ttl_seconds,
+            } => {
                 let ttl = match (&output, output_ttl_seconds) {
                     (Some(_), Some(ttl)) if ttl > 0 => f64::from(ttl),
                     (None, None) => 0.0,
-                    (Some(_), _) => return Err(ToolExecutionStoreError::InvalidRequestedValue(
-                        "confirmed success output requires a positive retention TTL",
-                    )),
-                    (None, Some(_)) => return Err(ToolExecutionStoreError::InvalidRequestedValue(
-                        "output TTL cannot be set without output",
-                    )),
+                    (Some(_), _) => {
+                        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                            "confirmed success output requires a positive retention TTL",
+                        ));
+                    }
+                    (None, Some(_)) => {
+                        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                            "output TTL cannot be set without output",
+                        ));
+                    }
                 };
                 ("confirmed_succeeded", output, ttl)
             }
@@ -373,7 +384,10 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
             .bind(scope.tenant_id().to_string())
             .bind(execution_id.to_string())
             .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
+            .bind(to_i64(
+                expected_fencing_token.value(),
+                "expected fencing token",
+            )?),
         )
         .await?;
         transaction.commit().await?;
