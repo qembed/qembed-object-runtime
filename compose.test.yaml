@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: ${POSTGRES_IMAGE:-pgvector/pgvector:0.8.7-pg16-bookworm}
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:0.8.7-pg19-bookworm}
     environment:
       POSTGRES_DB: qembed_test
       POSTGRES_USER: qembed_test

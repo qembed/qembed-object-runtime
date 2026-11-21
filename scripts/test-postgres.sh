@@ -2,12 +2,13 @@
 set -euo pipefail
 
 if ! docker compose version >/dev/null 2>&1; then
-  echo "Docker Compose v2 is required to run PostgreSQL integration tests." >&2
+  echo "Docker Compose v2 is required to run PostgreSQL and JetStream integration tests." >&2
   exit 1
 fi
 
 compose=(docker compose --project-name qembed-rust-test --file compose.test.yaml)
 export DATABASE_URL="${DATABASE_URL:-postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test}"
+export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 mkdir -p "$evidence_dir"
 
@@ -47,6 +48,7 @@ pgvector_version="$(psql_in_test_db -Atc "SELECT extversion FROM pg_extension WH
   echo "postgres_version=$postgres_version"
   echo "postgres_version_num=$postgres_version_num"
   echo "pgvector_version=$pgvector_version"
+  echo "nats_url=$NATS_URL"
 } > "$evidence_dir/database-metadata.txt"
 
 if cargo nextest --version >/dev/null 2>&1; then
