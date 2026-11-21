@@ -422,3 +422,128 @@ async fn tool_execution_persistence_grants_match_the_runtime_capabilities() {
 
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn expired_tool_execution_becomes_unknown_and_cannot_be_retried() {
+    let fixture = setup().await;
+    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let claimed = store
+        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-a", 1)
+        .await
+        .expect("lease claim succeeds")
+        .expect("Authorized execution is claimable");
+
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+
+    assert!(
+        store
+            .mark_tool_execution_unknown(
+                &fixture.scope,
+                fixture.execution_id,
+                claimed.version(),
+                claimed.fencing_token(),
+            )
+            .await
+            .expect("expired lease transition query succeeds"),
+        "the current expired lease checkpoint transitions exactly once"
+    );
+
+    let unknown = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("Unknown execution can be loaded")
+        .expect("execution exists");
+    assert_eq!(unknown.status(), ToolExecutionStatus::Unknown);
+    assert_eq!(unknown.version(), claimed.version() + 1);
+    assert_eq!(unknown.fencing_token(), claimed.fencing_token());
+    assert_eq!(unknown.lease_owner(), None);
+
+    assert!(
+        store
+            .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-b", 60)
+            .await
+            .expect("retry claim query succeeds")
+            .is_none(),
+        "Unknown must never return to Executing through the claim path"
+    );
+
+    let forbidden_retry = sqlx::query(
+        "UPDATE tool_executions
+            SET status='Executing', version=version+1, lease_owner='tool-worker-b',
+                lease_until=clock_timestamp()+interval '60 seconds',
+                heartbeat_at=clock_timestamp()
+          WHERE id=$1",
+    )
+    .bind(fixture.execution_id.into_uuid())
+    .execute(&fixture.pool)
+    .await;
+    assert!(
+        forbidden_retry.is_err(),
+        "the database state guard must reject Unknown -> Executing"
+    );
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn live_or_stale_tool_execution_checkpoint_cannot_be_marked_unknown() {
+    let fixture = setup().await;
+    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let claimed = store
+        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-a", 60)
+        .await
+        .expect("lease claim succeeds")
+        .expect("Authorized execution is claimable");
+
+    assert!(
+        !store
+            .mark_tool_execution_unknown(
+                &fixture.scope,
+                fixture.execution_id,
+                claimed.version(),
+                claimed.fencing_token(),
+            )
+            .await
+            .expect("live lease is not eligible for Unknown"),
+        "a live lease must remain Executing"
+    );
+
+    assert!(
+        !store
+            .mark_tool_execution_unknown(
+                &fixture.scope,
+                fixture.execution_id,
+                claimed.version().saturating_sub(1),
+                claimed.fencing_token(),
+            )
+            .await
+            .expect("stale version is a CAS miss"),
+        "stale version cannot transition the row"
+    );
+
+    assert!(
+        !store
+            .mark_tool_execution_unknown(
+                &fixture.scope,
+                fixture.execution_id,
+                claimed.version(),
+                ToolExecutionFencingToken::from_value(
+                    claimed.fencing_token().value().saturating_sub(1)
+                ),
+            )
+            .await
+            .expect("stale fencing token is a CAS miss"),
+        "stale fencing token cannot transition the row"
+    );
+
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("execution remains readable")
+        .expect("execution exists");
+    assert_eq!(persisted.status(), ToolExecutionStatus::Executing);
+    assert_eq!(persisted.version(), claimed.version());
+
+    fixture.pool.close().await;
+}
