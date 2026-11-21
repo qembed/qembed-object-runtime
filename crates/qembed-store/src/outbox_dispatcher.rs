@@ -66,9 +66,7 @@ impl fmt::Display for OutboxDispatcherError {
         match self {
             Self::InvalidOwner => f.write_str("outbox dispatcher owner must not be empty"),
             Self::InvalidTopic => f.write_str("outbox topic must not be empty"),
-            Self::InvalidBatchSize => {
-                f.write_str("outbox batch size must be between 1 and 500")
-            }
+            Self::InvalidBatchSize => f.write_str("outbox batch size must be between 1 and 500"),
             Self::InvalidLeaseDuration => {
                 f.write_str("outbox lease must be between 1 and 3600 seconds")
             }
