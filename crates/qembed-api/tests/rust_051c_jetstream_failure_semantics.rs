@@ -2,8 +2,8 @@ use std::{
     error::Error,
     fmt, io,
     process::Command,
-    thread,
     sync::atomic::{AtomicBool, Ordering},
+    thread,
     time::Duration,
 };
 
@@ -316,7 +316,10 @@ async fn publish_accepted_but_puback_lost_retries_with_same_id_and_jetstream_ded
     assert_eq!(second_outcome.published, 1);
     assert_eq!(stream_message_count(&stream).await, 1);
     assert!(publication_duplicate(&pool, &tenant_id, &delivery_id).await);
-    assert_eq!(publication_state(&pool, &tenant_id, &delivery_id).await, (true, Some(1), 1));
+    assert_eq!(
+        publication_state(&pool, &tenant_id, &delivery_id).await,
+        (true, Some(1), 1)
+    );
     pool.close().await;
 }
 
