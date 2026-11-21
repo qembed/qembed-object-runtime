@@ -77,3 +77,12 @@ jobs:
           path: target/test-evidence/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Upload resolved Cargo.lock for dependency review
+        if: matrix.postgres == '15'
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved-cargo-lockfile
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
