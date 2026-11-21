@@ -1,7 +1,7 @@
 # Qembed Object Runtime — Rust Development Roadmap
 
 > **Файл:** `ROADMAP.md`  
-> **База:** Qembed Object Runtime M0 v2.3.3; ADR RT-039…RT-047  
+> **База:** Qembed Object Runtime M0 v2.3.3; ADR RT-039…RT-048  
 > **Фокус:** только Rust-разработка и тестирование Rust-кода  
 > **Первый milestone:** M1a — walking skeleton `create → publish → invoke → retrieve result` на mock ChatProvider.
 
@@ -237,8 +237,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Scope note: Decision entity/table/repository отсутствуют в текущих Rust domain contracts и migrations. Не вводим неподтверждённую модель ради теста; decision-specific access rules добавляются вместе с будущим контрактом persistence.
   - DoD: существующие immutable snapshots/events доступны только через разрешённые операции; для decisions проверка отложена до появления их Rust persistence contract.
 
-- [ ] **RUST-029 (S)** Добавить тесты role separation для store integration.
-  - Реализация: отдельные NOLOGIN group roles runtime/dispatcher/admin; реальные LOGIN test identities; RLS на всех tenant-owned таблицах; транзакционный tenant context для pre-auth owner lookup.
+- [ ] **RUST-029 (S)** Добавить тесты role separation для store integration.  - Реализация: отдельные NOLOGIN group roles runtime/dispatcher/admin; реальные LOGIN test identities; RLS на всех tenant-owned таблицах; транзакционный tenant context для pre-auth owner lookup.
   - Тесты: подключения под каждой ролью; positive/negative permission matrix; cross-tenant dispatcher только для outbox; отсутствие tenant context fail-closed.
   - Архитектурный контракт: `docs/STORE_ROLE_MATRIX.md`; migration identity отделена от application roles и требует CREATEROLE.
   - DoD: integration suite подключается под каждой тестируемой ролью, а не только DB owner.
@@ -402,7 +401,7 @@ SQLX_OFFLINE=true cargo check --workspace
 ### 9.1. Outbox → JetStream
 
 - [ ] **RUST-051 (L)** Реализовать PostgreSQL Outbox Relay для NATS JetStream. Задача разделена на независимые проверяемые части:
-  - [x] **RUST-051a (M) — PostgreSQL claim primitive.** Текущий PR #74 добавляет restricted delivery projection, короткую транзакцию claim через FOR UPDATE SKIP LOCKED, lease owner/expiry, monotonic fencing token, attempts, acknowledge/release и PostgreSQL tests на stale ack, competing relays и role isolation. Это только SQL-часть relay, не готовый NATS publisher и не завершённая RUST-051.
+  - [ ] **RUST-051a (M) — PostgreSQL claim primitive.** Текущий PR #74 добавляет restricted delivery projection, короткую транзакцию claim через FOR UPDATE SKIP LOCKED, lease owner/expiry, monotonic fencing token, attempts, acknowledge/release и PostgreSQL tests на stale ack, competing relays и role isolation. Это только SQL-часть relay, не готовый NATS publisher и не завершённая RUST-051.
   - [ ] **RUST-051b (M) — JetStream publisher adapter.** Добавить broker-neutral MessagePublisher port и concrete async-nats JetStream adapter в composition root; публиковать только committed Outbox deliveries; использовать стабильный delivery_id как Nats-Msg-Id; ждать PubAck; фиксировать результат публикации в PostgreSQL; сетевой I/O выполнять вне SQL-транзакции. Перед зависимостью — audit MSRV 1.85 и фиксация совместимой версии в Cargo.lock.
   - [ ] **RUST-051c (M) — Relay failure semantics.** Проверить crash после claim/до publish, после publish/до PubAck, после PubAck/до PostgreSQL update, NATS outage/reconnect и параллельные relay processes. Повторная публикация сохраняет тот же logical delivery_id; bounded JetStream deduplication не заменяет consumer idempotency.
   - Тесты: PostgreSQL integration + реальный JetStream test server; проверка PubAck, redelivery, stable message identity, lease fencing и отсутствия сетевого I/O внутри SQL-транзакции.
@@ -477,8 +476,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: unit state transition matrix; serialization tests; invalid revision references.
   - DoD: staged/live/retired и revision identity типизированы.
 
-- [ ] **RUST-066 (L)** Реализовать `commit_knowledge_revision` repository operation.
-  - Тесты: DB integration — успешный commit, rollback, concurrent commit, revision log, event/outbox atomicity.
+- [ ] **RUST-066 (L)** Реализовать `commit_knowledge_revision` repository operation.  - Тесты: DB integration — успешный commit, rollback, concurrent commit, revision log, event/outbox atomicity.
   - DoD: lock revision row; проверить indexing completeness; обновить intervals/revision/event в одной транзакции.
 - [ ] **RUST-067 (M)** Реализовать staged ingestion/indexing pipeline.
   - Тесты: unit на chunking/validation; integration — staged chunks не видны retrieval до commit; повтор ingestion идемпотентен.
