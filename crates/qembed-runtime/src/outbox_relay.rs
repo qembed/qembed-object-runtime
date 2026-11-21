@@ -225,11 +225,7 @@ mod tests {
             Ok(true)
         }
 
-        async fn release(
-            &self,
-            _: &Self::Delivery,
-            _: &str,
-        ) -> Result<bool, Self::Error> {
+        async fn release(&self, _: &Self::Delivery, _: &str) -> Result<bool, Self::Error> {
             self.released.fetch_add(1, Ordering::SeqCst);
             Ok(true)
         }
