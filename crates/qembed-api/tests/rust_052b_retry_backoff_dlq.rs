@@ -51,7 +51,9 @@ impl InboundMessageHandler for PermanentFailure {
 #[tokio::test]
 async fn retry_backoff_and_permanent_failures_are_parked_before_source_ack() {
     let nats_url = std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
-    let client = async_nats::connect(&nats_url).await.expect("NATS is available");
+    let client = async_nats::connect(&nats_url)
+        .await
+        .expect("NATS is available");
     let context = jetstream::new(client);
     let suffix = Uuid::new_v4().simple().to_string();
     let source_subject = format!("qembed.rust052b.source.{suffix}");
@@ -185,8 +187,8 @@ async fn retry_backoff_and_permanent_failures_are_parked_before_source_ack() {
         .await
         .expect("first DLQ message is present")
         .expect("first DLQ delivery is valid");
-    let first_envelope: serde_json::Value = serde_json::from_slice(&first_parked.payload)
-        .expect("first DLQ envelope is valid JSON");
+    let first_envelope: serde_json::Value =
+        serde_json::from_slice(&first_parked.payload).expect("first DLQ envelope is valid JSON");
     assert_eq!(
         first_envelope["original_delivery_id"],
         retry_delivery_id.to_string()
@@ -216,18 +218,15 @@ async fn retry_backoff_and_permanent_failures_are_parked_before_source_ack() {
         .await
         .expect("second DLQ message is present")
         .expect("second DLQ delivery is valid");
-    let second_envelope: serde_json::Value = serde_json::from_slice(&second_parked.payload)
-        .expect("second DLQ envelope is valid JSON");
+    let second_envelope: serde_json::Value =
+        serde_json::from_slice(&second_parked.payload).expect("second DLQ envelope is valid JSON");
     assert_eq!(
         second_envelope["original_delivery_id"],
         permanent_delivery_id.to_string()
     );
     assert_eq!(second_envelope["delivery_attempt"], 1);
     assert_eq!(second_envelope["failure_kind"], "permanent");
-    assert_eq!(
-        second_envelope["failure_code"],
-        "unsupported_event_version"
-    );
+    assert_eq!(second_envelope["failure_code"], "unsupported_event_version");
     second_parked
         .double_ack()
         .await

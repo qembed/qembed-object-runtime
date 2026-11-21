@@ -157,8 +157,8 @@ impl NatsJetStreamConsumer {
             failure_message: failure.message(),
             payload_bytes: &message.payload,
         };
-        let payload = serde_json::to_vec(&envelope)
-            .map_err(NatsJetStreamConsumerError::transport)?;
+        let payload =
+            serde_json::to_vec(&envelope).map_err(NatsJetStreamConsumerError::transport)?;
         let mut headers = async_nats::HeaderMap::new();
         headers.append("Nats-Msg-Id", dead_letter_id.as_str());
         headers.append(DEAD_LETTER_ID_HEADER, dead_letter_id.as_str());
@@ -212,7 +212,9 @@ impl MessageConsumer for NatsJetStreamConsumer {
             let message = result.map_err(NatsJetStreamConsumerError::transport)?;
             outcome.received += 1;
 
-            let info = message.info().map_err(NatsJetStreamConsumerError::transport)?;
+            let info = message
+                .info()
+                .map_err(NatsJetStreamConsumerError::transport)?;
             let source_stream = info.stream.to_owned();
             let source_consumer = info.consumer.to_owned();
             let source_sequence = info.stream_sequence;

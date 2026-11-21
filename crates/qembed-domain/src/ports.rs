@@ -475,22 +475,36 @@ pub struct MessageHandlerError {
 impl MessageHandlerError {
     #[must_use]
     pub fn retryable(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { kind: MessageFailureKind::Retryable, code: code.into(), message: message.into() }
+        Self {
+            kind: MessageFailureKind::Retryable,
+            code: code.into(),
+            message: message.into(),
+        }
     }
 
     #[must_use]
     pub fn permanent(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { kind: MessageFailureKind::Permanent, code: code.into(), message: message.into() }
+        Self {
+            kind: MessageFailureKind::Permanent,
+            code: code.into(),
+            message: message.into(),
+        }
     }
 
     #[must_use]
-    pub const fn kind(&self) -> MessageFailureKind { self.kind }
+    pub const fn kind(&self) -> MessageFailureKind {
+        self.kind
+    }
 
     #[must_use]
-    pub fn code(&self) -> &str { &self.code }
+    pub fn code(&self) -> &str {
+        &self.code
+    }
 
     #[must_use]
-    pub fn message(&self) -> &str { &self.message }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl std::fmt::Display for MessageHandlerError {
