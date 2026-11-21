@@ -123,6 +123,55 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
 }
 
 #[tokio::test]
+async fn expired_lease_can_be_reclaimed_with_a_new_fencing_token() {
+    let pool = setup().await;
+    let topic = format!("test.rust051.expired.{}", Uuid::new_v4());
+    let (tenant_id, delivery_id) = enqueue(&pool, &topic).await;
+    let dispatcher = PgOutboxDispatcher::new(pool.clone());
+
+    let first = dispatcher
+        .claim_batch("worker-a", &topic, 10, 30)
+        .await
+        .expect("first worker should claim");
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].attempts(), 1);
+    assert_eq!(first[0].claim_token(), 1);
+
+    sqlx::query(
+        "UPDATE outbox_messages SET lease_expires_at = now() - interval '1 second' WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
+    )
+    .bind(&tenant_id)
+    .bind(&delivery_id)
+    .execute(&pool)
+    .await
+    .expect("test should expire the first lease");
+
+    let second = dispatcher
+        .claim_batch("worker-b", &topic, 10, 30)
+        .await
+        .expect("second worker should reclaim the expired lease");
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].attempts(), 2);
+    assert_eq!(second[0].claim_token(), 2);
+    assert_eq!(first[0].delivery_id(), second[0].delivery_id());
+
+    assert!(
+        !dispatcher
+            .acknowledge(&first[0], "worker-a")
+            .await
+            .expect("stale acknowledgement must be rejected")
+    );
+    assert!(
+        dispatcher
+            .acknowledge(&second[0], "worker-b")
+            .await
+            .expect("current owner should acknowledge")
+    );
+
+    pool.close().await;
+}
+
+#[tokio::test]
 async fn independent_dispatchers_claim_disjoint_rows() {
     let pool = setup().await;
     let topic = format!("test.rust051.concurrent.{}", Uuid::new_v4());
