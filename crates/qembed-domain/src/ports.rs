@@ -457,10 +457,65 @@ impl InboundMessage {
     }
 }
 
-/// Handler failures deliberately leave the transport delivery unacknowledged.
-/// A handler may return Ok only after its durable PostgreSQL work has committed.
-pub type MessageHandlerError = Box<dyn Error + Send + Sync + 'static>;
+/// Whether a handler failure is expected to succeed if the same message is retried.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MessageFailureKind {
+    Retryable,
+    Permanent,
+}
 
+/// A classified application failure used by the consumer retry/DLQ policy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageHandlerError {
+    kind: MessageFailureKind,
+    code: String,
+    message: String,
+}
+
+impl MessageHandlerError {
+    #[must_use]
+    pub fn retryable(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: MessageFailureKind::Retryable,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn permanent(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: MessageFailureKind::Permanent,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    #[must_use]
+    pub const fn kind(&self) -> MessageFailureKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for MessageHandlerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl Error for MessageHandlerError {}
+
+/// A handler may return Ok only after its durable PostgreSQL work has committed.
 pub trait InboundMessageHandler: Send + Sync {
     fn handle(
         &self,
@@ -474,6 +529,9 @@ pub struct MessageConsumerOutcome {
     pub received: usize,
     pub acknowledged: usize,
     pub handler_failed: usize,
+    pub retry_scheduled: usize,
+    pub dead_lettered: usize,
+    pub dead_letter_failed: usize,
 }
 
 /// Broker-neutral pull-consumer boundary. Implementations ACK only after

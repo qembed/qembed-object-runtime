@@ -6,7 +6,7 @@ use async_nats::jetstream::{
     stream::Config as StreamConfig,
 };
 use qembed_api::adapters::{
-    nats_jetstream_consumer::NatsJetStreamConsumer,
+    nats_jetstream_consumer::{NatsJetStreamConsumer, NatsJetStreamConsumerConfig},
     nats_jetstream_publisher::NatsJetStreamPublisher,
 };
 use qembed_domain::ports::{
@@ -23,7 +23,12 @@ impl InboundMessageHandler for FailingHandler {
         &self,
         _message: InboundMessage,
     ) -> Pin<Box<dyn Future<Output = Result<(), MessageHandlerError>> + Send + '_>> {
-        Box::pin(async { Err(std::io::Error::other("simulated pre-commit failure").into()) })
+        Box::pin(async {
+            Err(MessageHandlerError::retryable(
+                "temporary_failure",
+                "simulated pre-commit failure",
+            ))
+        })
     }
 }
 
@@ -37,15 +42,24 @@ impl InboundMessageHandler for CommitHandler {
         message: InboundMessage,
     ) -> Pin<Box<dyn Future<Output = Result<(), MessageHandlerError>> + Send + '_>> {
         Box::pin(async move {
-            let delivery_id = Uuid::parse_str(message.delivery_id())?;
-            let mut transaction = self.pool.begin().await?;
+            let delivery_id = Uuid::parse_str(message.delivery_id()).map_err(|error| {
+                MessageHandlerError::permanent("invalid_delivery_id", error.to_string())
+            })?;
+            let mut transaction = self.pool.begin().await.map_err(|error| {
+                MessageHandlerError::retryable("postgres_begin_failed", error.to_string())
+            })?;
             sqlx::query(
                 "INSERT INTO rust_052a_ack_probe (delivery_id) VALUES ($1) ON CONFLICT (delivery_id) DO NOTHING",
             )
             .bind(delivery_id)
             .execute(&mut *transaction)
-            .await?;
-            transaction.commit().await?;
+            .await
+            .map_err(|error| {
+                MessageHandlerError::retryable("postgres_write_failed", error.to_string())
+            })?;
+            transaction.commit().await.map_err(|error| {
+                MessageHandlerError::retryable("postgres_commit_failed", error.to_string())
+            })?;
             Ok(())
         })
     }
@@ -96,7 +110,18 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
         )
         .await
         .expect("durable pull consumer is provisioned");
-    let consumer = NatsJetStreamConsumer::new(consumer);
+    let consumer = NatsJetStreamConsumer::new(
+        consumer,
+        context.clone(),
+        NatsJetStreamConsumerConfig::new(
+            "qembed.dlq.rust052a",
+            5,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            2,
+        )
+        .expect("valid retry policy"),
+    );
     let publisher = NatsJetStreamPublisher::connect(&nats_url)
         .await
         .expect("publisher connects");
