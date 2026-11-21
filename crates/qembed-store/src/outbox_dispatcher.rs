@@ -6,6 +6,7 @@
 use std::fmt;
 
 use serde_json::Value;
+use qembed_domain::ports::{OutboxDeliveryStore, OutboundMessage, PublicationReceipt};
 use sqlx::{FromRow, PgPool, Row, postgres::PgRow};
 
 /// A delivery projection; deliberately excludes event and aggregate internals.
@@ -71,6 +72,7 @@ pub enum OutboxDispatcherError {
     InvalidTopic,
     InvalidBatchSize,
     InvalidLeaseDuration,
+    InvalidPublicationReceipt,
     Database(sqlx::Error),
 }
 
@@ -83,6 +85,7 @@ impl fmt::Display for OutboxDispatcherError {
             Self::InvalidLeaseDuration => {
                 f.write_str("outbox lease must be between 1 and 3600 seconds")
             }
+            Self::InvalidPublicationReceipt => f.write_str("publication receipt is incomplete or invalid"),
             Self::Database(error) => write!(f, "outbox database operation failed: {error}"),
         }
     }
@@ -166,7 +169,12 @@ impl PgOutboxDispatcher {
         &self,
         delivery: &OutboxDelivery,
         owner: &str,
+        receipt: PublicationReceipt,
     ) -> Result<bool, OutboxDispatcherError> {
+        if receipt.stream().trim().is_empty() || receipt.sequence() == 0 {
+            return Err(OutboxDispatcherError::InvalidPublicationReceipt);
+        }
+
         let mut transaction = self
             .pool
             .begin()
@@ -178,12 +186,24 @@ impl PgOutboxDispatcher {
             .map_err(OutboxDispatcherError::Database)?;
 
         let result = sqlx::query(
-            "UPDATE outbox_messages                 SET delivered_at = now(), lease_owner = NULL, lease_expires_at = NULL               WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid                 AND delivered_at IS NULL AND lease_owner = $3                 AND claim_token = $4 AND lease_expires_at > now()",
+            "UPDATE outbox_messages
+                SET delivered_at = now(),
+                    publication_stream = $5,
+                    publication_sequence = $6,
+                    publication_duplicate = $7,
+                    lease_owner = NULL,
+                    lease_expires_at = NULL
+              WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid
+                AND delivered_at IS NULL AND lease_owner = $3
+                AND claim_token = $4 AND lease_expires_at > now()",
         )
         .bind(&delivery.tenant_id)
         .bind(&delivery.delivery_id)
         .bind(owner)
         .bind(delivery.claim_token)
+        .bind(receipt.stream())
+        .bind(i64::try_from(receipt.sequence()).map_err(|_| OutboxDispatcherError::InvalidPublicationReceipt)?)
+        .bind(receipt.duplicate())
         .execute(&mut *transaction)
         .await
         .map_err(OutboxDispatcherError::Database)?;
@@ -228,5 +248,55 @@ impl PgOutboxDispatcher {
             .await
             .map_err(OutboxDispatcherError::Database)?;
         Ok(result.rows_affected() == 1)
+    }
+}
+
+
+impl OutboxDeliveryStore for PgOutboxDispatcher {
+    type Delivery = OutboxDelivery;
+    type Error = OutboxDispatcherError;
+
+    fn claim_batch(
+        &self,
+        owner: &str,
+        topic: &str,
+        batch_size: u16,
+        lease_seconds: u32,
+    ) -> impl std::future::Future<Output = Result<Vec<Self::Delivery>, Self::Error>> + Send {
+        async move {
+            PgOutboxDispatcher::claim_batch(
+                self,
+                owner,
+                topic,
+                i64::from(batch_size),
+                i64::from(lease_seconds),
+            )
+            .await
+        }
+    }
+
+    fn outbound_message(&self, delivery: &Self::Delivery) -> OutboundMessage {
+        OutboundMessage::new(
+            delivery.delivery_id.clone(),
+            delivery.topic.clone(),
+            delivery.payload.clone(),
+        )
+    }
+
+    fn record_publication(
+        &self,
+        delivery: &Self::Delivery,
+        owner: &str,
+        receipt: PublicationReceipt,
+    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
+        async move { PgOutboxDispatcher::acknowledge(self, delivery, owner, receipt).await }
+    }
+
+    fn release(
+        &self,
+        delivery: &Self::Delivery,
+        owner: &str,
+    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
+        async move { PgOutboxDispatcher::release(self, delivery, owner).await }
     }
 }
