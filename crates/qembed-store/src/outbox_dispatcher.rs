@@ -6,10 +6,10 @@
 use std::fmt;
 
 use serde_json::Value;
-use sqlx::{FromRow, PgPool};
+use sqlx::{FromRow, PgPool, Row, postgres::PgRow};
 
 /// A delivery projection; deliberately excludes event and aggregate internals.
-#[derive(Clone, Debug, PartialEq, FromRow)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OutboxDelivery {
     tenant_id: String,
     delivery_id: String,
@@ -17,6 +17,19 @@ pub struct OutboxDelivery {
     payload: Value,
     attempts: i32,
     claim_token: i64,
+}
+
+impl<'row> FromRow<'row, PgRow> for OutboxDelivery {
+    fn from_row(row: &'row PgRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            tenant_id: row.try_get("tenant_id")?,
+            delivery_id: row.try_get("delivery_id")?,
+            topic: row.try_get("topic")?,
+            payload: row.try_get("payload")?,
+            attempts: row.try_get("attempts")?,
+            claim_token: row.try_get("claim_token")?,
+        })
+    }
 }
 
 impl OutboxDelivery {
