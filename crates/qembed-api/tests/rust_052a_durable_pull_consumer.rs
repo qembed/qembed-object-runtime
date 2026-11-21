@@ -6,7 +6,7 @@ use async_nats::jetstream::{
     stream::Config as StreamConfig,
 };
 use qembed_api::adapters::{
-    nats_jetstream_consumer::NatsJetStreamConsumer,
+    nats_jetstream_consumer::{NatsJetStreamConsumer, NatsJetStreamConsumerConfig},
     nats_jetstream_publisher::NatsJetStreamPublisher,
 };
 use qembed_domain::ports::{
@@ -23,7 +23,7 @@ impl InboundMessageHandler for FailingHandler {
         &self,
         _message: InboundMessage,
     ) -> Pin<Box<dyn Future<Output = Result<(), MessageHandlerError>> + Send + '_>> {
-        Box::pin(async { Err(std::io::Error::other("simulated pre-commit failure").into()) })
+        Box::pin(async { Err(MessageHandlerError::retryable("temporary_failure", "simulated pre-commit failure")) })
     }
 }
 
@@ -96,7 +96,7 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
         )
         .await
         .expect("durable pull consumer is provisioned");
-    let consumer = NatsJetStreamConsumer::new(consumer);
+    let consumer = NatsJetStreamConsumer::new(consumer, context.clone(), NatsJetStreamConsumerConfig::new("qembed.dlq.rust052a", 5, Duration::from_millis(100), Duration::from_secs(2), 2).expect("valid retry policy"));
     let publisher = NatsJetStreamPublisher::connect(&nats_url)
         .await
         .expect("publisher connects");
