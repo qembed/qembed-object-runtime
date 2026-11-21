@@ -748,7 +748,6 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
     fixture.pool.close().await;
 }
 
-
 #[tokio::test]
 async fn postgres_reconciliation_rejects_mismatched_invocation_provenance() {
     let fixture = setup().await;
