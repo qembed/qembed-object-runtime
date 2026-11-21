@@ -17,7 +17,7 @@ fn compose(args: &[&str]) {
             "--project-name",
             "qembed-rust-test",
             "--file",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/../../../compose.test.yaml"),
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../compose.test.yaml"),
         ])
         .args(args)
         .status()
