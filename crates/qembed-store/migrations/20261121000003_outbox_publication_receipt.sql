@@ -42,10 +42,10 @@ CREATE TABLE outbox_publication_receipts (
     publication_stream TEXT NOT NULL CHECK (publication_stream <> ''),
     publication_sequence BIGINT NOT NULL CHECK (publication_sequence > 0),
     publication_duplicate BOOLEAN NOT NULL,
-    published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    FOREIGN KEY (tenant_id, delivery_id)
-        REFERENCES outbox_messages (tenant_id, delivery_id) ON DELETE RESTRICT
+    published_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- No FK to outbox_messages: retention may prune delivered Outbox rows while
+-- this immutable audit history remains available independently.
 
 CREATE INDEX outbox_publication_receipts_delivery_idx
     ON outbox_publication_receipts (tenant_id, delivery_id, published_at, receipt_id);
