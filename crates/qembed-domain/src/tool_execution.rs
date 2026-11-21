@@ -342,7 +342,6 @@ pub enum ToolExecutionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::invocation::FencingToken;
 
     fn execution() -> ToolExecution {
         ToolExecution::new(
@@ -403,15 +402,14 @@ mod tests {
     }
 
     #[test]
-    fn invocation_fencing_token_cannot_authorize_tool_execution() {
+    fn a_different_tool_execution_fence_is_rejected() {
         let mut execution = execution();
         execution.claim("tool-worker-a").expect("claim succeeds");
 
-        let invocation_token = FencingToken::from_value(1);
         assert_eq!(
             execution.ensure_lease_owner(
                 "tool-worker-a",
-                ToolExecutionFencingToken::from_value(invocation_token.value() + 1),
+                ToolExecutionFencingToken::from_value(2),
             ),
             Err(ToolExecutionError::StaleFencingToken)
         );
