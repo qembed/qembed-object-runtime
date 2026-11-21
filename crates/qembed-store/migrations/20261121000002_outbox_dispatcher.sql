@@ -12,9 +12,13 @@ ALTER TABLE outbox_messages
     ADD CONSTRAINT outbox_delivered_unleased
         CHECK (delivered_at IS NULL OR lease_owner IS NULL);
 
-CREATE INDEX outbox_claimable_idx
-    ON outbox_messages (created_at, delivery_id)
-    WHERE delivered_at IS NULL;
+-- The base Outbox migration already creates outbox_pending_idx on this
+-- predicate; reuse it rather than maintaining a duplicate claim index.
+
+-- The canonical schema previously granted event-log access to the dispatcher.
+-- Remove both the table privilege and its permissive RLS policy.
+DROP POLICY IF EXISTS disp_events ON events;
+REVOKE SELECT ON events FROM qembed_dispatcher;
 
 -- Remove table-wide SELECT: the dispatcher receives only the columns needed
 -- to deliver, fence and acknowledge a message. In particular, event_id and
