@@ -127,6 +127,31 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     assert_eq!(stream.as_deref(), Some("QEMBED_EVENTS"));
     assert_eq!(sequence, Some(1));
     assert_eq!(duplicate, Some(false));
+    let receipt_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox_publication_receipts WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
+    )
+    .bind(tenant_id)
+    .bind(delivery_id)
+    .fetch_one(&pool)
+    .await
+    .expect("publication history should be readable by the owner");
+    assert_eq!(receipt_count, 1);
+
+    let immutable_error = sqlx::query(
+        "UPDATE outbox_publication_receipts SET publication_duplicate = true WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
+    )
+    .bind(tenant_id)
+    .bind(delivery_id)
+    .execute(&pool)
+    .await
+    .expect_err("publication history must reject UPDATE");
+    assert_eq!(
+        immutable_error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
+        Some("55000")
+    );
     pool.close().await;
 }
 
@@ -240,6 +265,22 @@ async fn dispatcher_role_is_limited_to_delivery_projection() {
     .await
     .expect("dispatcher may read the publication receipt projection");
     assert_eq!(publication_stream, None);
+    assert!(
+        sqlx::query_scalar::<_, bool>(
+            "SELECT has_table_privilege('qembed_dispatcher', 'public.outbox_publication_receipts', 'INSERT')",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .expect("receipt insert privilege should be inspectable")
+    );
+    assert!(
+        !sqlx::query_scalar::<_, bool>(
+            "SELECT has_table_privilege('qembed_dispatcher', 'public.outbox_publication_receipts', 'SELECT')",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .expect("receipt select privilege should be inspectable")
+    );
     transaction
         .rollback()
         .await
