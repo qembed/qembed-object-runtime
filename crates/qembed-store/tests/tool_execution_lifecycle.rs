@@ -7,11 +7,11 @@ use qembed_domain::{
     },
     invocation_lease::InvocationLeaseStore,
     test_support::scope_for_tenant,
-    tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore},
     tool_execution::{
         ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionOutcome,
         ToolExecutionStatus,
     },
+    tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore},
     tool_execution_reconciliation::{
         ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
         ToolExecutionReconciliationRequest,
