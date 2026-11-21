@@ -6,8 +6,7 @@ use std::str::FromStr;
 use qembed_domain::ids::{CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId};
 use qembed_domain::scope::Scope;
 use qembed_domain::tool_execution::{
-    ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionOutcome,
-    ToolExecutionStatus,
+    ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionStatus,
 };
 use qembed_domain::tool_execution_lease::ToolExecutionLeaseStore;
 use serde_json::Value;
@@ -180,11 +179,18 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         owner: &str,
         expected_version: u64,
         expected_fencing_token: ToolExecutionFencingToken,
-        outcome: ToolExecutionOutcome,
+        next: ToolExecution,
         output: Option<Value>,
         output_ttl_seconds: Option<u32>,
     ) -> Result<bool, Self::Error> {
         validate_owner(owner)?;
+        let next_status = validate_next_execution(
+            scope,
+            execution_id,
+            expected_version,
+            expected_fencing_token,
+            &next,
+        )?;
         let ttl_seconds = match (&output, output_ttl_seconds) {
             (Some(_), Some(ttl)) if ttl > 0 => f64::from(ttl),
             (None, None) => 0.0,
@@ -199,11 +205,6 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
                 ));
             }
         };
-        let next_status = match outcome {
-            ToolExecutionOutcome::Succeeded => "Succeeded",
-            ToolExecutionOutcome::Failed => "Failed",
-        };
-
         let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
         let result = execute(
             &mut transaction,
@@ -236,6 +237,49 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         .await?;
         transaction.commit().await?;
         Ok(result.rows_affected() == 1)
+    }
+}
+
+fn validate_next_execution(
+    scope: &Scope,
+    execution_id: ToolExecutionId,
+    expected_version: u64,
+    expected_fencing_token: ToolExecutionFencingToken,
+    next: &ToolExecution,
+) -> Result<&'static str, ToolExecutionStoreError> {
+    if next.id() != execution_id || next.tenant_id() != scope.tenant_id() {
+        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+            "next execution identity differs from the requested tenant execution",
+        ));
+    }
+    if next.version()
+        != expected_version
+            .checked_add(1)
+            .ok_or(ToolExecutionStoreError::InvalidRequestedValue(
+                "expected version overflow",
+            ))?
+    {
+        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+            "next ToolExecution version must advance exactly once",
+        ));
+    }
+    if next.fencing_token() != expected_fencing_token {
+        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+            "ToolExecution fencing token cannot change when committing a result",
+        ));
+    }
+    if next.lease_owner().is_some() || !next.status().is_terminal() {
+        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+            "next ToolExecution must be terminal and release its lease",
+        ));
+    }
+
+    match next.status() {
+        ToolExecutionStatus::Succeeded => Ok("Succeeded"),
+        ToolExecutionStatus::Failed => Ok("Failed"),
+        _ => Err(ToolExecutionStoreError::InvalidRequestedValue(
+            "unsupported ToolExecution result state",
+        )),
     }
 }
 
