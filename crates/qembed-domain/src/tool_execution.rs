@@ -378,6 +378,7 @@ pub enum ToolExecutionError {
     StaleFencingToken,
     VersionOverflow,
     FencingTokenOverflow,
+    UnresolvedReconciliation,
 }
 
 #[cfg(test)]
