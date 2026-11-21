@@ -222,6 +222,14 @@ async fn dispatcher_role_is_limited_to_delivery_projection() {
             .await
             .expect("delivery projection columns should be visible");
     assert_eq!(projection, topic);
+    let publication_stream: Option<String> = sqlx::query_scalar(
+        "SELECT publication_stream FROM outbox_messages WHERE topic = $1 LIMIT 1",
+    )
+    .bind(&topic)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("dispatcher may read the publication receipt projection");
+    assert_eq!(publication_stream, None);
     transaction
         .rollback()
         .await
