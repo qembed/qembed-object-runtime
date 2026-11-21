@@ -7,7 +7,6 @@ CREATE TABLE objects (
     published_version_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, object_id),
-    UNIQUE (object_id),
     CHECK (state NOT IN ('active', 'suspended') OR published_version_id IS NOT NULL)
 );
 
@@ -20,7 +19,6 @@ CREATE TABLE object_versions (
         CHECK (status IN ('draft', 'published', 'superseded')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, object_id, object_version_id),
-    UNIQUE (object_version_id),
     UNIQUE (tenant_id, object_id, version_number),
     FOREIGN KEY (tenant_id, object_id)
         REFERENCES objects (tenant_id, object_id)
