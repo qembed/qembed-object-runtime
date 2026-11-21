@@ -38,6 +38,7 @@ impl OutboxDelivery {
 #[derive(Debug)]
 pub enum OutboxDispatcherError {
     InvalidOwner,
+    InvalidTopic,
     InvalidBatchSize,
     InvalidLeaseDuration,
     Database(sqlx::Error),
@@ -47,6 +48,7 @@ impl fmt::Display for OutboxDispatcherError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidOwner => f.write_str("outbox dispatcher owner must not be empty"),
+            Self::InvalidTopic => f.write_str("outbox topic must not be empty"),
             Self::InvalidBatchSize => f.write_str("outbox batch size must be between 1 and 500"),
             Self::InvalidLeaseDuration => f.write_str("outbox lease must be between 1 and 3600 seconds"),
             Self::Database(error) => write!(f, "outbox database operation failed: {error}"),
@@ -77,10 +79,12 @@ impl PgOutboxDispatcher {
     pub async fn claim_batch(
         &self,
         owner: &str,
+        topic: &str,
         batch_size: i64,
         lease_seconds: i64,
     ) -> Result<Vec<OutboxDelivery>, OutboxDispatcherError> {
         if owner.trim().is_empty() { return Err(OutboxDispatcherError::InvalidOwner); }
+        if topic.trim().is_empty() { return Err(OutboxDispatcherError::InvalidTopic); }
         if !(1..=500).contains(&batch_size) { return Err(OutboxDispatcherError::InvalidBatchSize); }
         if !(1..=3600).contains(&lease_seconds) { return Err(OutboxDispatcherError::InvalidLeaseDuration); }
 
@@ -88,11 +92,12 @@ impl PgOutboxDispatcher {
         sqlx::query("SET LOCAL ROLE qembed_dispatcher")
             .execute(&mut *transaction).await.map_err(OutboxDispatcherError::Database)?;
         let deliveries = sqlx::query_as::<_, OutboxDelivery>(
-            "WITH candidates AS (                SELECT tenant_id, delivery_id FROM outbox_messages                  WHERE delivered_at IS NULL                    AND (lease_expires_at IS NULL OR lease_expires_at <= now())                  ORDER BY created_at, delivery_id                  FOR UPDATE SKIP LOCKED LIMIT $1             )              UPDATE outbox_messages AS message                 SET lease_owner = $2,                     lease_expires_at = now() + make_interval(secs => $3::int),                     claim_token = message.claim_token + 1,                     attempts = message.attempts + 1                FROM candidates               WHERE message.tenant_id = candidates.tenant_id                 AND message.delivery_id = candidates.delivery_id              RETURNING message.tenant_id::text AS tenant_id,                        message.delivery_id::text AS delivery_id,                        message.topic, message.payload, message.attempts, message.claim_token"
+            "WITH candidates AS (                SELECT tenant_id, delivery_id FROM outbox_messages                  WHERE topic = $4 AND delivered_at IS NULL                    AND (lease_expires_at IS NULL OR lease_expires_at <= now())                  ORDER BY created_at, delivery_id                  FOR UPDATE SKIP LOCKED LIMIT $1             )              UPDATE outbox_messages AS message                 SET lease_owner = $2,                     lease_expires_at = now() + make_interval(secs => $3::int),                     claim_token = message.claim_token + 1,                     attempts = message.attempts + 1                FROM candidates               WHERE message.tenant_id = candidates.tenant_id                 AND message.delivery_id = candidates.delivery_id              RETURNING message.tenant_id::text AS tenant_id,                        message.delivery_id::text AS delivery_id,                        message.topic, message.payload, message.attempts, message.claim_token"
         )
         .bind(batch_size)
         .bind(owner)
         .bind(lease_seconds as i32)
+        .bind(topic)
         .fetch_all(&mut *transaction)
         .await
         .map_err(OutboxDispatcherError::Database)?;
