@@ -407,10 +407,7 @@ mod tests {
         execution.claim("tool-worker-a").expect("claim succeeds");
 
         assert_eq!(
-            execution.ensure_lease_owner(
-                "tool-worker-a",
-                ToolExecutionFencingToken::from_value(2),
-            ),
+            execution.ensure_lease_owner("tool-worker-a", ToolExecutionFencingToken::from_value(2)),
             Err(ToolExecutionError::StaleFencingToken)
         );
     }
