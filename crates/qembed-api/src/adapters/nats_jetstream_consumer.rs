@@ -80,12 +80,12 @@ impl NatsJetStreamConsumerConfig {
     }
 
     fn retry_delay(&self, attempt: u32) -> Duration {
-        self.initial_retry_delay
-            .saturating_mul(
-                self.retry_multiplier
-                    .saturating_pow(attempt.saturating_sub(1)),
-            )
-            .min(self.max_retry_delay)
+        (1..attempt)
+            .try_fold(self.initial_retry_delay, |delay, _| {
+                let next = delay.saturating_mul(self.retry_multiplier);
+                (next < self.max_retry_delay).then_some(next)
+            })
+            .unwrap_or(self.max_retry_delay)
     }
 }
 
@@ -337,6 +337,20 @@ mod tests {
         assert_eq!(policy.retry_delay(2), Duration::from_millis(200));
         assert_eq!(policy.retry_delay(3), Duration::from_millis(350));
         assert_eq!(policy.retry_delay(20), Duration::from_millis(350));
+
+        let tiny_initial = NatsJetStreamConsumerConfig::new(
+            "qembed.dead",
+            u32::MAX,
+            Duration::from_nanos(1),
+            Duration::from_secs(600),
+            2,
+        )
+        .expect("policy with a large attempt budget is valid");
+        assert_eq!(
+            tiny_initial.retry_delay(u32::MAX),
+            Duration::from_secs(600),
+            "the delay must still reach its cap when the exponent exceeds u32"
+        );
     }
 
     #[test]
