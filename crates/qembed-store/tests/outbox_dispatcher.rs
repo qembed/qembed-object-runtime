@@ -148,7 +148,8 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     assert_eq!(
         immutable_error
             .as_database_error()
-            .and_then(|error| error.code()),
+            .and_then(|error| error.code())
+            .as_deref(),
         Some("55000")
     );
     pool.close().await;
