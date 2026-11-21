@@ -78,6 +78,8 @@ Malformed/permanent-invalid envelope фиксируется как durable failu
 
 - Domain/Runtime зависят от broker-neutral ports, например MessagePublisher и MessageConsumer, а не от async-nats types.
 - async-nats используется как concrete Rust adapter только после dependency/MSRV audit. Текущий Rust 1.85 MSRV сохраняется, если отдельное согласованное решение не докажет необходимость повышения.
+
+**Предварительный MSRV finding (2026-11-21):** опубликованный manifest async-nats 0.49.1 задаёт rust-version 1.88.0; release notes async-nats 0.51.0 отдельно сообщают о повышении MSRV до 1.89.0. Поэтому нельзя просто добавить latest async-nats в workspace с Rust 1.85. В RUST-051b необходимо проверить более раннюю версию, которая одновременно поддерживает нужный JetStream API и реально собирается на Rust 1.85, включая транзитивные зависимости и feature set. Если такой поддерживаемой версии нет, повышение workspace MSRV оформляется отдельным решением и не выполняется молча. Источники: [async-nats 0.49.1 Cargo manifest](https://docs.rs/crate/async-nats/0.49.1/source/Cargo.toml.orig) и [async-nats 0.51.0 release notes](https://github.com/nats-io/nats.rs/releases/tag/async-nats%2Fv0.51.0).
 - Не добавлять седьмой crate. На первом этапе API, Relay и Worker могут быть разными process modes одного Rust workspace/artifact и запускаться/масштабироваться независимо.
 - Выделение отдельных deployable services и дальнейшее дробление bounded contexts выполняются постепенно; NATS сам по себе не требует немедленного разбиения всех crates на микросервисы.
 - Локальная разработка и CI должны запускать настоящий JetStream server для integration/failure tests; unit tests могут использовать test doubles только для чистых port contracts.
