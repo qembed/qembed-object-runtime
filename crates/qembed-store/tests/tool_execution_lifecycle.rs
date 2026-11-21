@@ -8,14 +8,14 @@ use qembed_domain::{
     invocation_lease::InvocationLeaseStore,
     test_support::scope_for_tenant,
     tool_execution::{
-        ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken,
-        ToolExecutionOutcome, ToolExecutionStatus,
+        ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionOutcome,
+        ToolExecutionStatus,
     },
     tool_execution_reconciliation::{
         ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
         ToolExecutionReconciliationRequest,
     },
-    tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore, ToolExecutionReconciliationStore},
+
 };
 use qembed_store::{
     invocation_worker::PgExecutionStore, run_migrations, tool_execution_store::PgToolExecutionStore,
@@ -566,15 +566,21 @@ async fn transition_fixture_to_unknown(
         .expect("Authorized execution is claimable");
     tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
     assert!(
-        store.mark_tool_execution_unknown(
-            &fixture.scope,
-            fixture.execution_id,
-            claimed.version(),
-            claimed.fencing_token(),
-        ).await.expect("expired lease transition succeeds")
+        store
+            .mark_tool_execution_unknown(
+                &fixture.scope,
+                fixture.execution_id,
+                claimed.version(),
+                claimed.fencing_token(),
+            )
+            .await
+            .expect("expired lease transition succeeds")
     );
-    store.load_tool_execution(&fixture.scope, fixture.execution_id)
-        .await.expect("Unknown row can be loaded").expect("execution exists")
+    store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("Unknown row can be loaded")
+        .expect("execution exists")
 }
 
 fn reconciliation_request(execution: &ToolExecution) -> ToolExecutionReconciliationRequest {
@@ -598,23 +604,38 @@ async fn postgres_reconciliation_commits_confirmed_success_with_matching_state()
         output_ttl_seconds: Some(3600),
     };
     let mut next = unknown.clone();
-    next.reconcile(outcome.clone()).expect("confirmed success is valid");
+    next.reconcile(outcome.clone())
+        .expect("confirmed success is valid");
 
-    assert!(store.apply_tool_execution_reconciliation(
-        &fixture.scope,
-        ToolExecutionReconciliationCompletion { request, next, outcome },
-    ).await.expect("reconciliation CAS succeeds"));
+    assert!(
+        store
+            .apply_tool_execution_reconciliation(
+                &fixture.scope,
+                ToolExecutionReconciliationCompletion {
+                    request,
+                    next,
+                    outcome
+                },
+            )
+            .await
+            .expect("reconciliation CAS succeeds")
+    );
 
-    let persisted = store.load_tool_execution(&fixture.scope, fixture.execution_id)
-        .await.expect("terminal row can be loaded").expect("execution exists");
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("terminal row can be loaded")
+        .expect("execution exists");
     assert_eq!(persisted.status(), ToolExecutionStatus::Succeeded);
     assert_eq!(persisted.version(), unknown.version() + 1);
     assert_eq!(persisted.fencing_token(), unknown.fencing_token());
 
-    let state: (String, Option<serde_json::Value>) = sqlx::query_as(
-        "SELECT reconciliation_state, output FROM tool_executions WHERE id=$1"
-    ).bind(fixture.execution_id.into_uuid()).fetch_one(&fixture.pool).await
-        .expect("reconciliation evidence is persisted");
+    let state: (String, Option<serde_json::Value>) =
+        sqlx::query_as("SELECT reconciliation_state, output FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("reconciliation evidence is persisted");
     assert_eq!(state.0, "confirmed_succeeded");
     assert_eq!(state.1, Some(serde_json::json!({"provider":"confirmed"})));
     fixture.pool.close().await;
@@ -630,23 +651,41 @@ async fn postgres_reconciliation_commits_confirmed_failure() {
         evidence: Some(serde_json::json!({"provider":"confirmed_absent"})),
     };
     let mut next = unknown.clone();
-    next.reconcile(outcome.clone()).expect("confirmed failure is valid");
+    next.reconcile(outcome.clone())
+        .expect("confirmed failure is valid");
 
-    assert!(store.apply_tool_execution_reconciliation(
-        &fixture.scope,
-        ToolExecutionReconciliationCompletion { request, next, outcome },
-    ).await.expect("reconciliation CAS succeeds"));
+    assert!(
+        store
+            .apply_tool_execution_reconciliation(
+                &fixture.scope,
+                ToolExecutionReconciliationCompletion {
+                    request,
+                    next,
+                    outcome
+                },
+            )
+            .await
+            .expect("reconciliation CAS succeeds")
+    );
 
-    let persisted = store.load_tool_execution(&fixture.scope, fixture.execution_id)
-        .await.expect("terminal row can be loaded").expect("execution exists");
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("terminal row can be loaded")
+        .expect("execution exists");
     assert_eq!(persisted.status(), ToolExecutionStatus::Failed);
     assert_eq!(persisted.version(), unknown.version() + 1);
-    let state: (String, Option<serde_json::Value>) = sqlx::query_as(
-        "SELECT reconciliation_state, output FROM tool_executions WHERE id=$1"
-    ).bind(fixture.execution_id.into_uuid()).fetch_one(&fixture.pool).await
-        .expect("failure evidence is persisted");
+    let state: (String, Option<serde_json::Value>) =
+        sqlx::query_as("SELECT reconciliation_state, output FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("failure evidence is persisted");
     assert_eq!(state.0, "confirmed_failed");
-    assert_eq!(state.1, Some(serde_json::json!({"provider":"confirmed_absent"})));
+    assert_eq!(
+        state.1,
+        Some(serde_json::json!({"provider":"confirmed_absent"}))
+    );
     fixture.pool.close().await;
 }
 
@@ -655,9 +694,8 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
     let fixture = setup().await;
     let store = PgToolExecutionStore::new(fixture.pool.clone());
     let unknown = transition_fixture_to_unknown(&fixture, &store).await;
-    let stale_token = ToolExecutionFencingToken::from_value(
-        unknown.fencing_token().value().saturating_sub(1)
-    );
+    let stale_token =
+        ToolExecutionFencingToken::from_value(unknown.fencing_token().value().saturating_sub(1));
     let outcome = ToolExecutionReconciliationOutcome::ConfirmedSucceeded {
         output: None,
         output_ttl_seconds: None,
@@ -675,19 +713,36 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
             None,
         ),
     );
-    stale_next.reconcile(outcome.clone()).expect("stale checkpoint can be represented");
+    stale_next
+        .reconcile(outcome.clone())
+        .expect("stale checkpoint can be represented");
     let request = ToolExecutionReconciliationRequest::new(
-        unknown.id(), unknown.invocation_id(), unknown.command_id(),
-        unknown.version(), stale_token,
+        unknown.id(),
+        unknown.invocation_id(),
+        unknown.command_id(),
+        unknown.version(),
+        stale_token,
     );
 
-    assert!(!store.apply_tool_execution_reconciliation(
-        &fixture.scope,
-        ToolExecutionReconciliationCompletion { request, next: stale_next, outcome },
-    ).await.expect("stale fencing token is a CAS miss"));
+    assert!(
+        !store
+            .apply_tool_execution_reconciliation(
+                &fixture.scope,
+                ToolExecutionReconciliationCompletion {
+                    request,
+                    next: stale_next,
+                    outcome
+                },
+            )
+            .await
+            .expect("stale fencing token is a CAS miss")
+    );
 
-    let persisted = store.load_tool_execution(&fixture.scope, fixture.execution_id)
-        .await.expect("Unknown row remains readable").expect("execution exists");
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("Unknown row remains readable")
+        .expect("execution exists");
     assert_eq!(persisted.status(), ToolExecutionStatus::Unknown);
     assert_eq!(persisted.version(), unknown.version());
     assert_eq!(persisted.fencing_token(), unknown.fencing_token());
