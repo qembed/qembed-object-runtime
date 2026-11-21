@@ -125,7 +125,11 @@ impl NatsJetStreamConsumer {
         context: Context,
         config: NatsJetStreamConsumerConfig,
     ) -> Self {
-        Self { consumer, context, config }
+        Self {
+            consumer,
+            context,
+            config,
+        }
     }
 
     async fn publish_dead_letter(

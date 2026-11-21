@@ -15,7 +15,7 @@
 - A permanent or exhausted failure is published to the DLQ with a confirmed JetStream PubAck before the source message receives a confirmed ACK.
 - If DLQ publication fails, the source is not ACKed; it receives a delayed NAK so parking can be retried.
 - The DLQ envelope preserves the original raw payload bytes, source stream/consumer/sequence, subject, delivery attempt, original delivery ID when present, and failure classification/diagnostics.
-- The DLQ message ID is deterministic from source stream and stream sequence. JetStream deduplication suppresses nearby duplicate publications; because its deduplication window is finite, DLQ consumers must also be idempotent using the stable dead-letter ID.
+- The DLQ message ID is deterministic from source stream, consumer and stream sequence. JetStream deduplication suppresses nearby duplicate publications; because its deduplication window is finite, DLQ consumers must also be idempotent using the stable dead-letter ID.
 - The original delivery ID is retained unchanged. DLQ identity is separate and never replaces the original business idempotency key.
 
 ## Retry policy

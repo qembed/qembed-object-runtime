@@ -42,8 +42,12 @@ impl InboundMessageHandler for CommitHandler {
         message: InboundMessage,
     ) -> Pin<Box<dyn Future<Output = Result<(), MessageHandlerError>> + Send + '_>> {
         Box::pin(async move {
-            let delivery_id = Uuid::parse_str(message.delivery_id()).map_err(|error| {\n                MessageHandlerError::permanent(\"invalid_delivery_id\", error.to_string())\n            })?;
-            let mut transaction = self.pool.begin().await.map_err(|error| {\n                MessageHandlerError::retryable(\"postgres_begin_failed\", error.to_string())\n            })?;
+            let delivery_id = Uuid::parse_str(message.delivery_id()).map_err(|error| {
+                MessageHandlerError::permanent("invalid_delivery_id", error.to_string())
+            })?;
+            let mut transaction = self.pool.begin().await.map_err(|error| {
+                MessageHandlerError::retryable("postgres_begin_failed", error.to_string())
+            })?;
             sqlx::query(
                 "INSERT INTO rust_052a_ack_probe (delivery_id) VALUES ($1) ON CONFLICT (delivery_id) DO NOTHING",
             )
