@@ -56,6 +56,10 @@ CREATE TRIGGER outbox_publication_receipts_append_only
 
 ALTER TABLE outbox_publication_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_publication_receipts FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON outbox_publication_receipts
+    FOR ALL TO qembed_runtime
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
 CREATE POLICY disp_outbox_receipts ON outbox_publication_receipts
     FOR INSERT TO qembed_dispatcher WITH CHECK (true);
 
