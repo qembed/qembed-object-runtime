@@ -387,9 +387,14 @@ mod tests {
     fn claim_advances_only_the_tool_execution_owned_counters() {
         let mut execution = execution();
         assert_eq!(execution.version(), 0);
-        assert_eq!(execution.fencing_token(), ToolExecutionFencingToken::INITIAL);
+        assert_eq!(
+            execution.fencing_token(),
+            ToolExecutionFencingToken::INITIAL
+        );
 
-        execution.claim("tool-worker-a").expect("authorized row can be claimed");
+        execution
+            .claim("tool-worker-a")
+            .expect("authorized row can be claimed");
 
         assert_eq!(execution.status(), ToolExecutionStatus::Executing);
         assert_eq!(execution.version(), 1);
