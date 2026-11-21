@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   rust:
-    name: Format, check, lint, dependency audit, and test (stable / PostgreSQL ${{ matrix.postgres }} / pgvector 0.8.7)
+    name: Format, check, lint, dependency audit, and test (Rust 1.100.0 / PostgreSQL ${{ matrix.postgres }} / pgvector 0.8.7)
     strategy:
       fail-fast: false
       matrix:
@@ -21,8 +21,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust 1.100.0
+        uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: rustfmt, clippy
 
@@ -77,19 +77,3 @@ jobs:
           path: target/test-evidence/
           if-no-files-found: error
           retention-days: 90
-
-  msrv:
-    name: Minimum supported Rust version (1.85.0)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install minimum supported Rust
-        uses: dtolnay/rust-toolchain@1.85.0
-
-      - name: Check workspace on MSRV
-        run: cargo check --workspace
-
-      - name: Run workspace tests on MSRV with PostgreSQL
-        run: bash scripts/test-postgres.sh
