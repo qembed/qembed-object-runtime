@@ -42,8 +42,8 @@ async fn composite_foreign_keys_reject_cross_tenant_references() {
     .await
     .expect("tenant A object version should be inserted");
 
-    // A version row cannot borrow an object owned by another tenant, even
-    // when the globally unique object ID is otherwise valid.
+    // A version row cannot borrow an object owned by another tenant. The same
+    // UUID is meaningful only together with its tenant.
     let cross_tenant_version = sqlx::query(
         "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number) \
          VALUES ($1::uuid, $2::uuid, $3::uuid, 1)",
@@ -116,7 +116,6 @@ async fn composite_foreign_keys_reject_cross_tenant_references() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn entity_identifiers_may_repeat_across_tenants_without_cross_linking() {
     let pool = common::connect().await;
@@ -178,11 +177,12 @@ async fn entity_identifiers_may_repeat_across_tenants_without_cross_linking() {
         .expect("the same EventId should be valid in a different tenant");
     }
 
-    let object_count: i64 = sqlx::query_scalar("SELECT count(*) FROM objects WHERE object_id = $1::uuid")
-        .bind(object_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .expect("object count should be readable");
+    let object_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM objects WHERE object_id = $1::uuid")
+            .bind(object_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("object count should be readable");
     let version_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM object_versions WHERE object_version_id = $1::uuid")
             .bind(version_id.to_string())
@@ -195,11 +195,12 @@ async fn entity_identifiers_may_repeat_across_tenants_without_cross_linking() {
             .fetch_one(&pool)
             .await
             .expect("snapshot count should be readable");
-    let event_count: i64 = sqlx::query_scalar("SELECT count(*) FROM events WHERE event_id = $1::uuid")
-        .bind(event_id.to_string())
-        .fetch_one(&pool)
-        .await
-        .expect("event count should be readable");
+    let event_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM events WHERE event_id = $1::uuid")
+            .bind(event_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("event count should be readable");
 
     assert_eq!(object_count, 2);
     assert_eq!(version_count, 2);
