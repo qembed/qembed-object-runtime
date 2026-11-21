@@ -62,7 +62,10 @@ impl fmt::Display for InvocationRecoveryError {
                 formatter.write_str("recovery function returned an invalid persisted ID")
             }
             Self::Database(error) => {
-                write!(formatter, "invocation recovery database operation failed: {error}")
+                write!(
+                    formatter,
+                    "invocation recovery database operation failed: {error}"
+                )
             }
         }
     }

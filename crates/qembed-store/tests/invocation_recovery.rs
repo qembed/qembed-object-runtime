@@ -2,14 +2,15 @@ mod common;
 
 use std::time::{Duration, SystemTime};
 
+use qembed_domain::ports::PublicationReceipt;
 use qembed_domain::{
-    ids::{CallerId, EventId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId},
+    ids::{
+        CallerId, EventId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId,
+    },
     test_support::scope_for_tenant,
 };
-use qembed_domain::ports::PublicationReceipt;
 use qembed_store::{
-    invocation_recovery::PgInvocationRecoverySweeper,
-    outbox_dispatcher::PgOutboxDispatcher,
+    invocation_recovery::PgInvocationRecoverySweeper, outbox_dispatcher::PgOutboxDispatcher,
     run_migrations,
 };
 use sqlx::PgPool;
@@ -184,7 +185,10 @@ async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_pu
     .await
     .expect("replay marker is readable");
     assert!(marker.0.is_some());
-    assert_eq!(marker.1.as_deref(), Some("invocation_progress_deadline_expired"));
+    assert_eq!(
+        marker.1.as_deref(),
+        Some("invocation_progress_deadline_expired")
+    );
     assert_eq!(marker.2, 1);
 
     let relay = PgOutboxDispatcher::new(fixture.pool.clone());
@@ -221,7 +225,10 @@ async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_pu
     assert_eq!(state.0, None);
     assert_eq!(state.1, None);
     assert_eq!(state.2, 1);
-    assert_eq!(state.3, 2, "the first PubAck remains in append-only history");
+    assert_eq!(
+        state.3, 2,
+        "the first PubAck remains in append-only history"
+    );
 
     fixture.pool.close().await;
 }
