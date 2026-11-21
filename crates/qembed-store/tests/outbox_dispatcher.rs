@@ -135,14 +135,14 @@ async fn dispatcher_role_is_limited_to_delivery_projection() {
         .await
         .expect("dispatcher role should be available");
 
-    let projection: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox_messages WHERE topic = $1",
+    let projection: String = sqlx::query_scalar(
+        "SELECT topic FROM outbox_messages WHERE topic = $1 LIMIT 1",
     )
     .bind(&topic)
     .fetch_one(&mut *transaction)
     .await
     .expect("delivery projection columns should be visible");
-    assert_eq!(projection, 1);
+    assert_eq!(projection, topic);
     transaction.rollback().await.expect("rollback role transaction");
 
     let mut event_transaction = pool.begin().await.expect("event transaction");
