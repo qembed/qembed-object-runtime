@@ -236,19 +236,25 @@ async fn crash_after_claim_before_publish_reclaims_same_delivery() {
     let pool = database().await;
     let (publisher, stream, subject) = jetstream().await;
     let (tenant_id, delivery_id) = enqueue(&pool, &subject).await;
-    let dispatcher = PgOutboxDispatcher::new(pool.clone());
+    drop(publisher);
 
-    let claimed = dispatcher
-        .claim_batch("relay-crashed", &subject, 1, 1)
-        .await
-        .expect("first relay claims the row");
-    assert_eq!(claimed.len(), 1);
-    assert_eq!(claimed[0].delivery_id(), delivery_id);
+    let child = run_child_process(&subject, "relay-crashed", "claim_only");
+    assert!(
+        child.status.success(),
+        "claiming child process failed: {}{}",
+        String::from_utf8_lossy(&child.stdout),
+        String::from_utf8_lossy(&child.stderr)
+    );
     assert_eq!(stream_message_count(&stream).await, 0);
 
     expire_lease(&pool, &tenant_id, &delivery_id).await;
+    let publisher = NatsJetStreamPublisher::connect(
+        &std::env::var("NATS_URL").expect("NATS_URL is set"),
+    )
+    .await
+    .expect("restarted relay connects");
     let relay = OutboxRelay::new(
-        dispatcher,
+        PgOutboxDispatcher::new(pool.clone()),
         publisher,
         relay_config("relay-restarted", &subject, 10, 30),
     );
@@ -330,22 +336,41 @@ async fn puback_before_postgres_receipt_failure_replays_same_delivery_id() {
     pool.close().await;
 }
 
+fn run_child_process(topic: &str, owner: &str, mode: &str) -> std::process::Output {
+    Command::new(std::env::current_exe().expect("test executable path is available"))
+        .args(["--exact", "child_process_relay_entrypoint", "--nocapture"])
+        .env("RUST_051C_CHILD_TOPIC", topic)
+        .env("RUST_051C_CHILD_OWNER", owner)
+        .env("RUST_051C_CHILD_MODE", mode)
+        .output()
+        .expect("child relay process starts")
+}
+
 #[tokio::test]
 async fn child_process_relay_entrypoint() {
     let Ok(topic) = std::env::var("RUST_051C_CHILD_TOPIC") else {
         return;
     };
     let owner = std::env::var("RUST_051C_CHILD_OWNER").expect("child owner is provided");
+    let mode = std::env::var("RUST_051C_CHILD_MODE").expect("child mode is provided");
     let pool = database().await;
+    let dispatcher = PgOutboxDispatcher::new(pool.clone());
+
+    if mode == "claim_only" {
+        let claimed = dispatcher
+            .claim_batch(&owner, &topic, 1, 1)
+            .await
+            .expect("child claims delivery before exiting");
+        assert_eq!(claimed.len(), 1);
+        pool.close().await;
+        return;
+    }
+
     let url = std::env::var("NATS_URL").expect("NATS_URL is provided");
     let publisher = NatsJetStreamPublisher::connect(&url)
         .await
         .expect("child process connects to JetStream");
-    let relay = OutboxRelay::new(
-        PgOutboxDispatcher::new(pool.clone()),
-        publisher,
-        relay_config(&owner, &topic, 1, 30),
-    );
+    let relay = OutboxRelay::new(dispatcher, publisher, relay_config(&owner, &topic, 1, 30));
     let outcome = relay.run_once().await.expect("child relay batch succeeds");
     assert_eq!(outcome.claimed, 1);
     assert_eq!(outcome.published, 1);
@@ -360,22 +385,10 @@ async fn independent_relay_processes_claim_disjoint_rows_and_publish_both() {
     enqueue(&pool, &subject).await;
     enqueue(&pool, &subject).await;
 
-    let executable = std::env::current_exe().expect("test executable path is available");
-    let spawn_child = |owner: &'static str| {
-        let executable = executable.clone();
-        let topic = subject.clone();
-        thread::spawn(move || {
-            Command::new(executable)
-                .args(["--exact", "child_process_relay_entrypoint", "--nocapture"])
-                .env("RUST_051C_CHILD_TOPIC", topic)
-                .env("RUST_051C_CHILD_OWNER", owner)
-                .output()
-                .expect("child relay process starts")
-        })
-    };
-
-    let child_a = spawn_child("relay-process-a");
-    let child_b = spawn_child("relay-process-b");
+    let topic_a = subject.clone();
+    let topic_b = subject.clone();
+    let child_a = thread::spawn(move || run_child_process(&topic_a, "relay-process-a", "publish"));
+    let child_b = thread::spawn(move || run_child_process(&topic_b, "relay-process-b", "publish"));
     let output_a = child_a.join().expect("child A joins");
     let output_b = child_b.join().expect("child B joins");
     assert!(
