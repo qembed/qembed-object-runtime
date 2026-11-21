@@ -32,7 +32,9 @@ impl fmt::Display for OutboxRelayConfigError {
             Self::EmptyOwner => formatter.write_str("relay owner must not be empty"),
             Self::EmptyTopic => formatter.write_str("relay topic must not be empty"),
             Self::InvalidBatchSize => formatter.write_str("relay batch size must be 1..=500"),
-            Self::InvalidLeaseDuration => formatter.write_str("relay lease must be 1..=3600 seconds"),
+            Self::InvalidLeaseDuration => {
+                formatter.write_str("relay lease must be 1..=3600 seconds")
+            }
         }
     }
 }
@@ -60,7 +62,12 @@ impl OutboxRelayConfig {
         if !(1..=3600).contains(&lease_seconds) {
             return Err(OutboxRelayConfigError::InvalidLeaseDuration);
         }
-        Ok(Self { owner, topic, batch_size, lease_seconds })
+        Ok(Self {
+            owner,
+            topic,
+            batch_size,
+            lease_seconds,
+        })
     }
 }
 
@@ -103,7 +110,11 @@ where
 {
     #[must_use]
     pub fn new(store: S, publisher: P, config: OutboxRelayConfig) -> Self {
-        Self { store, publisher, config }
+        Self {
+            store,
+            publisher,
+            config,
+        }
     }
 
     /// Claims rows, publishes outside PostgreSQL transactions, then persists PubAck.
@@ -112,7 +123,8 @@ where
     /// The next attempt reuses the same delivery ID, allowing bounded JetStream
     /// deduplication while retaining consumer-side idempotency as the guarantee.
     pub async fn run_once(&self) -> Result<OutboxRelayOutcome, OutboxRelayError<S::Error>> {
-        let deliveries = self.store
+        let deliveries = self
+            .store
             .claim_batch(
                 &self.config.owner,
                 &self.config.topic,
@@ -131,7 +143,8 @@ where
             let message = self.store.outbound_message(delivery);
             match self.publisher.publish(message).await {
                 Ok(receipt) => {
-                    if self.store
+                    if self
+                        .store
                         .record_publication(delivery, &self.config.owner, receipt)
                         .await
                         .map_err(OutboxRelayError)?
@@ -145,7 +158,8 @@ where
                 }
                 Err(_) => {
                     outcome.publish_failed += 1;
-                    if !self.store
+                    if !self
+                        .store
                         .release(delivery, &self.config.owner)
                         .await
                         .map_err(OutboxRelayError)?
@@ -164,8 +178,8 @@ where
 mod tests {
     use std::convert::Infallible;
     use std::future::Future;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use qembed_domain::ports::{OutboundMessage, PublicationReceipt};
 
@@ -193,7 +207,11 @@ mod tests {
         }
 
         fn outbound_message(&self, _: &Self::Delivery) -> OutboundMessage {
-            OutboundMessage::new("stable-delivery-id", "qembed.events", serde_json::json!({"v": 1}))
+            OutboundMessage::new(
+                "stable-delivery-id",
+                "qembed.events",
+                serde_json::json!({"v": 1}),
+            )
         }
 
         fn record_publication(
@@ -245,15 +263,24 @@ mod tests {
     async fn relay_persists_puback_after_publish() {
         let published = Arc::new(AtomicUsize::new(0));
         let released = Arc::new(AtomicUsize::new(0));
-        let store = TestStore { published: published.clone(), released: released.clone() };
-        let config = OutboxRelayConfig::new("relay-a", "qembed.events", 10, 30)
-            .expect("valid config");
+        let store = TestStore {
+            published: published.clone(),
+            released: released.clone(),
+        };
+        let config =
+            OutboxRelayConfig::new("relay-a", "qembed.events", 10, 30).expect("valid config");
         let relay = OutboxRelay::new(store, TestPublisher, config);
 
         let outcome = relay.run_once().await.expect("relay batch should succeed");
-        assert_eq!(outcome, OutboxRelayOutcome {
-            claimed: 1, published: 1, publish_failed: 0, lease_lost: 0,
-        });
+        assert_eq!(
+            outcome,
+            OutboxRelayOutcome {
+                claimed: 1,
+                published: 1,
+                publish_failed: 0,
+                lease_lost: 0,
+            }
+        );
         assert_eq!(published.load(Ordering::SeqCst), 1);
         assert_eq!(released.load(Ordering::SeqCst), 0);
     }
