@@ -173,6 +173,41 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         Ok(result.rows_affected() == 1)
     }
 
+    async fn mark_tool_execution_unknown(
+        &self,
+        scope: &Scope,
+        execution_id: ToolExecutionId,
+        expected_version: u64,
+        expected_fencing_token: ToolExecutionFencingToken,
+    ) -> Result<bool, Self::Error> {
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE tool_executions
+                    SET status='Unknown',
+                        version=version+1,
+                        lease_owner=NULL,
+                        lease_until=NULL,
+                        heartbeat_at=NULL,
+                        reconciliation_state='pending'
+                  WHERE tenant_id=$1::uuid AND id=$2::uuid AND status='Executing'
+                    AND lease_until <= clock_timestamp()
+                    AND version=$3 AND fencing_token=$4",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(execution_id.to_string())
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(
+                expected_fencing_token.value(),
+                "expected fencing token",
+            )?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     async fn complete_tool_execution(
         &self,
         scope: &Scope,

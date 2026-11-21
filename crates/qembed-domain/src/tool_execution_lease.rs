@@ -61,6 +61,20 @@ pub trait ToolExecutionLeaseStore: Send + Sync {
         lease_seconds: u32,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
+    /// Marks an Executing row Unknown only after its PostgreSQL lease has expired.
+    ///
+    /// This operation is a conditional transition, not a claim/retry operation.
+    /// It compares the ToolExecution-owned version and fencing token and uses
+    /// the database clock as the authority for lease expiry. A live lease,
+    /// stale checkpoint or already-transitioned row returns false.
+    fn mark_tool_execution_unknown(
+        &self,
+        scope: &Scope,
+        execution_id: ToolExecutionId,
+        expected_version: u64,
+        expected_fencing_token: ToolExecutionFencingToken,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
     /// Commits a known result under the current ToolExecution lease.
     ///
     /// The caller must first apply the domain state transition to `next`.

@@ -426,7 +426,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: unit transition matrix; DB integration на параллельные leases.
   - DoD: invocation lease и ToolExecution lease не используют общие token/version.
 
-- [ ] **RUST-054 (M)** Реализовать Unknown transition после неоднозначного execution timeout.
+- [x] **RUST-054 (M)** Реализовать Unknown transition после неоднозначного execution timeout.
   - Тесты: unit и DB integration — timeout, expired lease, запрет auto-retry, попытка запрещённого перехода.
   - DoD: Unknown не переходит в повторное выполнение автоматически.
 
