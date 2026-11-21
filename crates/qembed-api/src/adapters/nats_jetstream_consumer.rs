@@ -93,6 +93,15 @@ impl NatsJetStreamConsumerConfig {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DeadLetterSource<'a> {
+    delivery_id: Option<&'a str>,
+    stream: &'a str,
+    consumer: &'a str,
+    sequence: u64,
+    attempt: u32,
+}
+
 /// DLQ envelope preserves exact bytes, including malformed/non-UTF8 payloads.
 #[derive(serde::Serialize)]
 struct DeadLetterEnvelope<'a> {
@@ -136,22 +145,21 @@ impl NatsJetStreamConsumer {
         &self,
         message: &async_nats::jetstream::Message,
         failure: &MessageHandlerError,
-        delivery_id: Option<&str>,
-        stream: &str,
-        consumer: &str,
-        sequence: u64,
-        attempt: u32,
+        source: DeadLetterSource<'_>,
     ) -> Result<(), NatsJetStreamConsumerError> {
-        let dead_letter_id = format!("qembed-dlq-{stream}-{consumer}-{sequence}");
+        let dead_letter_id = format!(
+            "qembed-dlq-{}-{}-{}",
+            source.stream, source.consumer, source.sequence
+        );
         let source_subject = message.subject.to_string();
         let envelope = DeadLetterEnvelope {
             schema_version: 1,
             dead_letter_id: dead_letter_id.clone(),
-            original_delivery_id: delivery_id,
-            source_stream: stream,
-            source_consumer: consumer,
-            source_sequence: sequence,
-            delivery_attempt: attempt,
+            original_delivery_id: source.delivery_id,
+            source_stream: source.stream,
+            source_consumer: source.consumer,
+            source_sequence: source.sequence,
+            delivery_attempt: source.attempt,
             source_subject: &source_subject,
             failure_kind: match failure.kind() {
                 MessageFailureKind::Retryable => "retryable_exhausted",
@@ -166,7 +174,7 @@ impl NatsJetStreamConsumer {
         let mut headers = async_nats::HeaderMap::new();
         headers.append("Nats-Msg-Id", dead_letter_id.as_str());
         headers.append(DEAD_LETTER_ID_HEADER, dead_letter_id.as_str());
-        if let Some(delivery_id) = delivery_id {
+        if let Some(delivery_id) = source.delivery_id {
             headers.append(ORIGINAL_DELIVERY_ID_HEADER, delivery_id);
         }
 
@@ -268,11 +276,13 @@ impl MessageConsumer for NatsJetStreamConsumer {
                             .publish_dead_letter(
                                 &message,
                                 &failure,
-                                delivery_id.as_deref(),
-                                &source_stream,
-                                &source_consumer,
-                                source_sequence,
-                                attempt,
+                                DeadLetterSource {
+                                    delivery_id: delivery_id.as_deref(),
+                                    stream: &source_stream,
+                                    consumer: &source_consumer,
+                                    sequence: source_sequence,
+                                    attempt,
+                                },
                             )
                             .await
                         {
