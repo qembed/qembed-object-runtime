@@ -13,13 +13,19 @@ pub struct NatsJetStreamPublisherError {
 
 impl NatsJetStreamPublisherError {
     fn new(source: impl Error + Send + Sync + 'static) -> Self {
-        Self { source: Box::new(source) }
+        Self {
+            source: Box::new(source),
+        }
     }
 }
 
 impl fmt::Display for NatsJetStreamPublisherError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "NATS JetStream publication failed: {}", self.source)
+        write!(
+            formatter,
+            "NATS JetStream publication failed: {}",
+            self.source
+        )
     }
 }
 
@@ -56,18 +62,16 @@ impl NatsJetStreamPublisher {
 impl MessagePublisher for NatsJetStreamPublisher {
     type Error = NatsJetStreamPublisherError;
 
-    async fn publish(
-        &self,
-        message: OutboundMessage,
-    ) -> Result<PublicationReceipt, Self::Error> {
-        let payload = serde_json::to_vec(message.payload())
-            .map_err(NatsJetStreamPublisherError::new)?;
+    async fn publish(&self, message: OutboundMessage) -> Result<PublicationReceipt, Self::Error> {
+        let payload =
+            serde_json::to_vec(message.payload()).map_err(NatsJetStreamPublisherError::new)?;
         let mut headers = async_nats::HeaderMap::new();
         headers.append("Nats-Msg-Id", message.delivery_id());
 
         // The first await sends the publish; awaiting the returned future waits
         // for JetStream PubAck. The Outbox Relay persists that receipt afterward.
-        let acknowledgement = self.context
+        let acknowledgement = self
+            .context
             .publish_with_headers(message.subject().to_owned(), headers, payload.into())
             .await
             .map_err(NatsJetStreamPublisherError::new)?
