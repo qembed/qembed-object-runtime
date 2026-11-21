@@ -1,5 +1,7 @@
 mod common;
 
+use std::collections::HashSet;
+
 use qembed_store::outbox_dispatcher::PgOutboxDispatcher;
 use qembed_store::run_migrations;
 use sqlx::PgPool;
@@ -69,6 +71,17 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     assert_eq!(second.len(), 1);
     assert_eq!(second[0].attempts(), 2);
     assert_eq!(second[0].claim_token(), 2);
+    assert_eq!(first[0].delivery_id(), second[0].delivery_id());
+
+    // At-least-once consumers use the stable delivery ID as their idempotency key.
+    let mut processed = HashSet::new();
+    let mut side_effects = 0;
+    for delivery in [&first[0], &second[0]] {
+        if processed.insert(delivery.delivery_id().to_owned()) {
+            side_effects += 1;
+        }
+    }
+    assert_eq!(side_effects, 1);
 
     assert!(!dispatcher.acknowledge(&first[0], "worker-a").await.expect("stale ack is rejected"));
     assert!(dispatcher.acknowledge(&second[0], "worker-b").await.expect("current ack succeeds"));
