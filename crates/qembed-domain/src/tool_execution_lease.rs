@@ -8,6 +8,18 @@ use crate::ids::ToolExecutionId;
 use crate::scope::Scope;
 use crate::tool_execution::{ToolExecution, ToolExecutionFencingToken};
 
+/// Inputs for an atomic ToolExecution result write.
+#[derive(Debug)]
+pub struct ToolExecutionCompletion {
+    pub execution_id: ToolExecutionId,
+    pub owner: String,
+    pub expected_version: u64,
+    pub expected_fencing_token: ToolExecutionFencingToken,
+    pub next: ToolExecution,
+    pub output: Option<Value>,
+    pub output_ttl_seconds: Option<u32>,
+}
+
 /// Persistence boundary for one independently leased tool command.
 ///
 /// Every mutation is scoped to the trusted tenant and must atomically compare
@@ -58,12 +70,6 @@ pub trait ToolExecutionLeaseStore: Send + Sync {
     fn complete_tool_execution(
         &self,
         scope: &Scope,
-        execution_id: ToolExecutionId,
-        owner: &str,
-        expected_version: u64,
-        expected_fencing_token: ToolExecutionFencingToken,
-        next: ToolExecution,
-        output: Option<Value>,
-        output_ttl_seconds: Option<u32>,
+        completion: ToolExecutionCompletion,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
