@@ -2,9 +2,9 @@ mod common;
 
 use std::collections::HashSet;
 
+use qembed_domain::ports::PublicationReceipt;
 use qembed_store::outbox_dispatcher::PgOutboxDispatcher;
 use qembed_store::run_migrations;
-use qembed_domain::ports::PublicationReceipt;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -198,8 +198,18 @@ async fn independent_dispatchers_claim_disjoint_rows() {
     assert_eq!(b.len(), 1);
     assert_ne!(a[0].delivery_id(), b[0].delivery_id());
 
-    assert!(first.acknowledge(&a[0], "worker-a", receipt()).await.expect("ack A"));
-    assert!(second.acknowledge(&b[0], "worker-b", receipt()).await.expect("ack B"));
+    assert!(
+        first
+            .acknowledge(&a[0], "worker-a", receipt())
+            .await
+            .expect("ack A")
+    );
+    assert!(
+        second
+            .acknowledge(&b[0], "worker-b", receipt())
+            .await
+            .expect("ack B")
+    );
     pool.close().await;
 }
 
