@@ -12,7 +12,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.100"
 license = "UNLICENSED"
 
 [workspace.dependencies]
@@ -25,7 +25,7 @@ sha2 = "=0.10.8"
 uuid = { version = "=1.16.0", features = ["serde", "v4"] }
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "uuid"] }
 tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
-# Keep SQLx's transitive URL/IDNA stack compatible with Rust 1.85.
+# Keep SQLx's transitive URL/IDNA stack on the audited versions.
 home = "=0.5.11"
 idna_adapter = "=1.2.1"
 icu_collections = "=2.1.1"
