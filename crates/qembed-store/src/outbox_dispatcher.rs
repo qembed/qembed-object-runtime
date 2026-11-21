@@ -5,8 +5,8 @@
 
 use std::fmt;
 
+use qembed_domain::ports::{OutboundMessage, OutboxDeliveryStore, PublicationReceipt};
 use serde_json::Value;
-use qembed_domain::ports::{OutboxDeliveryStore, OutboundMessage, PublicationReceipt};
 use sqlx::{FromRow, PgPool, Row, postgres::PgRow};
 
 /// A delivery projection; deliberately excludes event and aggregate internals.
@@ -85,7 +85,9 @@ impl fmt::Display for OutboxDispatcherError {
             Self::InvalidLeaseDuration => {
                 f.write_str("outbox lease must be between 1 and 3600 seconds")
             }
-            Self::InvalidPublicationReceipt => f.write_str("publication receipt is incomplete or invalid"),
+            Self::InvalidPublicationReceipt => {
+                f.write_str("publication receipt is incomplete or invalid")
+            }
             Self::Database(error) => write!(f, "outbox database operation failed: {error}"),
         }
     }
@@ -202,7 +204,10 @@ impl PgOutboxDispatcher {
         .bind(owner)
         .bind(delivery.claim_token)
         .bind(receipt.stream())
-        .bind(i64::try_from(receipt.sequence()).map_err(|_| OutboxDispatcherError::InvalidPublicationReceipt)?)
+        .bind(
+            i64::try_from(receipt.sequence())
+                .map_err(|_| OutboxDispatcherError::InvalidPublicationReceipt)?,
+        )
         .bind(receipt.duplicate())
         .execute(&mut *transaction)
         .await
@@ -250,7 +255,6 @@ impl PgOutboxDispatcher {
         Ok(result.rows_affected() == 1)
     }
 }
-
 
 impl OutboxDeliveryStore for PgOutboxDispatcher {
     type Delivery = OutboxDelivery;
