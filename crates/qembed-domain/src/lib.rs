@@ -126,6 +126,7 @@ pub mod scope;
 pub mod snapshot;
 pub mod tool_execution;
 pub mod tool_execution_lease;
+pub mod tool_execution_reconciliation;
 
 /// Test-only constructors for integration tests in adapter crates.
 ///
