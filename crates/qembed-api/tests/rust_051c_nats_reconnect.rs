@@ -12,7 +12,13 @@ use uuid::Uuid;
 
 fn compose(args: &[&str]) {
     let status = Command::new("docker")
-        .args(["compose", "--project-name", "qembed-rust-test", "--file", "compose.test.yaml"])
+        .args([
+            "compose",
+            "--project-name",
+            "qembed-rust-test",
+            "--file",
+            "compose.test.yaml",
+        ])
         .args(args)
         .status()
         .expect("Docker Compose is available");
@@ -77,6 +83,9 @@ async fn existing_async_nats_client_reconnects_after_server_restart() {
     .expect("existing client reconnects and receives PubAck");
 
     assert_eq!(publish.stream(), stream.cached_info().config.name);
-    let info = stream.get_info().await.expect("stream remains available after restart");
+    let info = stream
+        .get_info()
+        .await
+        .expect("stream remains available after restart");
     assert_eq!(info.state.messages, 1);
 }

@@ -1,7 +1,6 @@
 use std::{
     error::Error,
-    fmt,
-    io,
+    fmt, io,
     process::Command,
     thread,
     sync::atomic::{AtomicBool, Ordering},
@@ -32,7 +31,11 @@ async fn database() -> PgPool {
     pool
 }
 
-async fn jetstream() -> (NatsJetStreamPublisher, async_nats::jetstream::stream::Stream, String) {
+async fn jetstream() -> (
+    NatsJetStreamPublisher,
+    async_nats::jetstream::stream::Stream,
+    String,
+) {
     let url = std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
     let client = async_nats::connect(url)
         .await
@@ -92,7 +95,12 @@ async fn enqueue(pool: &PgPool, topic: &str) -> (String, String) {
     (tenant_id.to_string(), delivery_id.to_string())
 }
 
-fn relay_config(owner: &str, subject: &str, batch_size: u16, lease_seconds: u32) -> OutboxRelayConfig {
+fn relay_config(
+    owner: &str,
+    subject: &str,
+    batch_size: u16,
+    lease_seconds: u32,
+) -> OutboxRelayConfig {
     OutboxRelayConfig::new(owner, subject, batch_size, lease_seconds).expect("valid relay config")
 }
 
@@ -116,7 +124,11 @@ async fn stream_message_count(stream: &async_nats::jetstream::stream::Stream) ->
         .messages
 }
 
-async fn publication_state(pool: &PgPool, tenant_id: &str, delivery_id: &str) -> (bool, Option<i64>, i64) {
+async fn publication_state(
+    pool: &PgPool,
+    tenant_id: &str,
+    delivery_id: &str,
+) -> (bool, Option<i64>, i64) {
     let row: (bool, Option<i64>, i64) = sqlx::query_as(
         "SELECT delivered_at IS NOT NULL, publication_sequence, (SELECT count(*) FROM outbox_publication_receipts WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid) FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
     )
@@ -167,7 +179,12 @@ impl OutboxDeliveryStore for FailReceiptOnceStore {
         lease_seconds: u32,
     ) -> Result<Vec<Self::Delivery>, Self::Error> {
         self.inner
-            .claim_batch(owner, topic, i64::from(batch_size), i64::from(lease_seconds))
+            .claim_batch(
+                owner,
+                topic,
+                i64::from(batch_size),
+                i64::from(lease_seconds),
+            )
             .await
             .map_err(|_| InjectedStoreError("claim failed"))
     }
@@ -187,7 +204,9 @@ impl OutboxDeliveryStore for FailReceiptOnceStore {
         receipt: PublicationReceipt,
     ) -> Result<bool, Self::Error> {
         if self.fail_once.swap(false, Ordering::SeqCst) {
-            return Err(InjectedStoreError("injected failure before PostgreSQL receipt write"));
+            return Err(InjectedStoreError(
+                "injected failure before PostgreSQL receipt write",
+            ));
         }
         self.inner
             .acknowledge(delivery, owner, receipt)
@@ -195,11 +214,7 @@ impl OutboxDeliveryStore for FailReceiptOnceStore {
             .map_err(|_| InjectedStoreError("receipt persistence failed"))
     }
 
-    async fn release(
-        &self,
-        delivery: &Self::Delivery,
-        owner: &str,
-    ) -> Result<bool, Self::Error> {
+    async fn release(&self, delivery: &Self::Delivery, owner: &str) -> Result<bool, Self::Error> {
         self.inner
             .release(delivery, owner)
             .await
@@ -215,17 +230,16 @@ struct PublishThenLoseAckOnce {
 impl MessagePublisher for PublishThenLoseAckOnce {
     type Error = io::Error;
 
-    async fn publish(
-        &self,
-        message: OutboundMessage,
-    ) -> Result<PublicationReceipt, Self::Error> {
+    async fn publish(&self, message: OutboundMessage) -> Result<PublicationReceipt, Self::Error> {
         let receipt = self
             .inner
             .publish(message)
             .await
             .map_err(|error| io::Error::other(error.to_string()))?;
         if self.fail_once.swap(false, Ordering::SeqCst) {
-            return Err(io::Error::other("injected lost PubAck after server acceptance"));
+            return Err(io::Error::other(
+                "injected lost PubAck after server acceptance",
+            ));
         }
         Ok(receipt)
     }
@@ -262,7 +276,10 @@ async fn crash_after_claim_before_publish_reclaims_same_delivery() {
     assert_eq!(outcome.claimed, 1);
     assert_eq!(outcome.published, 1);
     assert_eq!(stream_message_count(&stream).await, 1);
-    assert_eq!(publication_state(&pool, &tenant_id, &delivery_id).await, (true, Some(1), 1));
+    assert_eq!(
+        publication_state(&pool, &tenant_id, &delivery_id).await,
+        (true, Some(1), 1)
+    );
     assert!(!publication_duplicate(&pool, &tenant_id, &delivery_id).await);
     pool.close().await;
 }
@@ -283,7 +300,10 @@ async fn publish_accepted_but_puback_lost_retries_with_same_id_and_jetstream_ded
         ambiguous,
         relay_config("relay-a", &subject, 10, 30),
     );
-    let first_outcome = first.run_once().await.expect("transport failure is released");
+    let first_outcome = first
+        .run_once()
+        .await
+        .expect("transport failure is released");
     assert_eq!(first_outcome.publish_failed, 1);
     assert_eq!(first_outcome.published, 0);
 
@@ -320,7 +340,10 @@ async fn puback_before_postgres_receipt_failure_replays_same_delivery_id() {
         "the injected PostgreSQL receipt write fails after JetStream PubAck"
     );
     assert_eq!(stream_message_count(&stream).await, 1);
-    assert_eq!(publication_state(&pool, &tenant_id, &delivery_id).await, (false, None, 0));
+    assert_eq!(
+        publication_state(&pool, &tenant_id, &delivery_id).await,
+        (false, None, 0)
+    );
 
     expire_lease(&pool, &tenant_id, &delivery_id).await;
     let retry = OutboxRelay::new(
