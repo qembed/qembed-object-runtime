@@ -8,6 +8,7 @@ fi
 
 compose=(docker compose --project-name qembed-rust-test --file compose.test.yaml)
 export DATABASE_URL="${DATABASE_URL:-postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test}"
+export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 mkdir -p "$evidence_dir"
 
@@ -55,3 +56,6 @@ if cargo nextest --version >/dev/null 2>&1; then
 else
   cargo test --workspace 2>&1 | tee "$evidence_dir/cargo-test.log"
 fi
+
+cargo test -p qembed-api --test rust_051c_nats_reconnect -- --ignored --test-threads=1 2>&1 \
+  | tee "$evidence_dir/nats-reconnect.log"
