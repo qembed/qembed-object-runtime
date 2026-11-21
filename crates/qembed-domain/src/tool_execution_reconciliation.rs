@@ -28,26 +28,47 @@ impl ToolExecutionReconciliationRequest {
         expected_version: u64,
         expected_fencing_token: ToolExecutionFencingToken,
     ) -> Self {
-        Self { execution_id, invocation_id, command_id, expected_version, expected_fencing_token }
+        Self {
+            execution_id,
+            invocation_id,
+            command_id,
+            expected_version,
+            expected_fencing_token,
+        }
     }
 
     #[must_use]
-    pub const fn execution_id(&self) -> ToolExecutionId { self.execution_id }
+    pub const fn execution_id(&self) -> ToolExecutionId {
+        self.execution_id
+    }
     #[must_use]
-    pub const fn invocation_id(&self) -> InvocationId { self.invocation_id }
+    pub const fn invocation_id(&self) -> InvocationId {
+        self.invocation_id
+    }
     #[must_use]
-    pub const fn command_id(&self) -> CommandId { self.command_id }
+    pub const fn command_id(&self) -> CommandId {
+        self.command_id
+    }
     #[must_use]
-    pub const fn expected_version(&self) -> u64 { self.expected_version }
+    pub const fn expected_version(&self) -> u64 {
+        self.expected_version
+    }
     #[must_use]
-    pub const fn expected_fencing_token(&self) -> ToolExecutionFencingToken { self.expected_fencing_token }
+    pub const fn expected_fencing_token(&self) -> ToolExecutionFencingToken {
+        self.expected_fencing_token
+    }
 }
 
 /// Evidence-backed assessment of the external side effect.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ToolExecutionReconciliationOutcome {
-    ConfirmedSucceeded { output: Option<Value>, output_ttl_seconds: Option<u32> },
-    ConfirmedFailed { evidence: Option<Value> },
+    ConfirmedSucceeded {
+        output: Option<Value>,
+        output_ttl_seconds: Option<u32>,
+    },
+    ConfirmedFailed {
+        evidence: Option<Value>,
+    },
     /// The provider cannot yet prove either success or failure.
     Unresolved,
 }
