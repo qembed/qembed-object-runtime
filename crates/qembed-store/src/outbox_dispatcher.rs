@@ -177,6 +177,9 @@ impl PgOutboxDispatcher {
             return Err(OutboxDispatcherError::InvalidPublicationReceipt);
         }
 
+        let publication_sequence = i64::try_from(receipt.sequence())
+            .map_err(|_| OutboxDispatcherError::InvalidPublicationReceipt)?;
+
         let mut transaction = self
             .pool
             .begin()
@@ -204,20 +207,34 @@ impl PgOutboxDispatcher {
         .bind(owner)
         .bind(delivery.claim_token)
         .bind(receipt.stream())
-        .bind(
-            i64::try_from(receipt.sequence())
-                .map_err(|_| OutboxDispatcherError::InvalidPublicationReceipt)?,
-        )
+        .bind(publication_sequence)
         .bind(receipt.duplicate())
         .execute(&mut *transaction)
         .await
         .map_err(OutboxDispatcherError::Database)?;
 
+        let acknowledged = result.rows_affected() == 1;
+        if acknowledged {
+            sqlx::query(
+                "INSERT INTO outbox_publication_receipts
+                    (tenant_id, delivery_id, publication_stream, publication_sequence, publication_duplicate)
+                 VALUES ($1::uuid, $2::uuid, $3, $4, $5)",
+            )
+            .bind(&delivery.tenant_id)
+            .bind(&delivery.delivery_id)
+            .bind(receipt.stream())
+            .bind(publication_sequence)
+            .bind(receipt.duplicate())
+            .execute(&mut *transaction)
+            .await
+            .map_err(OutboxDispatcherError::Database)?;
+        }
+
         transaction
             .commit()
             .await
             .map_err(OutboxDispatcherError::Database)?;
-        Ok(result.rows_affected() == 1)
+        Ok(acknowledged)
     }
 
     /// Releases a failed delivery for later redelivery without changing its token.
