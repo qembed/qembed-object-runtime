@@ -183,12 +183,13 @@ async fn entity_identifiers_may_repeat_across_tenants_without_cross_linking() {
             .fetch_one(&pool)
             .await
             .expect("object count should be readable");
-    let version_count: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM object_versions WHERE object_version_id = $1::uuid")
-            .bind(version_id.to_string())
-            .fetch_one(&pool)
-            .await
-            .expect("version count should be readable");
+    let version_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM object_versions WHERE object_version_id = $1::uuid",
+    )
+    .bind(version_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("version count should be readable");
     let snapshot_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM snapshots WHERE snapshot_id = $1::uuid")
             .bind(snapshot_id.to_string())
