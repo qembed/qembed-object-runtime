@@ -52,7 +52,10 @@ mod tests {
 
         let command_id = derive_command_id(invocation_id, 7, &action_hash);
 
-        assert_eq!(command_id.to_string(), "51838ecd-f956-5415-b688-d7da15e41699");
+        assert_eq!(
+            command_id.to_string(),
+            "51838ecd-f956-5415-b688-d7da15e41699"
+        );
     }
 
     #[test]
@@ -65,7 +68,10 @@ mod tests {
 
         // A restarted process reconstructs only the durable input values.
         let restored_invocation_id = InvocationId::from_uuid(
-            invocation_uuid.to_string().parse().expect("persisted UUID parses"),
+            invocation_uuid
+                .to_string()
+                .parse()
+                .expect("persisted UUID parses"),
         );
         let after_restart = derive_command_id(restored_invocation_id, 12, &action_hash);
 
