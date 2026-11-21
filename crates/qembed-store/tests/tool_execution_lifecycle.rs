@@ -11,9 +11,7 @@ use qembed_domain::{
     tool_execution_lease::ToolExecutionLeaseStore,
 };
 use qembed_store::{
-    invocation_worker::PgExecutionStore,
-    run_migrations,
-    tool_execution_store::PgToolExecutionStore,
+    invocation_worker::PgExecutionStore, run_migrations, tool_execution_store::PgToolExecutionStore,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -193,7 +191,12 @@ async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
     let fixture = setup().await;
     let invocation_store = PgExecutionStore::new(fixture.pool.clone());
     let invocation = invocation_store
-        .claim_invocation(&fixture.scope, fixture.invocation_id, "invocation-worker", 60)
+        .claim_invocation(
+            &fixture.scope,
+            fixture.invocation_id,
+            "invocation-worker",
+            60,
+        )
         .await
         .expect("Invocation lease claim succeeds")
         .expect("Invocation is claimable");
@@ -216,7 +219,10 @@ async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
         .await
         .expect("a stale/missing ToolExecution lease is a CAS miss");
 
-    assert!(!wrote, "Invocation ownership must not authorize ToolExecution writes");
+    assert!(
+        !wrote,
+        "Invocation ownership must not authorize ToolExecution writes"
+    );
 
     let persisted = tool_store
         .load_tool_execution(&fixture.scope, fixture.execution_id)
@@ -329,13 +335,12 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
     assert_eq!(persisted.fencing_token(), claimed.fencing_token());
     assert_eq!(persisted.lease_owner(), None);
 
-    let row: (serde_json::Value, Option<String>) = sqlx::query_as(
-        "SELECT output, output_expires_at::text FROM tool_executions WHERE id=$1",
-    )
-    .bind(fixture.execution_id.into_uuid())
-    .fetch_one(&fixture.pool)
-    .await
-    .expect("persisted output and expiry exist");
+    let row: (serde_json::Value, Option<String>) =
+        sqlx::query_as("SELECT output, output_expires_at::text FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("persisted output and expiry exist");
     assert_eq!(row.0, serde_json::json!({"accepted":true}));
     assert!(row.1.is_some());
 
