@@ -205,19 +205,37 @@ async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
     assert_eq!(invocation.fencing_token().value(), 0);
 
     let tool_store = PgToolExecutionStore::new(fixture.pool.clone());
+    let mut unpersisted_claim = tool_store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("ToolExecution can be loaded")
+        .expect("ToolExecution exists");
+    unpersisted_claim
+        .claim("invocation-worker")
+        .expect("the domain state machine can prepare a local claim");
+    let expected_version = unpersisted_claim.version();
+    let tool_fencing_token = unpersisted_claim.fencing_token();
+    unpersisted_claim
+        .complete(
+            "invocation-worker",
+            tool_fencing_token,
+            ToolExecutionOutcome::Succeeded,
+        )
+        .expect("the local state machine can prepare a result");
+
     let wrote = tool_store
         .complete_tool_execution(
             &fixture.scope,
             fixture.execution_id,
             "invocation-worker",
-            0,
-            ToolExecutionFencingToken::INITIAL,
-            ToolExecutionOutcome::Succeeded,
+            expected_version,
+            tool_fencing_token,
+            unpersisted_claim,
             Some(serde_json::json!({"result":"forbidden"})),
             Some(60),
         )
         .await
-        .expect("a stale/missing ToolExecution lease is a CAS miss");
+        .expect("a missing persisted ToolExecution lease is a CAS miss");
 
     assert!(
         !wrote,
@@ -293,6 +311,14 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
     );
 
     let output = serde_json::json!({"accepted":true});
+    let mut next = claimed.clone();
+    next.complete(
+        owner,
+        claimed.fencing_token(),
+        ToolExecutionOutcome::Succeeded,
+    )
+    .expect("domain state machine accepts the current lease owner's result");
+
     assert!(
         store
             .complete_tool_execution(
@@ -301,7 +327,7 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
                 owner,
                 claimed.version(),
                 claimed.fencing_token(),
-                ToolExecutionOutcome::Succeeded,
+                next.clone(),
                 Some(output.clone()),
                 Some(3600),
             )
@@ -317,7 +343,7 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
                 owner,
                 claimed.version(),
                 claimed.fencing_token(),
-                ToolExecutionOutcome::Succeeded,
+                next,
                 Some(output),
                 Some(3600),
             )
