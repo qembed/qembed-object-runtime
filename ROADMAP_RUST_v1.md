@@ -379,9 +379,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Evidence: run [#44811246397](https://github.com/qembed/qembed-object-runtime/actions/runs/44811246397), exact HEAD `1304b9c99096c7251c43edaca6623ab933d05db0`; PostgreSQL 15.20/16.16/19.0 + pgvector 0.8.7; 212/212 workspace tests passed per version; Rust 1.85 MSRV passed. Artifacts are linked in `docs/RUST-049_M1A_TEST_EVIDENCE.md`.
   - DoD: JUnit/nextest reports, DB/pgvector metadata, full logs and concurrency results are reproducible from CI artifacts.
 
-- [ ] **RUST-050 (XS)** Зафиксировать M1a completion и обновить roadmap.
-  - Тесты: повторный полный CI run на release commit.
-  - DoD: закрытые тесты и известные ограничения перечислены в release note.
+- [x] **RUST-050 (XS)** Зафиксировать M1a completion и обновить roadmap.
+  - Release note: [M1a release notes](docs/M1A_RELEASE_NOTES.md) перечисляет закрытые задачи RUST-045…049, acceptance/CI evidence, известные ограничения и границы defect review.
+  - Release gate: полный CI workflow должен быть зелёным на точном RUST-050 release commit; SHA и run зафиксированы в PR #73.
+  - DoD: применимые M1a acceptance cases и обязательные Rust/DB suites подтверждены; M2 и production-lifecycle ограничения явно сохранены.
 
 **M1a Definition of Done:** walking skeleton работает end-to-end; все применимые M1a acceptance tests зелёные; unit, integration, DB integration и compile-fail suites проходят; нет открытых Critical/High дефектов в реализованном Rust path без formal waiver.
 
