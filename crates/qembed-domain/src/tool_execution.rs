@@ -306,6 +306,30 @@ impl ToolExecution {
         Ok(())
     }
 
+    /// Applies a confirmed reconciliation result to an Unknown execution.
+    ///
+    /// Persistence must atomically compare the expected version and fencing token
+    /// and require pending reconciliation before storing the terminal state.
+    pub fn reconcile(
+        &mut self,
+        outcome: crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome,
+    ) -> Result<(), ToolExecutionError> {
+        let next = match outcome {
+            crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome::ConfirmedSucceeded { .. } => ToolExecutionStatus::Succeeded,
+            crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome::ConfirmedFailed { .. } => ToolExecutionStatus::Failed,
+            crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome::Unresolved => {
+                return Err(ToolExecutionError::UnresolvedReconciliation);
+            }
+        };
+        if self.status != ToolExecutionStatus::Unknown || self.lease_owner.is_some() {
+            return Err(ToolExecutionError::InvalidTransition { from: self.status, to: next });
+        }
+        self.ensure_transition(next)?;
+        self.version = self.version.checked_add(1).ok_or(ToolExecutionError::VersionOverflow)?;
+        self.status = next;
+        Ok(())
+    }
+
     /// Marks an execution Unknown after PostgreSQL has confirmed its lease expired.
     ///
     /// This is deliberately not a retry transition. The persistence adapter must
