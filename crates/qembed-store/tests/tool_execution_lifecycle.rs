@@ -391,3 +391,34 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
 
     fixture.pool.close().await;
 }
+
+#[tokio::test]
+async fn tool_execution_persistence_grants_match_the_runtime_capabilities() {
+    let pool = common::connect().await;
+    run_migrations(&pool)
+        .await
+        .expect("all store migrations should apply");
+
+    let privileges: (bool, bool, bool, bool, bool, bool, bool, bool) = sqlx::query_as(
+        "SELECT
+            has_table_privilege('qembed_runtime', 'tool_executions', 'SELECT'),
+            has_table_privilege('qembed_runtime', 'tool_executions', 'INSERT'),
+            has_table_privilege('qembed_runtime', 'tool_executions', 'UPDATE'),
+            has_table_privilege('qembed_definer', 'tool_executions', 'SELECT'),
+            has_table_privilege('qembed_definer', 'tool_executions', 'UPDATE'),
+            has_table_privilege('qembed_dispatcher', 'tool_executions', 'SELECT'),
+            has_table_privilege('qembed_admin', 'tool_executions', 'SELECT'),
+            has_table_privilege('qembed_runtime', 'policy_decisions', 'UPDATE')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("ToolExecution capability grants are queryable");
+
+    assert_eq!(
+        privileges,
+        (true, true, true, true, true, false, false, false),
+        "runtime owns execution writes; definer supports retention; unrelated roles cannot access executions"
+    );
+
+    pool.close().await;
+}
