@@ -9,6 +9,8 @@
 
 ## 1. Принципы разработки
 
+**Toolchain policy (2026-11-21):** проект использует Rust 1.100.0 как локальный toolchain и MSRV. Версия закреплена в `rust-toolchain.toml`, `[workspace.package].rust-version` и CI. Обновление Rust выполняется отдельным изменением с полным PostgreSQL 15/16/19 test matrix.
+
 1. Этот roadmap описывает только Rust-реализацию. SQL remediation, исправление схемы, эксплуатационные и юридические работы сюда не входят.
 2. Архитектура M0 и шесть crates считаются зафиксированными:
    - `qembed-domain`
@@ -331,7 +333,7 @@ SQLX_OFFLINE=true cargo check --workspace
 - [x] **RUST-044-T (M)** Перейти с Actix-web на Axum + Tower до реализации оставшихся Owner API endpoints.
   - Основание: Owner API ещё небольшой; миграция до добавления оставшихся endpoints сокращает повторную работу и удерживает единый HTTP stack.
   - Архитектурное решение: Axum — HTTP router/handler framework; Tower — service/middleware layer. Сохранить HTTP/JSON Owner API и текущие auth/tenant boundaries. Connect/gRPC/Protobuf в эту задачу не входят и требуют отдельного ADR/решения.
-  - MSRV: workspace minimum Rust 1.85; CI проверяет Rust 1.85 и актуальный stable. Возможное изменение MSRV рассматривается отдельно, при появлении конкретной зависимости или отдельного архитектурного решения.
+  - MSRV: workspace minimum Rust 1.100.0; `rust-toolchain.toml` фиксирует Rust 1.100.0, а CI запускает весь основной matrix на той же версии. Исторические записи о Rust 1.85 ниже относятся к фактически выполненным M1a PR и CI runs.
   - Реализация: заменить Actix routing, extractors, middleware и composition wiring на Axum + Tower; перенести health/readiness и Owner routes; убрать actix-web из workspace dependencies и crates; сохранить rust-version 1.85 и существующий MSRV CI.
   - Сохранить без изменения публичные HTTP contracts: paths, methods, headers, status codes, DTOs, error codes, response minimization, Bearer auth и недоверенный X-Tenant-ID selector. Не переносить SQLx или бизнес-логику в handlers/middleware.
   - Тесты: Axum router/service integration для каждого endpoint; auth/tenant negative cases; health/readiness behavior; serialization/error mapping; реальные PostgreSQL API integration tests остаются на PostgreSQL и не заменяются router mocks.
