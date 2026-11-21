@@ -32,7 +32,7 @@ GRANT UPDATE (replay_requested_at, replay_reason, replay_count)
 
 GRANT SELECT (replay_requested_at, replay_reason, replay_count)
     ON outbox_messages TO qembed_dispatcher;
-GRANT UPDATE (replay_requested_at, replay_reason, replay_count)
+GRANT UPDATE (replay_requested_at, replay_reason)
     ON outbox_messages TO qembed_dispatcher;
 
 CREATE FUNCTION sweep_stale_invocation_deliveries(
