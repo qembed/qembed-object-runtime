@@ -439,9 +439,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: фиксированный UUIDv5 vector; восстановление входов после restart; различие ID для разных invocation, step и action.
   - DoD: один и тот же logical command получает одинаковый ID после рестарта.
 
-- [ ] **RUST-057 (M)** Реализовать конкурентные budget reservations.
-  - Тесты: DB integration с параллельными транзакциями; overspend race; rollback; duplicate idempotency.
-  - DoD: совокупный reserve не превышает effective budget.
+- [x] **RUST-057 (M)** Реализовать и проверить конкурентные budget reservations.
+  - Сериализация: каждая reservation блокирует tenant/object row в `object_budgets` через `FOR UPDATE` до проверки aggregate usage, caller usage и concurrency ceiling; счётчики и reservation записываются в той же транзакции.
+  - Тесты: две независимые PostgreSQL sessions одновременно резервируют один оставшийся daily budget — ровно одна транзакция проходит; конкурентный одинаковый idempotency key даёт один Created и один Replay; downstream failure после reservation откатывает reservation и оба счётчика.
+  - DoD: совокупный consumed + reserved usage не превышает effective object/caller budget; replay не создаёт вторую reservation.
 
 - [ ] **RUST-058 (S)** Реализовать distributed rate limiting и pool isolation.
   - Тесты: concurrency tests на несколько workers; fairness tests для Anonymous/Authenticated/Owner.
