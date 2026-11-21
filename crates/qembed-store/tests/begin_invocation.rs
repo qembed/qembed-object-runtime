@@ -177,7 +177,8 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
     let pool_schema = schema.clone();
     let pool = PgPoolOptions::new()
-        .max_connections(1)
+        // Concurrency regression tests must use independent PostgreSQL sessions.
+        .max_connections(8)
         .after_connect(move |connection, _| {
             let schema = pool_schema.clone();
             Box::pin(async move {
@@ -2782,6 +2783,153 @@ async fn one_thousand_invocations_of_one_configuration_pin_the_same_snapshot() {
     .expect("invocation snapshot pins should be queryable");
     assert_eq!(pinned_snapshots, 1);
     assert_eq!(counts(&fixture).await, (1_000, 1_000, 1_000, 1_000, 1_000));
+
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
+    let fixture = setup(None).await;
+    let input = command(&fixture, "budget-race-a").input_message;
+    let estimate = qembed_domain::budget::estimate_input_tokens(input.len())
+        .expect("fixture input estimate should fit");
+    sqlx::query(
+        "UPDATE object_budgets SET daily_token_limit=$3, per_caller_daily_token_limit=100000 WHERE tenant_id=$1::uuid AND object_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .bind(i64::try_from(estimate).expect("estimate fits bigint"))
+    .execute(&fixture.pool)
+    .await
+    .expect("tight object budget should be installed");
+
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let pool_a = fixture.pool.clone();
+    let pool_b = fixture.pool.clone();
+    let scope_a = fixture.scope;
+    let scope_b = fixture.scope;
+    let command_a = command(&fixture, "budget-race-a");
+    let command_b = command(&fixture, "budget-race-b");
+    let barrier_a = barrier.clone();
+    let barrier_b = barrier;
+
+    let task_a = tokio::spawn(async move {
+        barrier_a.wait().await;
+        begin_invocation(&pool_a, &scope_a, command_a).await
+    });
+    let task_b = tokio::spawn(async move {
+        barrier_b.wait().await;
+        begin_invocation(&pool_b, &scope_b, command_b).await
+    });
+
+    let result_a = task_a.await.expect("first PostgreSQL task should finish");
+    let result_b = task_b.await.expect("second PostgreSQL task should finish");
+    let results = [result_a, result_b];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(BeginInvocationOutcome::Created { .. })))
+            .count(),
+        1,
+        "exactly one competing reservation may consume the remaining daily budget"
+    );
+    assert!(
+        results.iter().any(|result| matches!(
+            result,
+            Err(BeginInvocationError::Budget(
+                BudgetReservationError::Rejected(BudgetRejection::ObjectDailyLimit)
+            ))
+        )),
+        "the losing transaction must be rejected by the object daily ceiling"
+    );
+
+    let reserved: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum(consumed_tokens + reserved_tokens), 0)::bigint FROM usage_counters WHERE tenant_id=$1::uuid AND object_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("object usage should be readable");
+    assert_eq!(
+        reserved,
+        i64::try_from(estimate).expect("estimate fits bigint")
+    );
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("reservation count");
+    assert_eq!(
+        reservations, 1,
+        "rejected transaction leaves no reservation"
+    );
+
+    teardown(fixture).await;
+}
+
+#[tokio::test]
+async fn concurrent_duplicate_idempotency_claim_creates_only_one_reservation() {
+    let fixture = setup(None).await;
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let pool_a = fixture.pool.clone();
+    let pool_b = fixture.pool.clone();
+    let scope_a = fixture.scope;
+    let scope_b = fixture.scope;
+    let command_a = command(&fixture, "same-concurrent-key");
+    let command_b = command(&fixture, "same-concurrent-key");
+    let barrier_a = barrier.clone();
+    let barrier_b = barrier;
+
+    let task_a = tokio::spawn(async move {
+        barrier_a.wait().await;
+        begin_invocation(&pool_a, &scope_a, command_a).await
+    });
+    let task_b = tokio::spawn(async move {
+        barrier_b.wait().await;
+        begin_invocation(&pool_b, &scope_b, command_b).await
+    });
+
+    let result_a = task_a.await.expect("first PostgreSQL task should finish");
+    let result_b = task_b.await.expect("second PostgreSQL task should finish");
+    let results = [result_a, result_b];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(BeginInvocationOutcome::Created { .. })))
+            .count(),
+        1,
+        "one transaction must own the idempotency claim"
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(BeginInvocationOutcome::Replay { .. })))
+            .count(),
+        1,
+        "the competing transaction must replay the committed invocation"
+    );
+    let created_id = results
+        .iter()
+        .find_map(|result| match result {
+            Ok(BeginInvocationOutcome::Created { invocation_id, .. }) => Some(*invocation_id),
+            _ => None,
+        })
+        .expect("one transaction should create the invocation");
+    assert!(
+        results.iter().any(|result| matches!(
+            result,
+            Ok(BeginInvocationOutcome::Replay { invocation_id }) if *invocation_id == created_id
+        )),
+        "replay must return the exact invocation created by the winner"
+    );
+
+    assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("reservation count");
+    assert_eq!(reservations, 1, "idempotent replay must not reserve twice");
 
     teardown(fixture).await;
 }

@@ -33,6 +33,16 @@ The idempotency claim is checked before budget reservation. A matching replay re
 
 Provider/network I/O is deliberately outside this transaction. It may begin only after the transaction commits and `begin_invocation` returns `Created`.
 
+## Concurrency regression evidence
+
+The serialization guarantee is exercised against two independent PostgreSQL sessions, not a single pooled connection:
+
+- Two different idempotency keys race for a daily object budget that can fund exactly one estimate. Exactly one begin transaction may commit; the other must receive the object daily-limit rejection. The persisted aggregate (consumed + reserved) must remain at or below the limit.
+- Two concurrent requests with the same effective Caller, object, key, and payload must produce one `Created` and one `Replay` for the same InvocationId, with exactly one reservation and one counter increment.
+- A failure after the reservation step (for example, invocation-row insertion failure) rolls back the reservation, object counter, caller counter, idempotency claim, and other begin rows together.
+
+These tests validate the database serialization point described above. They do not replace the broader multi-worker concurrency suite tracked by RUST-063.
+
 ## Pool attribution and anonymous share
 
 The pool (`anonymous` or `authenticated`) is retained in `budget_reservations` and `usage_counters` for attribution. The object daily token ceiling is shared across both pools. The runtime does not read or enforce `anonymous_share_pct`; it is intentionally excluded from this policy until a separate contract defines its semantics.
