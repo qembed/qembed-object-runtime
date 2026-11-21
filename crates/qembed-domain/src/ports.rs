@@ -6,6 +6,8 @@
 
 use std::error::Error;
 use std::future::Future;
+use std::pin::Pin;
+use std::time::Duration;
 
 use crate::caller::InvocationPool;
 use crate::chat::{
@@ -414,6 +416,77 @@ impl PublicationReceipt {
     pub const fn duplicate(&self) -> bool {
         self.duplicate
     }
+}
+
+/// A message received from the durable transport. Its delivery identity is
+/// supplied by the trusted publisher header, not inferred from payload fields.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InboundMessage {
+    delivery_id: String,
+    subject: String,
+    payload: serde_json::Value,
+}
+
+impl InboundMessage {
+    #[must_use]
+    pub fn new(
+        delivery_id: impl Into<String>,
+        subject: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> Self {
+        Self {
+            delivery_id: delivery_id.into(),
+            subject: subject.into(),
+            payload,
+        }
+    }
+
+    #[must_use]
+    pub fn delivery_id(&self) -> &str {
+        &self.delivery_id
+    }
+
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+}
+
+/// Handler failures deliberately leave the transport delivery unacknowledged.
+/// A handler may return Ok only after its durable PostgreSQL work has committed.
+pub type MessageHandlerError = Box<dyn Error + Send + Sync + 'static>;
+
+pub trait InboundMessageHandler: Send + Sync {
+    fn handle(
+        &self,
+        message: InboundMessage,
+    ) -> Pin<Box<dyn Future<Output = Result<(), MessageHandlerError>> + Send + '_>>;
+}
+
+/// Counts the result of one bounded pull-consumer batch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MessageConsumerOutcome {
+    pub received: usize,
+    pub acknowledged: usize,
+    pub handler_failed: usize,
+}
+
+/// Broker-neutral pull-consumer boundary. Implementations ACK only after
+/// the handler succeeds; handlers must return success after PostgreSQL commit.
+pub trait MessageConsumer: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn process_batch<'a>(
+        &'a self,
+        handler: &'a dyn InboundMessageHandler,
+        batch_size: u16,
+        expires_after: Duration,
+    ) -> impl Future<Output = Result<MessageConsumerOutcome, Self::Error>> + Send + 'a;
 }
 
 /// Broker-neutral outbound publication port.

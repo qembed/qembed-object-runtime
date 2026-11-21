@@ -67,6 +67,7 @@ impl MessagePublisher for NatsJetStreamPublisher {
             serde_json::to_vec(message.payload()).map_err(NatsJetStreamPublisherError::new)?;
         let mut headers = async_nats::HeaderMap::new();
         headers.append("Nats-Msg-Id", message.delivery_id());
+        headers.append("Qembed-Delivery-Id", message.delivery_id());
 
         // The first await sends the publish; awaiting the returned future waits
         // for JetStream PubAck. The Outbox Relay persists that receipt afterward.
