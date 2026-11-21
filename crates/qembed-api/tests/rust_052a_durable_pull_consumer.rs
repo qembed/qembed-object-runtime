@@ -53,8 +53,7 @@ impl InboundMessageHandler for CommitHandler {
 
 #[tokio::test]
 async fn durable_pull_consumer_acks_only_after_handler_commit() {
-    let nats_url =
-        std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
+    let nats_url = std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL is set by test-postgres.sh");
     let pool = PgPoolOptions::new()
