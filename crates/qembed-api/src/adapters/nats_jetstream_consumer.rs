@@ -138,7 +138,8 @@ impl NatsJetStreamConsumer {
         sequence: u64,
         attempt: u32,
     ) -> Result<(), NatsJetStreamConsumerError> {
-        let dead_letter_id = format!("qembed-dlq-{stream}-{sequence}");
+        let dead_letter_id = format!("qembed-dlq-{stream}-{consumer}-{sequence}");
+        let source_subject = message.subject.to_string();
         let envelope = DeadLetterEnvelope {
             schema_version: 1,
             dead_letter_id: dead_letter_id.clone(),
@@ -147,7 +148,7 @@ impl NatsJetStreamConsumer {
             source_consumer: consumer,
             source_sequence: sequence,
             delivery_attempt: attempt,
-            source_subject: message.subject.as_str(),
+            source_subject: &source_subject,
             failure_kind: match failure.kind() {
                 MessageFailureKind::Retryable => "retryable_exhausted",
                 MessageFailureKind::Permanent => "permanent",
@@ -300,5 +301,52 @@ impl MessageConsumer for NatsJetStreamConsumer {
         }
 
         Ok(outcome)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NatsJetStreamConsumerConfig;
+    use std::time::Duration;
+
+    #[test]
+    fn retry_delay_grows_exponentially_and_is_capped() {
+        let policy = NatsJetStreamConsumerConfig::new(
+            "qembed.dead",
+            5,
+            Duration::from_millis(100),
+            Duration::from_millis(350),
+            2,
+        )
+        .expect("policy is valid");
+
+        assert_eq!(policy.retry_delay(1), Duration::from_millis(100));
+        assert_eq!(policy.retry_delay(2), Duration::from_millis(200));
+        assert_eq!(policy.retry_delay(3), Duration::from_millis(350));
+        assert_eq!(policy.retry_delay(20), Duration::from_millis(350));
+    }
+
+    #[test]
+    fn rejects_invalid_retry_policy() {
+        assert!(
+            NatsJetStreamConsumerConfig::new(
+                "",
+                3,
+                Duration::from_millis(100),
+                Duration::from_secs(1),
+                2,
+            )
+            .is_err()
+        );
+        assert!(
+            NatsJetStreamConsumerConfig::new(
+                "qembed.dead",
+                0,
+                Duration::from_millis(100),
+                Duration::from_secs(1),
+                2,
+            )
+            .is_err()
+        );
     }
 }

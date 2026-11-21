@@ -23,7 +23,12 @@ impl InboundMessageHandler for FailingHandler {
         &self,
         _message: InboundMessage,
     ) -> Pin<Box<dyn Future<Output = Result<(), MessageHandlerError>> + Send + '_>> {
-        Box::pin(async { Err(MessageHandlerError::retryable("temporary_failure", "simulated pre-commit failure")) })
+        Box::pin(async {
+            Err(MessageHandlerError::retryable(
+                "temporary_failure",
+                "simulated pre-commit failure",
+            ))
+        })
     }
 }
 
@@ -96,7 +101,18 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
         )
         .await
         .expect("durable pull consumer is provisioned");
-    let consumer = NatsJetStreamConsumer::new(consumer, context.clone(), NatsJetStreamConsumerConfig::new("qembed.dlq.rust052a", 5, Duration::from_millis(100), Duration::from_secs(2), 2).expect("valid retry policy"));
+    let consumer = NatsJetStreamConsumer::new(
+        consumer,
+        context.clone(),
+        NatsJetStreamConsumerConfig::new(
+            "qembed.dlq.rust052a",
+            5,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            2,
+        )
+        .expect("valid retry policy"),
+    );
     let publisher = NatsJetStreamPublisher::connect(&nats_url)
         .await
         .expect("publisher connects");
