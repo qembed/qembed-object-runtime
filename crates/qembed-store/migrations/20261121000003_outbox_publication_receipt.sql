@@ -50,9 +50,17 @@ CREATE TABLE outbox_publication_receipts (
 CREATE INDEX outbox_publication_receipts_delivery_idx
     ON outbox_publication_receipts (tenant_id, delivery_id, published_at, receipt_id);
 
+CREATE FUNCTION reject_outbox_publication_receipt_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $receipt_immutable$
+BEGIN
+    RAISE EXCEPTION 'outbox_publication_receipts is append-only'
+        USING ERRCODE = '55000';
+END
+$receipt_immutable$;
+
 CREATE TRIGGER outbox_publication_receipts_append_only
     BEFORE UPDATE OR DELETE ON outbox_publication_receipts
-    FOR EACH ROW EXECUTE FUNCTION forbid_mutation();
+    FOR EACH ROW EXECUTE FUNCTION reject_outbox_publication_receipt_mutation();
 
 ALTER TABLE outbox_publication_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_publication_receipts FORCE ROW LEVEL SECURITY;
