@@ -15,7 +15,6 @@ use qembed_domain::{
         ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
         ToolExecutionReconciliationRequest,
     },
-
 };
 use qembed_store::{
     invocation_worker::PgExecutionStore, run_migrations, tool_execution_store::PgToolExecutionStore,
