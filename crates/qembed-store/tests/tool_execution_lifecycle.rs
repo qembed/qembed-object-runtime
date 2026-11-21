@@ -423,7 +423,6 @@ async fn tool_execution_persistence_grants_match_the_runtime_capabilities() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn expired_tool_execution_becomes_unknown_and_cannot_be_retried() {
     let fixture = setup().await;
