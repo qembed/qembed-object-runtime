@@ -262,11 +262,10 @@ async fn crash_after_claim_before_publish_reclaims_same_delivery() {
     assert_eq!(stream_message_count(&stream).await, 0);
 
     expire_lease(&pool, &tenant_id, &delivery_id).await;
-    let publisher = NatsJetStreamPublisher::connect(
-        &std::env::var("NATS_URL").expect("NATS_URL is set"),
-    )
-    .await
-    .expect("restarted relay connects");
+    let publisher =
+        NatsJetStreamPublisher::connect(&std::env::var("NATS_URL").expect("NATS_URL is set"))
+            .await
+            .expect("restarted relay connects");
     let relay = OutboxRelay::new(
         PgOutboxDispatcher::new(pool.clone()),
         publisher,
@@ -358,7 +357,10 @@ async fn puback_before_postgres_receipt_failure_replays_same_delivery_id() {
     assert_eq!(outcome.published, 1);
     assert_eq!(stream_message_count(&stream).await, 1);
     assert!(publication_duplicate(&pool, &tenant_id, &delivery_id).await);
-    assert_eq!(publication_state(&pool, &tenant_id, &delivery_id).await, (true, Some(1), 1));
+    assert_eq!(
+        publication_state(&pool, &tenant_id, &delivery_id).await,
+        (true, Some(1), 1)
+    );
     pool.close().await;
 }
 
