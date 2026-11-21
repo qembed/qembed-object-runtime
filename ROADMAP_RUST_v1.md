@@ -3,6 +3,8 @@
 > **Файл:** `ROADMAP.md`  
 > **База:** Qembed Object Runtime M0 v2.3.3; ADR RT-039…RT-048  
 > **Фокус:** только Rust-разработка и тестирование Rust-кода  
+
+**Toolchain policy (2026-11-21):** проект использует Rust 1.100.0 как локальный toolchain и MSRV. Версия закреплена в `rust-toolchain.toml`, `[workspace.package].rust-version` и CI. Обновление Rust выполняется отдельным изменением с полным PostgreSQL 15/16/19 test matrix.
 > **Первый milestone:** M1a — walking skeleton `create → publish → invoke → retrieve result` на mock ChatProvider.
 
 ---
