@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::ids::ToolExecutionId;
 use crate::scope::Scope;
 use crate::tool_execution::{ToolExecution, ToolExecutionFencingToken};
+use crate::tool_execution_reconciliation::ToolExecutionReconciliationCompletion;
 
 /// Inputs for an atomic ToolExecution result write.
 #[derive(Debug)]
@@ -85,5 +86,15 @@ pub trait ToolExecutionLeaseStore: Send + Sync {
         &self,
         scope: &Scope,
         completion: ToolExecutionCompletion,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+}
+
+/// Persistence boundary for completing an Unknown ToolExecution after reconciliation.
+pub trait ToolExecutionReconciliationStore: ToolExecutionLeaseStore {
+    /// Applies a confirmed result only when the Unknown checkpoint is still current.
+    fn apply_tool_execution_reconciliation(
+        &self,
+        scope: &Scope,
+        completion: ToolExecutionReconciliationCompletion,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }

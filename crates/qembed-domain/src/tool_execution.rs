@@ -306,6 +306,36 @@ impl ToolExecution {
         Ok(())
     }
 
+    /// Applies a confirmed reconciliation result to an Unknown execution.
+    ///
+    /// Persistence must atomically compare the expected version and fencing token
+    /// and require pending reconciliation before storing the terminal state.
+    pub fn reconcile(
+        &mut self,
+        outcome: crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome,
+    ) -> Result<(), ToolExecutionError> {
+        let next = match outcome {
+            crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome::ConfirmedSucceeded { .. } => ToolExecutionStatus::Succeeded,
+            crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome::ConfirmedFailed { .. } => ToolExecutionStatus::Failed,
+            crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome::Unresolved => {
+                return Err(ToolExecutionError::UnresolvedReconciliation);
+            }
+        };
+        if self.status != ToolExecutionStatus::Unknown || self.lease_owner.is_some() {
+            return Err(ToolExecutionError::InvalidTransition {
+                from: self.status,
+                to: next,
+            });
+        }
+        self.ensure_transition(next)?;
+        self.version = self
+            .version
+            .checked_add(1)
+            .ok_or(ToolExecutionError::VersionOverflow)?;
+        self.status = next;
+        Ok(())
+    }
+
     /// Marks an execution Unknown after PostgreSQL has confirmed its lease expired.
     ///
     /// This is deliberately not a retry transition. The persistence adapter must
@@ -354,6 +384,7 @@ pub enum ToolExecutionError {
     StaleFencingToken,
     VersionOverflow,
     FencingTokenOverflow,
+    UnresolvedReconciliation,
 }
 
 #[cfg(test)]
@@ -483,6 +514,54 @@ mod tests {
         assert_eq!(execution.version(), 2);
         assert_eq!(execution.fencing_token(), token);
         assert_eq!(execution.lease_owner(), None);
+    }
+
+    #[test]
+    fn reconciliation_accepts_only_confirmed_outcomes_from_unknown() {
+        use crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome as R;
+
+        let mut succeeded = execution();
+        succeeded.claim("worker").expect("claim succeeds");
+        succeeded
+            .mark_unknown_after_expiry()
+            .expect("expiry becomes Unknown");
+        let token = succeeded.fencing_token();
+        succeeded
+            .reconcile(R::ConfirmedSucceeded {
+                output: None,
+                output_ttl_seconds: None,
+            })
+            .expect("confirmed success is accepted");
+        assert_eq!(succeeded.status(), ToolExecutionStatus::Succeeded);
+        assert_eq!(succeeded.version(), 3);
+        assert_eq!(succeeded.fencing_token(), token);
+
+        let mut failed = execution();
+        failed.claim("worker").expect("claim succeeds");
+        failed
+            .mark_unknown_after_expiry()
+            .expect("expiry becomes Unknown");
+        failed
+            .reconcile(R::ConfirmedFailed { evidence: None })
+            .expect("confirmed failure is accepted");
+        assert_eq!(failed.status(), ToolExecutionStatus::Failed);
+    }
+
+    #[test]
+    fn unresolved_reconciliation_cannot_make_execution_terminal() {
+        use crate::tool_execution_reconciliation::ToolExecutionReconciliationOutcome as R;
+
+        let mut execution = execution();
+        execution.claim("worker").expect("claim succeeds");
+        execution
+            .mark_unknown_after_expiry()
+            .expect("expiry becomes Unknown");
+        assert_eq!(
+            execution.reconcile(R::Unresolved),
+            Err(ToolExecutionError::UnresolvedReconciliation)
+        );
+        assert_eq!(execution.status(), ToolExecutionStatus::Unknown);
+        assert_eq!(execution.version(), 2);
     }
 
     #[test]

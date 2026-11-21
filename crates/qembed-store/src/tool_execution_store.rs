@@ -8,7 +8,12 @@ use qembed_domain::scope::Scope;
 use qembed_domain::tool_execution::{
     ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionStatus,
 };
-use qembed_domain::tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore};
+use qembed_domain::tool_execution_lease::{
+    ToolExecutionCompletion, ToolExecutionLeaseStore, ToolExecutionReconciliationStore,
+};
+use qembed_domain::tool_execution_reconciliation::{
+    ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
+};
 use sqlx::PgPool;
 
 use crate::{begin_tenant_transaction, execute, fetch_optional};
@@ -275,6 +280,117 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
                 expected_fencing_token.value(),
                 "expected fencing token",
             )?),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+impl ToolExecutionReconciliationStore for PgToolExecutionStore {
+    async fn apply_tool_execution_reconciliation(
+        &self,
+        scope: &Scope,
+        completion: ToolExecutionReconciliationCompletion,
+    ) -> Result<bool, Self::Error> {
+        let ToolExecutionReconciliationCompletion {
+            request,
+            next,
+            outcome,
+        } = completion;
+        let execution_id = request.execution_id();
+        let expected_version = request.expected_version();
+        let expected_fencing_token = request.expected_fencing_token();
+        if next.invocation_id() != request.invocation_id()
+            || next.command_id() != request.command_id()
+        {
+            return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                "reconciliation request does not identify the same command",
+            ));
+        }
+        let next_status = validate_next_execution(
+            scope,
+            execution_id,
+            expected_version,
+            expected_fencing_token,
+            &next,
+        )?;
+
+        let (reconciliation_state, output, ttl_seconds) = match outcome {
+            ToolExecutionReconciliationOutcome::ConfirmedSucceeded {
+                output,
+                output_ttl_seconds,
+            } => {
+                let ttl = match (&output, output_ttl_seconds) {
+                    (Some(_), Some(ttl)) if ttl > 0 => f64::from(ttl),
+                    (None, None) => 0.0,
+                    (Some(_), _) => {
+                        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                            "confirmed success output requires a positive retention TTL",
+                        ));
+                    }
+                    (None, Some(_)) => {
+                        return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                            "output TTL cannot be set without output",
+                        ));
+                    }
+                };
+                ("confirmed_succeeded", output, ttl)
+            }
+            ToolExecutionReconciliationOutcome::ConfirmedFailed { evidence } => {
+                ("confirmed_failed", evidence, 0.0)
+            }
+            ToolExecutionReconciliationOutcome::Unresolved => {
+                return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                    "unresolved reconciliation cannot be persisted as terminal",
+                ));
+            }
+        };
+
+        let expected_status = if reconciliation_state == "confirmed_succeeded" {
+            "Succeeded"
+        } else {
+            "Failed"
+        };
+        if next_status != expected_status {
+            return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                "reconciliation evidence does not match the requested terminal state",
+            ));
+        }
+
+        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE tool_executions
+                    SET status=$1,
+                        version=version+1,
+                        reconciliation_state=$2,
+                        finished_at=clock_timestamp(),
+                        output=$3,
+                        output_expires_at=CASE
+                            WHEN $3::jsonb IS NULL OR $4::double precision = 0 THEN NULL
+                            ELSE clock_timestamp()+make_interval(secs => $4::double precision)
+                        END
+                  WHERE tenant_id=$5::uuid AND id=$6::uuid
+                    AND status='Unknown' AND reconciliation_state='pending'
+                    AND version=$7 AND fencing_token=$8
+                    AND invocation_id=$9::uuid AND command_id=$10::uuid
+                ",
+            )
+            .bind(next_status)
+            .bind(reconciliation_state)
+            .bind(output)
+            .bind(ttl_seconds)
+            .bind(scope.tenant_id().to_string())
+            .bind(execution_id.to_string())
+            .bind(to_i64(expected_version, "expected version")?)
+            .bind(to_i64(
+                expected_fencing_token.value(),
+                "expected fencing token",
+            )?)
+            .bind(request.invocation_id().to_string())
+            .bind(request.command_id().to_string()),
         )
         .await?;
         transaction.commit().await?;

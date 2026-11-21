@@ -8,3 +8,8 @@ lints.workspace = true
 
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
+
+[dev-dependencies]
+qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
+serde_json.workspace = true
+tokio.workspace = true
