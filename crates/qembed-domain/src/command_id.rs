@@ -23,7 +23,7 @@ pub fn derive_command_id(
     step_index: u32,
     action_hash: &[u8; 32],
 ) -> CommandId {
-    const NAME_PREFIX: &[u8] = b"qembed.command-id.v1\\0";
+    const NAME_PREFIX: &[u8] = b"qembed.command-id.v1\0";
 
     let mut name = Vec::with_capacity(NAME_PREFIX.len() + 4 + action_hash.len());
     name.extend_from_slice(NAME_PREFIX);
