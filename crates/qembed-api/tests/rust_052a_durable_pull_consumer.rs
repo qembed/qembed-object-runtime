@@ -53,8 +53,13 @@ impl InboundMessageHandler for CommitHandler {
             )
             .bind(delivery_id)
             .execute(&mut *transaction)
-            .await?;
-            transaction.commit().await?;
+            .await
+            .map_err(|error| {
+                MessageHandlerError::retryable("postgres_write_failed", error.to_string())
+            })?;
+            transaction.commit().await.map_err(|error| {
+                MessageHandlerError::retryable("postgres_commit_failed", error.to_string())
+            })?;
             Ok(())
         })
     }
