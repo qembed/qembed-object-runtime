@@ -192,21 +192,34 @@ async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_pu
     assert_eq!(marker.2, 1);
 
     let relay = PgOutboxDispatcher::new(fixture.pool.clone());
-    let claimed = relay
-        .claim_batch("recovery-relay", "invocation.received", 10, 30)
+    // The dispatcher is deliberately cross-tenant. Claim a bounded batch,
+    // retain the row under test, and release unrelated pending deliveries.
+    let mut claimed = relay
+        .claim_batch("recovery-relay", "invocation.received", 500, 30)
         .await
-        .expect("relay claims the marked delivered row");
-    assert_eq!(claimed.len(), 1);
-    assert_eq!(claimed[0].delivery_id(), fixture.delivery_id.to_string());
+        .expect("relay claims marked and pending invocation deliveries");
+    let target_index = claimed
+        .iter()
+        .position(|delivery| delivery.delivery_id() == fixture.delivery_id.to_string())
+        .expect("the marked original delivery is in the claimed batch");
+    let target = claimed.remove(target_index);
+    for unrelated in &claimed {
+        assert!(
+            relay
+                .release(unrelated, "recovery-relay")
+                .await
+                .expect("unrelated delivery lease is released")
+        );
+    }
     assert_eq!(
-        claimed[0].payload()["invocation_id"],
+        target.payload()["invocation_id"],
         fixture.invocation_id.to_string()
     );
 
     assert!(
         relay
             .acknowledge(
-                &claimed[0],
+                &target,
                 "recovery-relay",
                 PublicationReceipt::new("QEMBED_EVENTS", 2, false),
             )
