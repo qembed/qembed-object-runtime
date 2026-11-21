@@ -13,20 +13,20 @@ use qembed_domain::{
     ports::DraftVersionCreation,
 };
 use qembed_runtime::{
-    outbox_relay::{OutboxRelay, OutboxRelayConfig},
     invocation_query::InvocationQueryService,
     invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
     object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
+    outbox_relay::{OutboxRelay, OutboxRelayConfig},
 };
 use qembed_store::{
-    outbox_dispatcher::PgOutboxDispatcher,
     PgReadinessFailure, PgReadinessProbe,
     auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
     invocation_query::PgInvocationQueryStore,
     invocation_start::PgInvocationStartStore,
     object_repository::ObjectRepository,
+    outbox_dispatcher::PgOutboxDispatcher,
 };
 use sqlx::PgPool;
 
