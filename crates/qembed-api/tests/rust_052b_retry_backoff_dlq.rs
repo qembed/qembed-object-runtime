@@ -84,7 +84,7 @@ async fn retry_backoff_and_permanent_failures_are_parked_before_source_ack() {
         .get_or_create_consumer(
             &source_durable,
             consumer::pull::Config {
-                durable_name: Some(source_durable),
+                durable_name: Some(source_durable.clone()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(2),
                 max_deliver: 10,
@@ -97,7 +97,7 @@ async fn retry_backoff_and_permanent_failures_are_parked_before_source_ack() {
         .get_or_create_consumer(
             &dlq_durable,
             consumer::pull::Config {
-                durable_name: Some(dlq_durable),
+                durable_name: Some(dlq_durable.clone()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(2),
                 ..Default::default()
