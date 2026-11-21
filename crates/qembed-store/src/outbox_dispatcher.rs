@@ -149,7 +149,7 @@ impl PgOutboxDispatcher {
             .map_err(OutboxDispatcherError::Database)?;
 
         let deliveries = sqlx::query_as::<_, OutboxDelivery>(
-            "WITH candidates AS (                SELECT tenant_id, delivery_id FROM outbox_messages                  WHERE topic = $4 AND delivered_at IS NULL                    AND (lease_expires_at IS NULL OR lease_expires_at <= now())                  ORDER BY created_at, delivery_id                  LIMIT $1 FOR UPDATE SKIP LOCKED             )              UPDATE outbox_messages AS message                 SET lease_owner = $2,                     lease_expires_at = now() + make_interval(secs => $3::int),                     claim_token = message.claim_token + 1,                     attempts = message.attempts + 1                FROM candidates               WHERE message.tenant_id = candidates.tenant_id                 AND message.delivery_id = candidates.delivery_id              RETURNING message.tenant_id::text AS tenant_id,                        message.delivery_id::text AS delivery_id,                        message.topic, message.payload, message.attempts, message.claim_token",
+            "WITH candidates AS (                SELECT tenant_id, delivery_id FROM outbox_messages                  WHERE topic = $4 AND (delivered_at IS NULL OR replay_requested_at IS NOT NULL)                    AND (lease_expires_at IS NULL OR lease_expires_at <= now())                  ORDER BY created_at, delivery_id                  LIMIT $1 FOR UPDATE SKIP LOCKED             )              UPDATE outbox_messages AS message                 SET lease_owner = $2,                     lease_expires_at = now() + make_interval(secs => $3::int),                     claim_token = message.claim_token + 1,                     attempts = message.attempts + 1                FROM candidates               WHERE message.tenant_id = candidates.tenant_id                 AND message.delivery_id = candidates.delivery_id              RETURNING message.tenant_id::text AS tenant_id,                        message.delivery_id::text AS delivery_id,                        message.topic, message.payload, message.attempts, message.claim_token",
         )
         .bind(batch_size)
         .bind(owner)
@@ -197,9 +197,12 @@ impl PgOutboxDispatcher {
                     publication_sequence = $6,
                     publication_duplicate = $7,
                     lease_owner = NULL,
-                    lease_expires_at = NULL
+                    lease_expires_at = NULL,
+                    replay_requested_at = NULL,
+                    replay_reason = NULL
               WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid
-                AND delivered_at IS NULL AND lease_owner = $3
+                AND (delivered_at IS NULL OR replay_requested_at IS NOT NULL)
+                AND lease_owner = $3
                 AND claim_token = $4 AND lease_expires_at > now()",
         )
         .bind(&delivery.tenant_id)
@@ -255,7 +258,7 @@ impl PgOutboxDispatcher {
             .map_err(OutboxDispatcherError::Database)?;
 
         let result = sqlx::query(
-            "UPDATE outbox_messages                 SET lease_owner = NULL, lease_expires_at = NULL               WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid                 AND delivered_at IS NULL AND lease_owner = $3 AND claim_token = $4",
+            "UPDATE outbox_messages                 SET lease_owner = NULL, lease_expires_at = NULL               WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid                 AND (delivered_at IS NULL OR replay_requested_at IS NOT NULL) AND lease_owner = $3 AND claim_token = $4",
         )
         .bind(&delivery.tenant_id)
         .bind(&delivery.delivery_id)
