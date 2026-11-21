@@ -18,6 +18,7 @@ use qembed_runtime::{
     object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
+    outbox_relay::{OutboxRelay, OutboxRelayConfig},
 };
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
@@ -25,8 +26,11 @@ use qembed_store::{
     invocation_query::PgInvocationQueryStore,
     invocation_start::PgInvocationStartStore,
     object_repository::ObjectRepository,
+    outbox_dispatcher::PgOutboxDispatcher,
 };
 use sqlx::PgPool;
+
+use crate::adapters::nats_jetstream_publisher::NatsJetStreamPublisher;
 
 use crate::handlers::{
     health::{ReadinessProbe, ReadinessStatus, health_router as configure_routes},
@@ -281,4 +285,16 @@ pub fn configure_owner_routes(pool: PgPool) -> Router {
 /// Composes the HTTP surface without creating a listener or changing runtime lifecycle.
 pub fn api_router(pool: PgPool, probe: PgReadinessProbe) -> Router {
     configure_health_routes(probe).merge(configure_owner_routes(pool))
+}
+
+/// Composes the PostgreSQL Outbox Relay with its JetStream publisher.
+///
+/// The returned service is transport-neutral at the runtime boundary; this
+/// function is the only place that wires the PostgreSQL and NATS adapters.
+pub fn compose_outbox_relay(
+    pool: PgPool,
+    publisher: NatsJetStreamPublisher,
+    config: OutboxRelayConfig,
+) -> OutboxRelay<PgOutboxDispatcher, NatsJetStreamPublisher> {
+    OutboxRelay::new(PgOutboxDispatcher::new(pool), publisher, config)
 }

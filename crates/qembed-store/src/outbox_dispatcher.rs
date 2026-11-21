@@ -5,6 +5,7 @@
 
 use std::fmt;
 
+use qembed_domain::ports::{OutboundMessage, OutboxDeliveryStore, PublicationReceipt};
 use serde_json::Value;
 use sqlx::{FromRow, PgPool, Row, postgres::PgRow};
 
@@ -71,6 +72,7 @@ pub enum OutboxDispatcherError {
     InvalidTopic,
     InvalidBatchSize,
     InvalidLeaseDuration,
+    InvalidPublicationReceipt,
     Database(sqlx::Error),
 }
 
@@ -82,6 +84,9 @@ impl fmt::Display for OutboxDispatcherError {
             Self::InvalidBatchSize => f.write_str("outbox batch size must be between 1 and 500"),
             Self::InvalidLeaseDuration => {
                 f.write_str("outbox lease must be between 1 and 3600 seconds")
+            }
+            Self::InvalidPublicationReceipt => {
+                f.write_str("publication receipt is incomplete or invalid")
             }
             Self::Database(error) => write!(f, "outbox database operation failed: {error}"),
         }
@@ -166,7 +171,15 @@ impl PgOutboxDispatcher {
         &self,
         delivery: &OutboxDelivery,
         owner: &str,
+        receipt: PublicationReceipt,
     ) -> Result<bool, OutboxDispatcherError> {
+        if receipt.stream().trim().is_empty() || receipt.sequence() == 0 {
+            return Err(OutboxDispatcherError::InvalidPublicationReceipt);
+        }
+
+        let publication_sequence = i64::try_from(receipt.sequence())
+            .map_err(|_| OutboxDispatcherError::InvalidPublicationReceipt)?;
+
         let mut transaction = self
             .pool
             .begin()
@@ -178,21 +191,50 @@ impl PgOutboxDispatcher {
             .map_err(OutboxDispatcherError::Database)?;
 
         let result = sqlx::query(
-            "UPDATE outbox_messages                 SET delivered_at = now(), lease_owner = NULL, lease_expires_at = NULL               WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid                 AND delivered_at IS NULL AND lease_owner = $3                 AND claim_token = $4 AND lease_expires_at > now()",
+            "UPDATE outbox_messages
+                SET delivered_at = now(),
+                    publication_stream = $5,
+                    publication_sequence = $6,
+                    publication_duplicate = $7,
+                    lease_owner = NULL,
+                    lease_expires_at = NULL
+              WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid
+                AND delivered_at IS NULL AND lease_owner = $3
+                AND claim_token = $4 AND lease_expires_at > now()",
         )
         .bind(&delivery.tenant_id)
         .bind(&delivery.delivery_id)
         .bind(owner)
         .bind(delivery.claim_token)
+        .bind(receipt.stream())
+        .bind(publication_sequence)
+        .bind(receipt.duplicate())
         .execute(&mut *transaction)
         .await
         .map_err(OutboxDispatcherError::Database)?;
+
+        let acknowledged = result.rows_affected() == 1;
+        if acknowledged {
+            sqlx::query(
+                "INSERT INTO outbox_publication_receipts
+                    (tenant_id, delivery_id, publication_stream, publication_sequence, publication_duplicate)
+                 VALUES ($1::uuid, $2::uuid, $3, $4, $5)",
+            )
+            .bind(&delivery.tenant_id)
+            .bind(&delivery.delivery_id)
+            .bind(receipt.stream())
+            .bind(publication_sequence)
+            .bind(receipt.duplicate())
+            .execute(&mut *transaction)
+            .await
+            .map_err(OutboxDispatcherError::Database)?;
+        }
 
         transaction
             .commit()
             .await
             .map_err(OutboxDispatcherError::Database)?;
-        Ok(result.rows_affected() == 1)
+        Ok(acknowledged)
     }
 
     /// Releases a failed delivery for later redelivery without changing its token.
@@ -228,5 +270,48 @@ impl PgOutboxDispatcher {
             .await
             .map_err(OutboxDispatcherError::Database)?;
         Ok(result.rows_affected() == 1)
+    }
+}
+
+impl OutboxDeliveryStore for PgOutboxDispatcher {
+    type Delivery = OutboxDelivery;
+    type Error = OutboxDispatcherError;
+
+    async fn claim_batch(
+        &self,
+        owner: &str,
+        topic: &str,
+        batch_size: u16,
+        lease_seconds: u32,
+    ) -> Result<Vec<Self::Delivery>, Self::Error> {
+        PgOutboxDispatcher::claim_batch(
+            self,
+            owner,
+            topic,
+            i64::from(batch_size),
+            i64::from(lease_seconds),
+        )
+        .await
+    }
+
+    fn outbound_message(&self, delivery: &Self::Delivery) -> OutboundMessage {
+        OutboundMessage::new(
+            delivery.delivery_id.clone(),
+            delivery.topic.clone(),
+            delivery.payload.clone(),
+        )
+    }
+
+    async fn record_publication(
+        &self,
+        delivery: &Self::Delivery,
+        owner: &str,
+        receipt: PublicationReceipt,
+    ) -> Result<bool, Self::Error> {
+        PgOutboxDispatcher::acknowledge(self, delivery, owner, receipt).await
+    }
+
+    async fn release(&self, delivery: &Self::Delivery, owner: &str) -> Result<bool, Self::Error> {
+        PgOutboxDispatcher::release(self, delivery, owner).await
     }
 }
