@@ -13,18 +13,19 @@ mod budget_reservation;
 pub mod budget_settlement;
 pub mod caller;
 mod cas;
+mod event_outbox;
 pub mod idempotency;
 pub mod invocation_cancellation;
 mod invocation_lease;
 pub mod invocation_query;
 pub mod invocation_start;
 pub mod invocation_worker;
+pub mod object_repository;
+pub mod outbox_dispatcher;
 pub mod readiness;
+pub mod snapshot_repository;
 pub use cas::{CasError, execute_cas};
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
-mod event_outbox;
-pub mod object_repository;
-pub mod snapshot_repository;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -76,10 +77,6 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
 }
 
 /// A PostgreSQL transaction with trusted tenant and authenticated Principal context established transaction-locally.
-///
-/// The wrapped connection is available only while this value is borrowed. Commit
-/// and rollback consume the wrapper so a tenant-scoped transaction cannot be
-/// accidentally reused after it has ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TransactionToken(u64);
 
@@ -110,9 +107,6 @@ impl TenantTransaction {
     }
 
     /// Returns the PostgreSQL connection carrying this transaction's tenant context.
-    ///
-    /// Queries must be executed through this connection, not through the pool,
-    /// so they participate in the transaction and inherit its tenant setting.
     pub fn connection(&mut self) -> &mut PgConnection {
         &mut self.transaction
     }
