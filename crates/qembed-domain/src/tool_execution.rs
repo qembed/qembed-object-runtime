@@ -306,6 +306,23 @@ impl ToolExecution {
         Ok(())
     }
 
+    /// Marks an execution Unknown after PostgreSQL has confirmed its lease expired.
+    ///
+    /// This is deliberately not a retry transition. The persistence adapter must
+    /// atomically verify the expired lease, current version and fencing token.
+    /// Unknown requires reconciliation because the external side effect may have
+    /// happened even though the worker did not persist its result.
+    pub fn mark_unknown_after_expiry(&mut self) -> Result<(), ToolExecutionError> {
+        self.ensure_transition(ToolExecutionStatus::Unknown)?;
+        self.version = self
+            .version
+            .checked_add(1)
+            .ok_or(ToolExecutionError::VersionOverflow)?;
+        self.status = ToolExecutionStatus::Unknown;
+        self.lease_owner = None;
+        Ok(())
+    }
+
     fn ensure_transition(&self, next: ToolExecutionStatus) -> Result<(), ToolExecutionError> {
         if self.status.can_transition_to(next) {
             Ok(())
