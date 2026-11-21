@@ -1,43 +1,31 @@
-# RUST-051 — Lease-fenced outbox dispatcher
+# RUST-051a — PostgreSQL outbox claim primitive
 
-## Contract
+## Scope
 
-The Store adapter claims outbox deliveries across tenants using the dedicated
-`qembed_dispatcher` PostgreSQL role. The role receives column-level access to
-the delivery projection only; it cannot read `events`, `event_id`, aggregate
-identity, or other domain tables.
+This change implements the PostgreSQL-side claim/lease primitive used by the future Outbox → NATS JetStream Relay. It is **not** the complete RUST-051 relay and does not publish to NATS.
 
-A claim is one short transaction:
+## Implemented contract
 
-1. Select pending rows for a subscribed topic, ordered by creation time.
-2. Lock candidates with `FOR UPDATE SKIP LOCKED`.
-3. Assign an owner and expiry, increment the claim fencing token and attempt
-   counter, and return only tenant ID, delivery ID, topic, payload, attempts,
-   and claim token.
-4. Commit before the caller performs delivery I/O.
+- Restricted qembed_dispatcher role sees only the delivery projection; it cannot read events, event_id, aggregate identity or other domain tables.
+- A short transaction claims pending rows with FOR UPDATE SKIP LOCKED, assigns owner/expiry, increments the monotonic claim fencing token and attempts counter, and returns only delivery fields.
+- Network I/O must happen after the claim transaction commits.
+- The future JetStream publisher must publish with stable delivery_id as Nats-Msg-Id, wait for PubAck, then persist a publication receipt in PostgreSQL.
+- Acknowledgement/receipt updates are accepted only for the current owner and fencing token. A stale relay cannot finalize a claim reclaimed by a newer relay.
 
-Delivery I/O must happen outside the database transaction. A successful
-consumer call is followed by `acknowledge`; a failed call may `release` the
-claim for immediate redelivery. If a process crashes, the lease expires and a
-different dispatcher can reclaim the row.
+## Delivery semantics
 
-Acknowledgement is accepted only for the current owner, current fencing token,
-and unexpired lease. A stale worker cannot acknowledge a row reclaimed by a
-newer worker. The stable `delivery_id` is the consumer idempotency key: a
-consumer must persist/deduplicate that identity before applying its side
-effect. The integration test exercises this deduplication rule across a
-release/reclaim cycle.
+- The end-to-end contract is at-least-once, not exactly-once.
+- A crash after JetStream PubAck but before PostgreSQL publication receipt causes a safe duplicate publication.
+- JetStream deduplication is bounded by its configured window. Consumers must remain idempotent using stable delivery_id and business identities such as invocation_id/command_id.
+- PubAck is not worker acknowledgement and is not proof of business completion.
+- PostgreSQL Outbox remains the recovery source; this PR alone does not implement the JetStream publisher, durable consumer, or recovery sweeper.
 
-## Operational boundaries
+## Follow-up
 
-- Delivery is at-least-once, not exactly-once. A crash after consumer success
-  but before acknowledgement intentionally causes redelivery.
-- Consumers must be idempotent by `delivery_id`; the dispatcher cannot make an
-  external side effect and PostgreSQL acknowledgement atomic.
-- Retry scheduling, maximum attempts, poison-message policy and dead-letter
-  handling belong to RUST-052.
-- This change provides the claim/delivery/ack persistence primitive. It does
-  not add a broker-specific transport or a long-running process supervisor.
-- The application database login used by this adapter must be granted
-  membership in the NOLOGIN `qembed_dispatcher` role. The role itself remains
-  restricted to the delivery projection.
+- RUST-051b adds the broker-neutral publisher port and JetStream adapter.
+- RUST-051c tests relay failure windows against a real JetStream server.
+- RUST-052 adds durable pull consumers, ACK-after-commit, retry/backoff, parking/DLQ and PostgreSQL-driven recovery.
+
+## Operational boundary
+
+The application DB login must be granted membership in the NOLOGIN qembed_dispatcher role. The role remains restricted to the delivery projection.
