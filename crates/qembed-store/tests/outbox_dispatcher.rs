@@ -9,7 +9,9 @@ use uuid::Uuid;
 
 async fn setup() -> PgPool {
     let pool = common::connect().await;
-    run_migrations(&pool).await.expect("migrations should apply");
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
     pool
 }
 
@@ -63,7 +65,12 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     assert_eq!(first[0].attempts(), 1);
     assert_eq!(first[0].claim_token(), 1);
 
-    assert!(dispatcher.release(&first[0], "worker-a").await.expect("release"));
+    assert!(
+        dispatcher
+            .release(&first[0], "worker-a")
+            .await
+            .expect("release")
+    );
     let second = dispatcher
         .claim_batch("worker-b", &topic, 10, 30)
         .await
@@ -83,9 +90,25 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     }
     assert_eq!(side_effects, 1);
 
-    assert!(!dispatcher.acknowledge(&first[0], "worker-a").await.expect("stale ack is rejected"));
-    assert!(dispatcher.acknowledge(&second[0], "worker-b").await.expect("current ack succeeds"));
-    assert!(dispatcher.claim_batch("worker-c", &topic, 10, 30).await.expect("queue is empty").is_empty());
+    assert!(
+        !dispatcher
+            .acknowledge(&first[0], "worker-a")
+            .await
+            .expect("stale ack is rejected")
+    );
+    assert!(
+        dispatcher
+            .acknowledge(&second[0], "worker-b")
+            .await
+            .expect("current ack succeeds")
+    );
+    assert!(
+        dispatcher
+            .claim_batch("worker-c", &topic, 10, 30)
+            .await
+            .expect("queue is empty")
+            .is_empty()
+    );
 
     let delivered: bool = sqlx::query_scalar(
         "SELECT delivered_at IS NOT NULL FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
@@ -135,15 +158,17 @@ async fn dispatcher_role_is_limited_to_delivery_projection() {
         .await
         .expect("dispatcher role should be available");
 
-    let projection: String = sqlx::query_scalar(
-        "SELECT topic FROM outbox_messages WHERE topic = $1 LIMIT 1",
-    )
-    .bind(&topic)
-    .fetch_one(&mut *transaction)
-    .await
-    .expect("delivery projection columns should be visible");
+    let projection: String =
+        sqlx::query_scalar("SELECT topic FROM outbox_messages WHERE topic = $1 LIMIT 1")
+            .bind(&topic)
+            .fetch_one(&mut *transaction)
+            .await
+            .expect("delivery projection columns should be visible");
     assert_eq!(projection, topic);
-    transaction.rollback().await.expect("rollback role transaction");
+    transaction
+        .rollback()
+        .await
+        .expect("rollback role transaction");
 
     let mut event_transaction = pool.begin().await.expect("event transaction");
     sqlx::query("SET LOCAL ROLE qembed_dispatcher")
@@ -155,7 +180,10 @@ async fn dispatcher_role_is_limited_to_delivery_projection() {
         .await
         .expect_err("event identity is outside the delivery projection");
     assert!(matches!(denied, sqlx::Error::Database(_)));
-    event_transaction.rollback().await.expect("rollback failed transaction");
+    event_transaction
+        .rollback()
+        .await
+        .expect("rollback failed transaction");
 
     let mut domain_transaction = pool.begin().await.expect("domain transaction");
     sqlx::query("SET LOCAL ROLE qembed_dispatcher")
@@ -167,6 +195,9 @@ async fn dispatcher_role_is_limited_to_delivery_projection() {
         .await
         .expect_err("dispatcher must not read the domain event log");
     assert!(matches!(denied, sqlx::Error::Database(_)));
-    domain_transaction.rollback().await.expect("rollback failed transaction");
+    domain_transaction
+        .rollback()
+        .await
+        .expect("rollback failed transaction");
     pool.close().await;
 }
