@@ -41,8 +41,10 @@ impl Error for NatsJetStreamConsumerError {
 }
 
 impl NatsJetStreamConsumerError {
-    fn transport(error: impl Error + Send + Sync + 'static) -> Self {
-        Self::Transport(Box::new(error))
+    // async-nats exposes transport failures as boxed trait objects. Accept the
+    // box directly: requiring a generic sized Error would reject dyn Error.
+    fn transport(error: Box<dyn Error + Send + Sync>) -> Self {
+        Self::Transport(error)
     }
 }
 
