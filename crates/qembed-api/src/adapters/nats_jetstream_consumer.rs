@@ -80,16 +80,9 @@ impl NatsJetStreamConsumerConfig {
     }
 
     fn retry_delay(&self, attempt: u32) -> Duration {
-        let mut delay = self.initial_retry_delay;
-        for _ in 1..attempt {
-            delay = delay
-                .checked_mul(self.retry_multiplier)
-                .unwrap_or(self.max_retry_delay);
-            if delay >= self.max_retry_delay {
-                return self.max_retry_delay;
-            }
-        }
-        delay.min(self.max_retry_delay)
+        self.initial_retry_delay
+            .saturating_mul(self.retry_multiplier.saturating_pow(attempt.saturating_sub(1)))
+            .min(self.max_retry_delay)
     }
 }
 
@@ -336,6 +329,7 @@ mod tests {
         )
         .expect("policy is valid");
 
+        assert_eq!(policy.retry_delay(0), Duration::from_millis(100));
         assert_eq!(policy.retry_delay(1), Duration::from_millis(100));
         assert_eq!(policy.retry_delay(2), Duration::from_millis(200));
         assert_eq!(policy.retry_delay(3), Duration::from_millis(350));
