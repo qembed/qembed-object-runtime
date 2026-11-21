@@ -79,7 +79,7 @@ impl MessageConsumer for NatsJetStreamConsumer {
             .consumer
             .fetch()
             .max_messages(usize::from(batch_size))
-            .expires_after(expires_after)
+            .expires(expires_after)
             .messages()
             .await
             .map_err(NatsJetStreamConsumerError::transport)?;
