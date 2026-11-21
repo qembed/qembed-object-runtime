@@ -150,8 +150,10 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
             &mut transaction,
             sqlx::query(
                 "UPDATE tool_executions
-                    SET lease_until=GREATEST(lease_until, clock_timestamp())
-                                      + make_interval(secs => $1::double precision),
+                    SET lease_until=GREATEST(
+                            lease_until,
+                            clock_timestamp() + make_interval(secs => $1::double precision)
+                        ),
                         heartbeat_at=clock_timestamp()
                   WHERE tenant_id=$2::uuid AND id=$3::uuid AND status='Executing'
                     AND lease_owner=$4 AND lease_until > clock_timestamp()
