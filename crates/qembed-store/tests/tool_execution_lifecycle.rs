@@ -8,7 +8,7 @@ use qembed_domain::{
     invocation_lease::InvocationLeaseStore,
     test_support::scope_for_tenant,
     tool_execution::{ToolExecutionFencingToken, ToolExecutionOutcome, ToolExecutionStatus},
-    tool_execution_lease::ToolExecutionLeaseStore,
+    tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore},
 };
 use qembed_store::{
     invocation_worker::PgExecutionStore, run_migrations, tool_execution_store::PgToolExecutionStore,
@@ -226,13 +226,15 @@ async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
     let wrote = tool_store
         .complete_tool_execution(
             &fixture.scope,
-            fixture.execution_id,
-            "invocation-worker",
-            expected_version,
-            tool_fencing_token,
-            unpersisted_claim,
-            Some(serde_json::json!({"result":"forbidden"})),
-            Some(60),
+            ToolExecutionCompletion {
+                execution_id: fixture.execution_id,
+                owner: "invocation-worker".to_owned(),
+                expected_version,
+                expected_fencing_token: tool_fencing_token,
+                next: unpersisted_claim,
+                output: Some(serde_json::json!({"result":"forbidden"})),
+                output_ttl_seconds: Some(60),
+            },
         )
         .await
         .expect("a missing persisted ToolExecution lease is a CAS miss");
@@ -323,13 +325,15 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
         store
             .complete_tool_execution(
                 &fixture.scope,
-                fixture.execution_id,
-                owner,
-                claimed.version(),
-                claimed.fencing_token(),
-                next.clone(),
-                Some(output.clone()),
-                Some(3600),
+                ToolExecutionCompletion {
+                    execution_id: fixture.execution_id,
+                    owner: owner.to_owned(),
+                    expected_version: claimed.version(),
+                    expected_fencing_token: claimed.fencing_token(),
+                    next: next.clone(),
+                    output: Some(output.clone()),
+                    output_ttl_seconds: Some(3600),
+                },
             )
             .await
             .expect("current ToolExecution lease can commit its result")
@@ -339,13 +343,15 @@ async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_
         !store
             .complete_tool_execution(
                 &fixture.scope,
-                fixture.execution_id,
-                owner,
-                claimed.version(),
-                claimed.fencing_token(),
-                next,
-                Some(output),
-                Some(3600),
+                ToolExecutionCompletion {
+                    execution_id: fixture.execution_id,
+                    owner: owner.to_owned(),
+                    expected_version: claimed.version(),
+                    expected_fencing_token: claimed.fencing_token(),
+                    next,
+                    output: Some(output),
+                    output_ttl_seconds: Some(3600),
+                },
             )
             .await
             .expect("replayed result write is a CAS miss")
