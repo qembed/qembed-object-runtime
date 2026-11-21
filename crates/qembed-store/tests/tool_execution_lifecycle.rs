@@ -747,3 +747,63 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
     assert_eq!(persisted.fencing_token(), unknown.fencing_token());
     fixture.pool.close().await;
 }
+
+
+#[tokio::test]
+async fn postgres_reconciliation_rejects_mismatched_invocation_provenance() {
+    let fixture = setup().await;
+    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let unknown = transition_fixture_to_unknown(&fixture, &store).await;
+    let forged_invocation_id = InvocationId::new();
+    let outcome = ToolExecutionReconciliationOutcome::ConfirmedSucceeded {
+        output: None,
+        output_ttl_seconds: None,
+    };
+    let mut forged_next = ToolExecution::from_persisted(
+        unknown.id(),
+        unknown.tenant_id(),
+        unknown.object_id(),
+        forged_invocation_id,
+        unknown.command_id(),
+        ToolExecutionCheckpoint::new(
+            ToolExecutionStatus::Unknown,
+            unknown.version(),
+            unknown.fencing_token(),
+            None,
+        ),
+    );
+    forged_next
+        .reconcile(outcome.clone())
+        .expect("forged provenance can be represented for the negative test");
+    let request = ToolExecutionReconciliationRequest::new(
+        unknown.id(),
+        forged_invocation_id,
+        unknown.command_id(),
+        unknown.version(),
+        unknown.fencing_token(),
+    );
+
+    assert!(
+        !store
+            .apply_tool_execution_reconciliation(
+                &fixture.scope,
+                ToolExecutionReconciliationCompletion {
+                    request,
+                    next: forged_next,
+                    outcome,
+                },
+            )
+            .await
+            .expect("mismatched invocation provenance is a CAS miss")
+    );
+
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("Unknown row remains readable")
+        .expect("execution exists");
+    assert_eq!(persisted.status(), ToolExecutionStatus::Unknown);
+    assert_eq!(persisted.version(), unknown.version());
+    assert_eq!(persisted.invocation_id(), unknown.invocation_id());
+    fixture.pool.close().await;
+}
