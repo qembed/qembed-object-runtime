@@ -294,11 +294,7 @@ impl OutboxDeliveryStore for PgOutboxDispatcher {
         PgOutboxDispatcher::acknowledge(self, delivery, owner, receipt).await
     }
 
-    async fn release(
-        &self,
-        delivery: &Self::Delivery,
-        owner: &str,
-    ) -> Result<bool, Self::Error> {
+    async fn release(&self, delivery: &Self::Delivery, owner: &str) -> Result<bool, Self::Error> {
         PgOutboxDispatcher::release(self, delivery, owner).await
     }
 }
