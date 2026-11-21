@@ -18,7 +18,7 @@ const DELIVERY_ID_HEADER: &str = "Qembed-Delivery-Id";
 pub enum NatsJetStreamConsumerError {
     InvalidBatchSize,
     InvalidExpiry,
-    Transport(Box<dyn Error + Send + Sync>),
+    Transport(String),
 }
 
 impl fmt::Display for NatsJetStreamConsumerError {
@@ -31,19 +31,13 @@ impl fmt::Display for NatsJetStreamConsumerError {
     }
 }
 
-impl Error for NatsJetStreamConsumerError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Transport(error) => Some(error.as_ref()),
-            _ => None,
-        }
-    }
-}
+impl Error for NatsJetStreamConsumerError {}
 
 impl NatsJetStreamConsumerError {
-    // Keep the concrete async-nats error type sized until it is boxed here.
-    fn transport(error: impl Error + Send + Sync + 'static) -> Self {
-        Self::Transport(Box::new(error))
+    // async-nats uses both concrete errors and boxed dyn Error values across
+    // its fetch APIs. Convert either to a stable diagnostic at this boundary.
+    fn transport(error: impl fmt::Display) -> Self {
+        Self::Transport(error.to_string())
     }
 }
 
