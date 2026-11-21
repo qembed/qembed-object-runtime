@@ -297,6 +297,13 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
         let execution_id = request.execution_id();
         let expected_version = request.expected_version();
         let expected_fencing_token = request.expected_fencing_token();
+        if next.invocation_id() != request.invocation_id()
+            || next.command_id() != request.command_id()
+        {
+            return Err(ToolExecutionStoreError::InvalidRequestedValue(
+                "reconciliation request does not identify the same command",
+            ));
+        }
         let next_status = validate_next_execution(
             scope,
             execution_id,
