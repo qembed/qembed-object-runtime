@@ -340,6 +340,127 @@ pub trait ChatProvider: Send + Sync {
     }
 }
 
+/// Broker-neutral message handed to an outbound publisher.
+///
+/// The stable delivery ID is the idempotency identity across retries. The
+/// subject and JSON payload are selected from the committed PostgreSQL Outbox
+/// projection; tenant identity is not promoted into transport authority.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutboundMessage {
+    delivery_id: String,
+    subject: String,
+    payload: serde_json::Value,
+}
+
+impl OutboundMessage {
+    #[must_use]
+    pub fn new(
+        delivery_id: impl Into<String>,
+        subject: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> Self {
+        Self {
+            delivery_id: delivery_id.into(),
+            subject: subject.into(),
+            payload,
+        }
+    }
+
+    #[must_use]
+    pub fn delivery_id(&self) -> &str {
+        &self.delivery_id
+    }
+
+    #[must_use]
+    pub fn subject(&self) -> &str {
+        &self.subject
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+}
+
+/// Transport publication receipt, normalized away from any broker SDK type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicationReceipt {
+    stream: String,
+    sequence: u64,
+    duplicate: bool,
+}
+
+impl PublicationReceipt {
+    #[must_use]
+    pub fn new(stream: impl Into<String>, sequence: u64, duplicate: bool) -> Self {
+        Self {
+            stream: stream.into(),
+            sequence,
+            duplicate,
+        }
+    }
+
+    #[must_use]
+    pub fn stream(&self) -> &str {
+        &self.stream
+    }
+
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    #[must_use]
+    pub const fn duplicate(&self) -> bool {
+        self.duplicate
+    }
+}
+
+/// Broker-neutral outbound publication port.
+///
+/// Returning a receipt means the transport has acknowledged durable acceptance;
+/// it does not mean that a business consumer completed the message.
+pub trait MessagePublisher: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn publish(
+        &self,
+        message: OutboundMessage,
+    ) -> impl Future<Output = Result<PublicationReceipt, Self::Error>> + Send;
+}
+
+/// Persistence port used by the Outbox Relay.
+///
+/// Claim and receipt writes are short PostgreSQL transactions. Implementations
+/// must not keep a database transaction open while the publisher performs I/O.
+pub trait OutboxDeliveryStore: Send + Sync {
+    type Delivery: Send + Sync;
+    type Error: Error + Send + Sync + 'static;
+
+    fn claim_batch(
+        &self,
+        owner: &str,
+        topic: &str,
+        batch_size: u16,
+        lease_seconds: u32,
+    ) -> impl Future<Output = Result<Vec<Self::Delivery>, Self::Error>> + Send;
+
+    fn outbound_message(&self, delivery: &Self::Delivery) -> OutboundMessage;
+
+    fn record_publication(
+        &self,
+        delivery: &Self::Delivery,
+        owner: &str,
+        receipt: PublicationReceipt,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+
+    fn release(
+        &self,
+        delivery: &Self::Delivery,
+        owner: &str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
