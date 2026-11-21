@@ -25,6 +25,7 @@ pub mod object_repository;
 pub mod outbox_dispatcher;
 pub mod readiness;
 pub mod snapshot_repository;
+pub mod tool_execution_store;
 pub use cas::{CasError, execute_cas};
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
 
