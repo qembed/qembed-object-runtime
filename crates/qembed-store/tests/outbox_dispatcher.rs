@@ -165,13 +165,13 @@ async fn expired_lease_can_be_reclaimed_with_a_new_fencing_token() {
 
     assert!(
         !dispatcher
-            .acknowledge(&first[0], "worker-a")
+            .acknowledge(&first[0], "worker-a", receipt())
             .await
             .expect("stale acknowledgement must be rejected")
     );
     assert!(
         dispatcher
-            .acknowledge(&second[0], "worker-b")
+            .acknowledge(&second[0], "worker-b", receipt())
             .await
             .expect("current owner should acknowledge")
     );
