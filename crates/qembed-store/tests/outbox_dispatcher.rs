@@ -118,8 +118,8 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     let (delivered, stream, sequence, duplicate): (bool, Option<String>, Option<i64>, Option<bool>) = sqlx::query_as(
         "SELECT delivered_at IS NOT NULL, publication_stream, publication_sequence, publication_duplicate FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
     )
-    .bind(tenant_id)
-    .bind(delivery_id)
+    .bind(&tenant_id)
+    .bind(&delivery_id)
     .fetch_one(&pool)
     .await
     .expect("delivery status should be readable by test owner");
@@ -130,8 +130,8 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     let receipt_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM outbox_publication_receipts WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
     )
-    .bind(tenant_id)
-    .bind(delivery_id)
+    .bind(&tenant_id)
+    .bind(&delivery_id)
     .fetch_one(&pool)
     .await
     .expect("publication history should be readable by the owner");
@@ -140,16 +140,15 @@ async fn release_and_reclaim_fence_stale_acknowledgements() {
     let immutable_error = sqlx::query(
         "UPDATE outbox_publication_receipts SET publication_duplicate = true WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
     )
-    .bind(tenant_id)
-    .bind(delivery_id)
+    .bind(&tenant_id)
+    .bind(&delivery_id)
     .execute(&pool)
     .await
     .expect_err("publication history must reject UPDATE");
     assert_eq!(
         immutable_error
             .as_database_error()
-            .and_then(|error| error.code())
-            .as_deref(),
+            .and_then(|error| error.code()),
         Some("55000")
     );
     pool.close().await;
