@@ -322,10 +322,16 @@ impl ToolExecution {
             }
         };
         if self.status != ToolExecutionStatus::Unknown || self.lease_owner.is_some() {
-            return Err(ToolExecutionError::InvalidTransition { from: self.status, to: next });
+            return Err(ToolExecutionError::InvalidTransition {
+                from: self.status,
+                to: next,
+            });
         }
         self.ensure_transition(next)?;
-        self.version = self.version.checked_add(1).ok_or(ToolExecutionError::VersionOverflow)?;
+        self.version = self
+            .version
+            .checked_add(1)
+            .ok_or(ToolExecutionError::VersionOverflow)?;
         self.status = next;
         Ok(())
     }
@@ -516,20 +522,27 @@ mod tests {
 
         let mut succeeded = execution();
         succeeded.claim("worker").expect("claim succeeds");
-        succeeded.mark_unknown_after_expiry().expect("expiry becomes Unknown");
+        succeeded
+            .mark_unknown_after_expiry()
+            .expect("expiry becomes Unknown");
         let token = succeeded.fencing_token();
-        succeeded.reconcile(R::ConfirmedSucceeded {
-            output: None,
-            output_ttl_seconds: None,
-        }).expect("confirmed success is accepted");
+        succeeded
+            .reconcile(R::ConfirmedSucceeded {
+                output: None,
+                output_ttl_seconds: None,
+            })
+            .expect("confirmed success is accepted");
         assert_eq!(succeeded.status(), ToolExecutionStatus::Succeeded);
         assert_eq!(succeeded.version(), 3);
         assert_eq!(succeeded.fencing_token(), token);
 
         let mut failed = execution();
         failed.claim("worker").expect("claim succeeds");
-        failed.mark_unknown_after_expiry().expect("expiry becomes Unknown");
-        failed.reconcile(R::ConfirmedFailed { evidence: None })
+        failed
+            .mark_unknown_after_expiry()
+            .expect("expiry becomes Unknown");
+        failed
+            .reconcile(R::ConfirmedFailed { evidence: None })
             .expect("confirmed failure is accepted");
         assert_eq!(failed.status(), ToolExecutionStatus::Failed);
     }
@@ -540,7 +553,9 @@ mod tests {
 
         let mut execution = execution();
         execution.claim("worker").expect("claim succeeds");
-        execution.mark_unknown_after_expiry().expect("expiry becomes Unknown");
+        execution
+            .mark_unknown_after_expiry()
+            .expect("expiry becomes Unknown");
         assert_eq!(
             execution.reconcile(R::Unresolved),
             Err(ToolExecutionError::UnresolvedReconciliation)
