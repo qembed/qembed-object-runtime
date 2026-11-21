@@ -269,14 +269,10 @@ mod tests {
             change_fence_before_return: false,
             store: None,
         };
-        let result = reconcile_tool_execution(
-            &store,
-            &reconciler,
-            &scope(),
-            store.execution.lock().expect("mutex").id(),
-        )
-        .await
-        .expect("workflow succeeds");
+        let id = store.execution.lock().expect("mutex").id();
+        let result = reconcile_tool_execution(&store, &reconciler, &scope(), id)
+            .await
+            .expect("workflow succeeds");
         match result {
             ToolExecutionReconciliationResult::Reconciled(execution) => {
                 assert_eq!(execution.status(), ToolExecutionStatus::Succeeded);
