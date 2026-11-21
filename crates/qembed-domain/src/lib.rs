@@ -110,6 +110,7 @@ pub mod auth;
 pub mod budget;
 pub mod caller;
 pub mod chat;
+pub mod command_id;
 pub mod ids;
 pub mod invocation;
 pub mod invocation_lease;

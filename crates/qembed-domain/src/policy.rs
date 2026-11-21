@@ -4,6 +4,7 @@
 //! domain authorization. Callers must never construct an AllowedCommand from
 //! transport data, model output, or an unverified action.
 
+use crate::command_id::derive_command_id;
 use crate::ids::{CommandId, InvocationId};
 
 /// An unforgeable-by-callers capability representing one policy-approved command.
@@ -64,6 +65,7 @@ use crate::ids::{CommandId, InvocationId};
 pub struct AllowedCommand {
     command_id: CommandId,
     invocation_id: InvocationId,
+    step_index: u32,
     action_hash: [u8; 32],
 }
 
@@ -80,6 +82,12 @@ impl AllowedCommand {
         self.invocation_id
     }
 
+    /// Returns the zero-based step index within the invocation.
+    #[must_use]
+    pub const fn step_index(&self) -> u32 {
+        self.step_index
+    }
+
     /// Returns the digest of the exact action that was authorized.
     #[must_use]
     pub const fn action_hash(&self) -> &[u8; 32] {
@@ -92,10 +100,11 @@ impl AllowedCommand {
     /// Authorizer introduced later must call this only after a positive policy
     /// decision; adapters and executors receive, but cannot manufacture, it.
     #[allow(dead_code)] // The Authorizer will use this mint boundary in RUST-078.
-    fn mint(command_id: CommandId, invocation_id: InvocationId, action_hash: [u8; 32]) -> Self {
+    fn mint(invocation_id: InvocationId, step_index: u32, action_hash: [u8; 32]) -> Self {
         Self {
-            command_id,
+            command_id: derive_command_id(invocation_id, step_index, &action_hash),
             invocation_id,
+            step_index,
             action_hash,
         }
     }
@@ -107,14 +116,18 @@ mod tests {
 
     #[test]
     fn policy_mint_creates_a_capability_bound_to_exact_command_context() {
-        let command_id = CommandId::new();
         let invocation_id = InvocationId::new();
+        let step_index = 4;
         let action_hash = [0x5a; 32];
 
-        let allowed = AllowedCommand::mint(command_id, invocation_id, action_hash);
+        let allowed = AllowedCommand::mint(invocation_id, step_index, action_hash);
 
-        assert_eq!(allowed.command_id(), command_id);
+        assert_eq!(
+            allowed.command_id(),
+            derive_command_id(invocation_id, step_index, &action_hash)
+        );
         assert_eq!(allowed.invocation_id(), invocation_id);
+        assert_eq!(allowed.step_index(), step_index);
         assert_eq!(allowed.action_hash(), &action_hash);
     }
 }
