@@ -109,8 +109,7 @@ mod tests {
         scope::Scope,
         test_support::scope_for_tenant,
         tool_execution::{
-            ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken,
-            ToolExecutionStatus,
+            ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionStatus,
         },
         tool_execution_lease::{
             ToolExecutionCompletion, ToolExecutionLeaseStore, ToolExecutionReconciliationStore,
@@ -121,9 +120,7 @@ mod tests {
         },
     };
 
-    use super::{
-        reconcile_tool_execution, ToolExecutionReconciliationResult,
-    };
+    use super::{ToolExecutionReconciliationResult, reconcile_tool_execution};
 
     #[derive(Clone)]
     struct MockStore {
@@ -140,8 +137,12 @@ mod tests {
                 CommandId::new(),
             );
             execution.claim("worker").expect("claim succeeds");
-            execution.mark_unknown_after_expiry().expect("Unknown transition succeeds");
-            Self { execution: Arc::new(Mutex::new(execution)) }
+            execution
+                .mark_unknown_after_expiry()
+                .expect("Unknown transition succeeds");
+            Self {
+                execution: Arc::new(Mutex::new(execution)),
+            }
         }
 
         fn replace_fence(&self) {
@@ -175,21 +176,44 @@ mod tests {
         }
 
         async fn claim_tool_execution(
-            &self, _: &Scope, _: ToolExecutionId, _: &str, _: u32,
-        ) -> Result<Option<ToolExecution>, Self::Error> { Ok(None) }
+            &self,
+            _: &Scope,
+            _: ToolExecutionId,
+            _: &str,
+            _: u32,
+        ) -> Result<Option<ToolExecution>, Self::Error> {
+            Ok(None)
+        }
 
         async fn heartbeat_tool_execution(
-            &self, _: &Scope, _: ToolExecutionId, _: &str, _: u64,
-            _: ToolExecutionFencingToken, _: u32,
-        ) -> Result<bool, Self::Error> { Ok(false) }
+            &self,
+            _: &Scope,
+            _: ToolExecutionId,
+            _: &str,
+            _: u64,
+            _: ToolExecutionFencingToken,
+            _: u32,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
 
         async fn mark_tool_execution_unknown(
-            &self, _: &Scope, _: ToolExecutionId, _: u64, _: ToolExecutionFencingToken,
-        ) -> Result<bool, Self::Error> { Ok(false) }
+            &self,
+            _: &Scope,
+            _: ToolExecutionId,
+            _: u64,
+            _: ToolExecutionFencingToken,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
 
         async fn complete_tool_execution(
-            &self, _: &Scope, _: ToolExecutionCompletion,
-        ) -> Result<bool, Self::Error> { Ok(false) }
+            &self,
+            _: &Scope,
+            _: ToolExecutionCompletion,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
     }
 
     impl ToolExecutionReconciliationStore for MockStore {
@@ -231,7 +255,9 @@ mod tests {
         }
     }
 
-    fn scope() -> Scope { scope_for_tenant(TenantId::new()) }
+    fn scope() -> Scope {
+        scope_for_tenant(TenantId::new())
+    }
 
     #[tokio::test]
     async fn confirmed_success_is_committed_as_terminal() {
@@ -245,9 +271,13 @@ mod tests {
             store: None,
         };
         let result = reconcile_tool_execution(
-            &store, &reconciler, &scope(),
+            &store,
+            &reconciler,
+            &scope(),
             store.execution.lock().expect("mutex").id(),
-        ).await.expect("workflow succeeds");
+        )
+        .await
+        .expect("workflow succeeds");
         match result {
             ToolExecutionReconciliationResult::Reconciled(execution) => {
                 assert_eq!(execution.status(), ToolExecutionStatus::Succeeded);
@@ -269,7 +299,8 @@ mod tests {
         };
         let id = store.execution.lock().expect("mutex").id();
         let result = reconcile_tool_execution(&store, &reconciler, &scope(), id)
-            .await.expect("workflow succeeds");
+            .await
+            .expect("workflow succeeds");
         match result {
             ToolExecutionReconciliationResult::Reconciled(execution) => {
                 assert_eq!(execution.status(), ToolExecutionStatus::Failed);
@@ -289,7 +320,8 @@ mod tests {
         };
         let id = store.execution.lock().expect("mutex").id();
         let result = reconcile_tool_execution(&store, &reconciler, &scope(), id)
-            .await.expect("unresolved is not an error");
+            .await
+            .expect("unresolved is not an error");
         assert_eq!(result, ToolExecutionReconciliationResult::Unresolved);
         let persisted = store.execution.lock().expect("mutex");
         assert_eq!(persisted.status(), ToolExecutionStatus::Unknown);
@@ -309,7 +341,8 @@ mod tests {
         };
         let id = store.execution.lock().expect("mutex").id();
         let result = reconcile_tool_execution(&store, &reconciler, &scope(), id)
-            .await.expect("stale CAS is not a storage error");
+            .await
+            .expect("stale CAS is not a storage error");
         assert_eq!(result, ToolExecutionReconciliationResult::Stale);
         let persisted = store.execution.lock().expect("mutex");
         assert_eq!(persisted.status(), ToolExecutionStatus::Unknown);
