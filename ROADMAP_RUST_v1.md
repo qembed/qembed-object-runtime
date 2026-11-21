@@ -422,7 +422,7 @@ SQLX_OFFLINE=true cargo check --workspace
 
 ### 9.3. Execution safety и budgets
 
-- [ ] **RUST-053 (M)** Реализовать независимую ToolExecution state machine и lease.
+- [x] **RUST-053 (M)** Реализовать независимую ToolExecution state machine и lease.
   - Тесты: unit transition matrix; DB integration на параллельные leases.
   - DoD: invocation lease и ToolExecution lease не используют общие token/version.
 

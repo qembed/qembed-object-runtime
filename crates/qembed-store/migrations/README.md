@@ -45,6 +45,15 @@ then inserts the invocation, and commits all related rows atomically. The
 migration follows the corresponding definitions in the canonical
 `qembed/qembed-sql` schema; it does not change that repository.
 
+The RUST-053 ToolExecution migration adds the minimal canonical prerequisites
+`tool_definitions`, `tool_versions`, and `policy_decisions`, then installs
+`tool_executions` with its own optimistic version, fencing token, lease owner,
+expiry and heartbeat. The initial claim advances only the ToolExecution-owned
+version/token; heartbeats retain both; result writes require the current live
+ToolExecution lease. Expired executions enter `Unknown` and require explicit
+reconciliation rather than automatic replay. Invocation lease metadata is not
+used as authority for ToolExecution writes.
+
 This migration chain is the implemented Rust persistence slice, not a copy of
 every future table in the full canonical schema. Tables without a current Rust
 adapter or approved implementation scope remain outside this chain until their
