@@ -124,6 +124,8 @@ pub mod principal;
 pub mod provider_call_attempt;
 pub mod scope;
 pub mod snapshot;
+pub mod tool_execution;
+pub mod tool_execution_lease;
 
 /// Test-only constructors for integration tests in adapter crates.
 ///
