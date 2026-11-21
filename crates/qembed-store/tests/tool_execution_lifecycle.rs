@@ -11,7 +11,9 @@ use qembed_domain::{
         ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionOutcome,
         ToolExecutionStatus,
     },
-    tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore},
+    tool_execution_lease::{
+        ToolExecutionCompletion, ToolExecutionLeaseStore, ToolExecutionReconciliationStore,
+    },
     tool_execution_reconciliation::{
         ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
         ToolExecutionReconciliationRequest,
