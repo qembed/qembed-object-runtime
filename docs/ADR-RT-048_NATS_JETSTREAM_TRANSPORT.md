@@ -52,13 +52,13 @@ M1a сохраняет Invocation, events и Outbox в PostgreSQL одной т�
 
 Outbox не удаляется и не считается бизнес-завершённым только из-за PubAck. Publication receipt означает лишь «broker подтвердил приём этой публикации».
 
-Recovery Sweeper периодически ищет runnable/queued Invocation, для которых нет активного execution lease и которые не продвигаются в пределах установленного progress deadline. Он повторно инициирует публикацию из сохранённого PostgreSQL Outbox payload, используя ту же logical delivery identity.
+Recovery Sweeper периодически ищет runnable/queued Invocation, для которых нет активного execution lease и которые не продвигаются в пределах установленного progress deadline. Он выставляет durable replay-request marker в PostgreSQL для исходной Outbox row; Relay снова делает её claimable даже если предыдущая публикация уже получила PubAck. Marker не удаляет и не перезаписывает историю publication receipt. После повторной публикации Relay фиксирует новый receipt и закрывает replay request. Payload и delivery_id не меняются; используется та же logical delivery identity. Физическая схема replay marker и учёт publication attempts реализуются в RUST-052c/RUST-051b после сверки с canonical qembed-sql schema.
 
 Повтор может создать дубликат, если исходное сообщение всё ещё находится в JetStream или уже обрабатывается. Это допустимо: durable Invocation state, idempotency keys, leases и fencing не дают повторно применить уже завершённый side effect.
 
 Для Unknown и неоднозначного provider outcome Sweeper **не** запускает выполнение повторно. Сначала требуется reconciliation либо доказанная upstream idempotency в соответствии с существующим Runtime contract.
 
-Retention/cleanup Outbox определяется отдельной политикой, которая сохраняет payload и identity на весь период, необходимый для recovery и аудита. Нельзя удалять единственную копию задания после PubAck.
+Relay claimable condition включает как первоначальную непубликованную запись, так и запись с активным durable replay request. Replay marker хранится в PostgreSQL и не зависит от NATS. Retention/cleanup Outbox определяется отдельной политикой, которая сохраняет payload и identity на весь период, необходимый для recovery и аудита. Нельзя удалять единственную копию задания после PubAck.
 
 ### 5. Message contract и trust boundary
 
