@@ -554,7 +554,6 @@ async fn live_or_stale_tool_execution_checkpoint_cannot_be_marked_unknown() {
     fixture.pool.close().await;
 }
 
-
 async fn transition_fixture_to_unknown(
     fixture: &Fixture,
     store: &PgToolExecutionStore,
