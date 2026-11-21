@@ -2787,7 +2787,6 @@ async fn one_thousand_invocations_of_one_configuration_pin_the_same_snapshot() {
     teardown(fixture).await;
 }
 
-
 #[tokio::test]
 async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
     let fixture = setup(None).await;
@@ -2852,13 +2851,19 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
     .fetch_one(&fixture.pool)
     .await
     .expect("object usage should be readable");
-    assert_eq!(reserved, i64::try_from(estimate).expect("estimate fits bigint"));
+    assert_eq!(
+        reserved,
+        i64::try_from(estimate).expect("estimate fits bigint")
+    );
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
     let reservations: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
         .fetch_one(&fixture.pool)
         .await
         .expect("reservation count");
-    assert_eq!(reservations, 1, "rejected transaction leaves no reservation");
+    assert_eq!(
+        reservations, 1,
+        "rejected transaction leaves no reservation"
+    );
 
     teardown(fixture).await;
 }
