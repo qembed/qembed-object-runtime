@@ -87,7 +87,7 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
         .get_or_create_consumer(
             &durable_name,
             consumer::pull::Config {
-                durable_name: Some(durable_name),
+                durable_name: Some(durable_name.clone()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_millis(300),
                 max_deliver: 5,
