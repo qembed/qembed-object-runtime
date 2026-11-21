@@ -430,7 +430,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: unit и DB integration — timeout, expired lease, запрет auto-retry, попытка запрещённого перехода.
   - DoD: Unknown не переходит в повторное выполнение автоматически.
 
-- [ ] **RUST-055 (M)** Реализовать reconciliation port и workflow.
+- [x] **RUST-055 (M)** Реализовать reconciliation port и workflow.
   - Тесты: mock reconciler для confirmed success, confirmed failure и unresolved outcome; stale fencing token rejected.
   - DoD: terminal outcome фиксируется только через актуальный reconciliation result.
 
