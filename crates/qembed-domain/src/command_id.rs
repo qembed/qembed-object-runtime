@@ -13,7 +13,7 @@ use crate::ids::{CommandId, InvocationId};
 /// The invocation UUID is the UUIDv5 namespace. The name is the versioned domain
 /// separator, the zero-based step index encoded as an unsigned 32-bit big-endian
 /// integer, and the 32-byte SHA-256 action digest. The encoding is unambiguous
-/// and independent of process, worker, clock, or host state.
+/// and independent of process, worker, clock, or host state. UUIDv5 is an\n/// identifier format, not a secret or authorization proof.
 ///
 /// Changing the encoding requires a new domain-separator version. Persisted
 /// command IDs must never be silently re-derived with a different version.
