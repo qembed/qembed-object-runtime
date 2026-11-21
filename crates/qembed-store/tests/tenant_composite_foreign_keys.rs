@@ -1,6 +1,6 @@
 mod common;
 
-use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, TenantId};
+use qembed_domain::ids::{EventId, ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_store::run_migrations;
 
 fn is_foreign_key_violation(error: sqlx::Error) -> bool {
@@ -112,6 +112,99 @@ async fn composite_foreign_keys_reject_cross_tenant_references() {
     .await
     .expect_err("outbox event FK must reject a cross-tenant event reference");
     assert!(is_foreign_key_violation(cross_tenant_outbox));
+
+    pool.close().await;
+}
+
+
+#[tokio::test]
+async fn entity_identifiers_may_repeat_across_tenants_without_cross_linking() {
+    let pool = common::connect().await;
+    run_migrations(&pool)
+        .await
+        .expect("migrations should be applied");
+
+    let tenant_a = TenantId::new();
+    let tenant_b = TenantId::new();
+    let object_id = ObjectId::new();
+    let version_id = ObjectVersionId::new();
+    let snapshot_id = SnapshotId::new();
+    let event_id = EventId::new();
+
+    for tenant in [tenant_a, tenant_b] {
+        sqlx::query("INSERT INTO objects (tenant_id, object_id) VALUES ($1::uuid, $2::uuid)")
+            .bind(tenant.to_string())
+            .bind(object_id.to_string())
+            .execute(&pool)
+            .await
+            .expect("the same ObjectId should be valid in a different tenant");
+
+        sqlx::query(
+            "INSERT INTO object_versions (tenant_id, object_id, object_version_id, version_number) \
+             VALUES ($1::uuid, $2::uuid, $3::uuid, 1)",
+        )
+        .bind(tenant.to_string())
+        .bind(object_id.to_string())
+        .bind(version_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("the same ObjectVersionId should be valid in a different tenant");
+
+        sqlx::query(
+            "INSERT INTO snapshots \
+             (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) \
+             VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7::jsonb)",
+        )
+        .bind(tenant.to_string())
+        .bind(snapshot_id.to_string())
+        .bind(object_id.to_string())
+        .bind(version_id.to_string())
+        .bind(br#"{}"#.as_slice())
+        .bind(vec![0_u8; 32])
+        .bind("{}")
+        .execute(&pool)
+        .await
+        .expect("the same SnapshotId should be valid in a different tenant");
+
+        sqlx::query(
+            "INSERT INTO events (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload) \
+             VALUES ($1::uuid, $2::uuid, 'object', $3::uuid, 'object.created', '{}'::jsonb)",
+        )
+        .bind(tenant.to_string())
+        .bind(event_id.to_string())
+        .bind(object_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("the same EventId should be valid in a different tenant");
+    }
+
+    let object_count: i64 = sqlx::query_scalar("SELECT count(*) FROM objects WHERE object_id = $1::uuid")
+        .bind(object_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .expect("object count should be readable");
+    let version_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM object_versions WHERE object_version_id = $1::uuid")
+            .bind(version_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("version count should be readable");
+    let snapshot_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM snapshots WHERE snapshot_id = $1::uuid")
+            .bind(snapshot_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("snapshot count should be readable");
+    let event_count: i64 = sqlx::query_scalar("SELECT count(*) FROM events WHERE event_id = $1::uuid")
+        .bind(event_id.to_string())
+        .fetch_one(&pool)
+        .await
+        .expect("event count should be readable");
+
+    assert_eq!(object_count, 2);
+    assert_eq!(version_count, 2);
+    assert_eq!(snapshot_count, 2);
+    assert_eq!(event_count, 2);
 
     pool.close().await;
 }
