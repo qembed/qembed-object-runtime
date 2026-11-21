@@ -375,6 +375,7 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
                   WHERE tenant_id=$5::uuid AND id=$6::uuid
                     AND status='Unknown' AND reconciliation_state='pending'
                     AND version=$7 AND fencing_token=$8
+                    AND invocation_id=$9::uuid AND command_id=$10::uuid
                 ",
             )
             .bind(next_status)
@@ -387,7 +388,9 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
             .bind(to_i64(
                 expected_fencing_token.value(),
                 "expected fencing token",
-            )?),
+            )?)
+            .bind(request.invocation_id().to_string())
+            .bind(request.command_id().to_string()),
         )
         .await?;
         transaction.commit().await?;
