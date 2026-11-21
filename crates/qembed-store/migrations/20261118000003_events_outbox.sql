@@ -17,7 +17,6 @@ CREATE TABLE events (
     payload JSONB NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, event_id),
-    UNIQUE (event_id),
     CONSTRAINT events_stream_version_unique
         UNIQUE (tenant_id, aggregate_type, aggregate_id, stream_version)
 );

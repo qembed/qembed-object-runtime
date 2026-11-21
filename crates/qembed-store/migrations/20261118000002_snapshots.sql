@@ -11,7 +11,6 @@ CREATE TABLE snapshots (
     json_projection JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (tenant_id, snapshot_id),
-    UNIQUE (snapshot_id),
     FOREIGN KEY (tenant_id, object_id, object_version_id)
         REFERENCES object_versions (tenant_id, object_id, object_version_id)
         ON DELETE RESTRICT
