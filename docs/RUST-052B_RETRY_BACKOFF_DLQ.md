@@ -6,14 +6,14 @@
 - The NATS consumer owns retry scheduling and dead-letter routing; business handlers do not call NATS APIs.
 - Retryable failures use bounded delayed NAK with exponential backoff.
 - Permanent failures are dead-lettered immediately. Retryable failures are dead-lettered after the configured maximum delivery attempt.
-- The DLQ subject and stream are provisioned by deployment configuration; the adapter does not create or mutate streams.
+- The DLQ subject and stream are provisioned by deployment configuration; the adapter does not create or mutate streams. Use a persistent file-backed stream and an appropriate retention policy.
 
 ## Delivery and loss-prevention contract
 
 - A successful handler is ACKed only after its PostgreSQL transaction has committed.
 - A retryable failure below the attempt limit receives NAK with a calculated delay.
 - A permanent or exhausted failure is published to the DLQ with a confirmed JetStream PubAck before the source message receives a confirmed ACK.
-- If DLQ publication fails, the source is not ACKed; it receives a delayed NAK so parking can be retried.
+- If DLQ publication fails, the source is not ACKed; it receives a delayed NAK so parking can be retried. The source consumer's MaxDeliver must be unlimited or high enough to allow repeated DLQ publication failures to recover.
 - The DLQ envelope preserves the original raw payload bytes, source stream/consumer/sequence, subject, delivery attempt, original delivery ID when present, and failure classification/diagnostics.
 - The DLQ message ID is deterministic from source stream, consumer and stream sequence. JetStream deduplication suppresses nearby duplicate publications; because its deduplication window is finite, DLQ consumers must also be idempotent using the stable dead-letter ID.
 - The original delivery ID is retained unchanged. DLQ identity is separate and never replaces the original business idempotency key.
@@ -37,3 +37,4 @@
 - Verify delayed retry for a retryable failure.
 - Verify permanent and exhausted failures are copied to the DLQ and the source is ACKed only after DLQ PubAck.
 - Verify DLQ envelope metadata and raw payload preservation.
+- Verify an unavailable DLQ leaves the source unacknowledged and schedules redelivery.

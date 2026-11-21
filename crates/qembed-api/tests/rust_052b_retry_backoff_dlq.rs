@@ -232,3 +232,72 @@ async fn retry_backoff_and_permanent_failures_are_parked_before_source_ack() {
         .await
         .expect("second DLQ test message is acknowledged");
 }
+
+#[tokio::test]
+async fn unavailable_dlq_keeps_source_delivery_unacknowledged() {
+    let nats_url = std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
+    let client = async_nats::connect(&nats_url)
+        .await
+        .expect("NATS is available");
+    let context = jetstream::new(client);
+    let suffix = Uuid::new_v4().simple().to_string();
+    let source_subject = format!("qembed.rust052b.dlq-unavailable.source.{suffix}");
+    let missing_dlq_subject = format!("qembed.rust052b.dlq-unavailable.missing.{suffix}");
+    let source_stream_name = format!("QEMBED_RUST052B_FAIL_SRC_{suffix}");
+    let source_durable = format!("qembed-rust052b-fail-src-{suffix}");
+
+    let source_stream = context
+        .get_or_create_stream(StreamConfig {
+            name: source_stream_name,
+            subjects: vec![source_subject.clone()],
+            max_messages: 100,
+            ..Default::default()
+        })
+        .await
+        .expect("source stream is provisioned");
+    let source_consumer = source_stream
+        .get_or_create_consumer(
+            &source_durable,
+            consumer::pull::Config {
+                durable_name: Some(source_durable.clone()),
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(2),
+                max_deliver: 10,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("source durable consumer is provisioned");
+
+    let consumer = NatsJetStreamConsumer::new(
+        source_consumer,
+        context.clone(),
+        NatsJetStreamConsumerConfig::new(
+            missing_dlq_subject,
+            1,
+            Duration::from_millis(100),
+            Duration::from_millis(250),
+            2,
+        )
+        .expect("retry policy is valid"),
+    );
+    let publisher = NatsJetStreamPublisher::new(context);
+    publisher
+        .publish(OutboundMessage::new(
+            Uuid::new_v4().to_string(),
+            source_subject,
+            serde_json::json!({"type": "poison"}),
+        ))
+        .await
+        .expect("source message is durably published");
+
+    let outcome = consumer
+        .process_batch(&PermanentFailure, 1, Duration::from_secs(2))
+        .await
+        .expect("failed DLQ publication is converted to delayed redelivery");
+    assert_eq!(outcome.received, 1);
+    assert_eq!(outcome.acknowledged, 0);
+    assert_eq!(outcome.dead_lettered, 0);
+    assert_eq!(outcome.dead_letter_failed, 1);
+    assert_eq!(outcome.retry_scheduled, 1);
+}
