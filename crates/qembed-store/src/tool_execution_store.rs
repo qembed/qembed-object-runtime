@@ -3,9 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use qembed_domain::ids::{
-    CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId,
-};
+use qembed_domain::ids::{CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId};
 use qembed_domain::scope::Scope;
 use qembed_domain::tool_execution::{
     ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionOutcome,
@@ -165,7 +163,10 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
             .bind(execution_id.to_string())
             .bind(owner)
             .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
+            .bind(to_i64(
+                expected_fencing_token.value(),
+                "expected fencing token",
+            )?),
         )
         .await?;
         transaction.commit().await?;
@@ -271,8 +272,8 @@ fn reconstitute_tool_execution(
     let invocation_id = parse_id::<InvocationId>(&row.3, "invocation_id")?;
     let command_id = parse_id::<CommandId>(&row.4, "command_id")?;
     let status = parse_status(&row.5)?;
-    let version =
-        u64::try_from(row.6).map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("version"))?;
+    let version = u64::try_from(row.6)
+        .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("version"))?;
     let token = u64::try_from(row.7)
         .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("fencing_token"))?;
 
@@ -291,10 +292,7 @@ fn reconstitute_tool_execution(
     ))
 }
 
-fn parse_id<T: FromStr>(
-    value: &str,
-    field: &'static str,
-) -> Result<T, ToolExecutionStoreError> {
+fn parse_id<T: FromStr>(value: &str, field: &'static str) -> Result<T, ToolExecutionStoreError> {
     value
         .parse()
         .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue(field))
