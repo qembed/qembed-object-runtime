@@ -234,7 +234,10 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
             .bind(execution_id.to_string())
             .bind(owner)
             .bind(to_i64(expected_version, "expected version")?)
-            .bind(to_i64(expected_fencing_token.value(), "expected fencing token")?),
+            .bind(to_i64(
+                expected_fencing_token.value(),
+                "expected fencing token",
+            )?),
         )
         .await?;
         transaction.commit().await?;
