@@ -9,7 +9,6 @@ use qembed_domain::tool_execution::{
     ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionStatus,
 };
 use qembed_domain::tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore};
-use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::{begin_tenant_transaction, execute, fetch_optional};
