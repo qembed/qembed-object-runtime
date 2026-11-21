@@ -49,3 +49,10 @@ This migration chain is the implemented Rust persistence slice, not a copy of
 every future table in the full canonical schema. Tables without a current Rust
 adapter or approved implementation scope remain outside this chain until their
 corresponding work is scheduled.
+
+The RUST-052c migration adds a durable replay marker to an already-published
+Outbox row and a tenant-scoped PostgreSQL recovery function. The sweeper only
+marks stale Received invocations with no active lease and safe provider-attempt
+evidence. The Relay republishes the same delivery ID; successful PubAck clears
+the pending marker while appending to the immutable publication receipt history.
+Ambiguous provider outcomes fail closed and are left to reconciliation.
