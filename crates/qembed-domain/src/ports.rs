@@ -465,6 +465,11 @@ pub enum MessageFailureKind {
 }
 
 /// A classified application failure used by the consumer retry/DLQ policy.
+///
+/// For an invocation message, returning Permanent requires the handler to
+/// commit the invocation's terminal Failed state before returning. Otherwise
+/// the PostgreSQL recovery sweeper would correctly still see a Received
+/// invocation and could replay a poison delivery that was already parked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MessageHandlerError {
     kind: MessageFailureKind,
@@ -516,6 +521,11 @@ impl std::fmt::Display for MessageHandlerError {
 impl Error for MessageHandlerError {}
 
 /// A handler may return Ok only after its durable PostgreSQL work has committed.
+///
+/// Retryable errors must leave the invocation in a retryable, non-terminal
+/// state. Permanent errors for invocation.received must be returned only after
+/// a terminal Failed state has committed in PostgreSQL; the recovery sweeper
+/// deliberately replays only Received invocations.
 pub trait InboundMessageHandler: Send + Sync {
     fn handle(
         &self,
