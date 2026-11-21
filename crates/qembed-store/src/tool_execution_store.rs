@@ -8,7 +8,7 @@ use qembed_domain::scope::Scope;
 use qembed_domain::tool_execution::{
     ToolExecution, ToolExecutionCheckpoint, ToolExecutionFencingToken, ToolExecutionStatus,
 };
-use qembed_domain::tool_execution_lease::ToolExecutionLeaseStore;
+use qembed_domain::tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore};
 use serde_json::Value;
 use sqlx::PgPool;
 
@@ -177,15 +177,18 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
     async fn complete_tool_execution(
         &self,
         scope: &Scope,
-        execution_id: ToolExecutionId,
-        owner: &str,
-        expected_version: u64,
-        expected_fencing_token: ToolExecutionFencingToken,
-        next: ToolExecution,
-        output: Option<Value>,
-        output_ttl_seconds: Option<u32>,
+        completion: ToolExecutionCompletion,
     ) -> Result<bool, Self::Error> {
-        validate_owner(owner)?;
+        let ToolExecutionCompletion {
+            execution_id,
+            owner,
+            expected_version,
+            expected_fencing_token,
+            next,
+            output,
+            output_ttl_seconds,
+        } = completion;
+        validate_owner(&owner)?;
         let next_status = validate_next_execution(
             scope,
             execution_id,
