@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::ids::ToolExecutionId;
 use crate::scope::Scope;
-use crate::tool_execution::{ToolExecution, ToolExecutionFencingToken, ToolExecutionOutcome};
+use crate::tool_execution::{ToolExecution, ToolExecutionFencingToken};
 
 /// Persistence boundary for one independently leased tool command.
 ///
@@ -51,6 +51,7 @@ pub trait ToolExecutionLeaseStore: Send + Sync {
 
     /// Commits a known result under the current ToolExecution lease.
     ///
+    /// The caller must first apply the domain state transition to `next`.
     /// Successful output, when present, must have a positive retention TTL.
     /// The SQL adapter verifies owner, unexpired lease, expected version and
     /// ToolExecution fencing token in the same UPDATE that writes the result.
@@ -61,7 +62,7 @@ pub trait ToolExecutionLeaseStore: Send + Sync {
         owner: &str,
         expected_version: u64,
         expected_fencing_token: ToolExecutionFencingToken,
-        outcome: ToolExecutionOutcome,
+        next: ToolExecution,
         output: Option<Value>,
         output_ttl_seconds: Option<u32>,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
