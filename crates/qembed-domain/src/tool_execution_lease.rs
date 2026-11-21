@@ -5,10 +5,8 @@ use std::future::Future;
 use serde_json::Value;
 
 use crate::ids::ToolExecutionId;
-use crate::tool_execution::{
-    ToolExecution, ToolExecutionFencingToken, ToolExecutionOutcome,
-};
 use crate::scope::Scope;
+use crate::tool_execution::{ToolExecution, ToolExecutionFencingToken, ToolExecutionOutcome};
 
 /// Persistence boundary for one independently leased tool command.
 ///
