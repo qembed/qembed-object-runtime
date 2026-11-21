@@ -3,7 +3,7 @@
 use qembed_domain::{
     scope::Scope,
     tool_execution::{ToolExecution, ToolExecutionError, ToolExecutionStatus},
-    tool_execution_lease::{ToolExecutionLeaseStore, ToolExecutionReconciliationStore},
+    tool_execution_lease::ToolExecutionReconciliationStore,
     tool_execution_reconciliation::{
         ToolExecutionReconciler, ToolExecutionReconciliationCompletion,
         ToolExecutionReconciliationOutcome, ToolExecutionReconciliationRequest,
