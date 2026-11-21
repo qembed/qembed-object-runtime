@@ -260,23 +260,21 @@ impl OutboxDeliveryStore for PgOutboxDispatcher {
     type Delivery = OutboxDelivery;
     type Error = OutboxDispatcherError;
 
-    fn claim_batch(
+    async fn claim_batch(
         &self,
         owner: &str,
         topic: &str,
         batch_size: u16,
         lease_seconds: u32,
-    ) -> impl std::future::Future<Output = Result<Vec<Self::Delivery>, Self::Error>> + Send {
-        async move {
-            PgOutboxDispatcher::claim_batch(
-                self,
-                owner,
-                topic,
-                i64::from(batch_size),
-                i64::from(lease_seconds),
-            )
-            .await
-        }
+    ) -> Result<Vec<Self::Delivery>, Self::Error> {
+        PgOutboxDispatcher::claim_batch(
+            self,
+            owner,
+            topic,
+            i64::from(batch_size),
+            i64::from(lease_seconds),
+        )
+        .await
     }
 
     fn outbound_message(&self, delivery: &Self::Delivery) -> OutboundMessage {
@@ -287,20 +285,20 @@ impl OutboxDeliveryStore for PgOutboxDispatcher {
         )
     }
 
-    fn record_publication(
+    async fn record_publication(
         &self,
         delivery: &Self::Delivery,
         owner: &str,
         receipt: PublicationReceipt,
-    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
-        async move { PgOutboxDispatcher::acknowledge(self, delivery, owner, receipt).await }
+    ) -> Result<bool, Self::Error> {
+        PgOutboxDispatcher::acknowledge(self, delivery, owner, receipt).await
     }
 
-    fn release(
+    async fn release(
         &self,
         delivery: &Self::Delivery,
         owner: &str,
-    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
-        async move { PgOutboxDispatcher::release(self, delivery, owner).await }
+    ) -> Result<bool, Self::Error> {
+        PgOutboxDispatcher::release(self, delivery, owner).await
     }
 }
