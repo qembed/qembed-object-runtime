@@ -12,9 +12,11 @@ digest is appropriate for random API credentials, not for human passwords;
 password authentication would require a dedicated password-hashing scheme.
 
 The object repository migration adds tenant-owned objects and numbered object
-versions. Composite foreign keys keep every version attached to an object in
-the same tenant; database uniqueness constraints prevent duplicate object IDs
-and per-object version numbers.
+versions. Object IDs are unique within a tenant; ObjectVersion IDs are unique
+within their tenant/object pair. Composite primary and foreign keys preserve
+those scopes and prevent cross-tenant or cross-object references. These UUIDs
+are deliberately not globally unique: a uniqueness error must not reveal that
+another tenant already uses an identifier.
 
 The snapshot migration stores the exact canonical JSON byte sequence in
 `snapshots.canonical_json BYTEA`. Its SHA-256 digest is stored separately in
@@ -65,3 +67,6 @@ marks stale Received invocations with no active lease and safe provider-attempt
 evidence. The Relay republishes the same delivery ID; successful PubAck clears
 the pending marker while appending to the immutable publication receipt history.
 Ambiguous provider outcomes fail closed and are left to reconciliation.
+
+
+Snapshot IDs and Event IDs are likewise tenant-scoped by their composite primary keys. Outbox references include tenant_id, so no global uniqueness on either UUID is required. Runtime lookups must always carry the authenticated tenant scope.
