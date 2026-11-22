@@ -323,7 +323,7 @@ async fn begin_context_transaction_inner(
     scope: &Scope,
     requested_caller_id: Option<CallerId>,
     issuer: &ContextIssuer,
- ) -> Result<(ContextTransaction, Option<ResolvedCaller>), ContextTransactionError> {
+) -> Result<(ContextTransaction, Option<ResolvedCaller>), ContextTransactionError> {
     let mut transaction = begin_context_tenant_transaction(pool, scope)
         .await
         .map_err(ContextTransactionError::Database)?;
