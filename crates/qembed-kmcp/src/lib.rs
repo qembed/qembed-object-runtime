@@ -1,22 +1,19 @@
-//! Provider-neutral policy core for the RT-050 Key Management Control Plane.
-//!
-//! This crate contains deterministic lifecycle policy. It deliberately has no
-//! HTTP, PostgreSQL, OIDC, KMS, HSM, filesystem, or network dependency.
-//!
-//! The caller must obtain authenticated operator/approver identities from a
-//! trusted authorization adapter and persist each accepted decision using an
-//! atomic compare-and-set operation that commits the registry change, immutable
-//! audit event, and audit-outbox row together. This crate does not authenticate
-//! identities or persist state.
-//!
-//! See `docs/RT-050_KMCP_CORE.md` for the trust boundaries and integration
-//! contract.
+//! Provider-neutral policy and adapter contracts for the RT-050 KMCP.
+//! No HTTP, PostgreSQL, OIDC, KMS, HSM, filesystem or network dependency.
+//! See docs/RT-050_KMCP_CORE.md and docs/RT-050_KMCP_ADAPTER_PORTS.md.
 
 #![forbid(unsafe_code)]
 
 pub mod lifecycle;
+pub mod ports;
 
 pub use lifecycle::{
     LifecycleAction, LifecycleDecision, LifecycleError, LifecycleRequest, LifecycleState,
     plan_transition,
+};
+pub use ports::{
+    AdminAuthorizer, AdminCredential, AdminOperation, AdminPermission, ApplyOutcome, AuditEvent,
+    AuditExportError, AuditLease, AuditOutboxExporter, AuthorizationError, AuthorizedAdmin,
+    KeyProvider, KeyRegistry, OperationRecord, ProviderError, ProvisionedKey, RegistryError,
+    RegistryKey,
 };
