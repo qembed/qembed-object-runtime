@@ -3,9 +3,8 @@ mod support;
 use qembed_domain::ids::{ObjectId, PrincipalId, TenantId};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
-use support::test;
+use support::{owner_router, test};
 
-use qembed_api::composition::configure_owner_routes;
 
 #[tokio::test]
 async fn owner_create_object_authenticates_and_persists_a_server_generated_draft() {
@@ -41,7 +40,7 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
     .await
     .expect("owner credential fixture should be inserted");
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let app = test::init_service(owner_router(pool.clone())).await;
 
     let oversized_body = test::call_service(
         &app,
