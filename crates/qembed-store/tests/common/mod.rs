@@ -1,8 +1,9 @@
 use qembed_store::{
-    ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey, connect_pool,
+    ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
+    connect_pool,
 };
-use uuid::Uuid;
 use sqlx::PgPool;
+use uuid::Uuid;
 
 pub async fn connect() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
@@ -12,7 +13,6 @@ pub async fn connect() -> PgPool {
         .await
         .expect("the PostgreSQL test database should accept connections")
 }
-
 
 /// Creates a test-only signer and registers its public key through the dedicated
 /// PostgreSQL key-control-plane identity. Each test gets a unique key ID so
@@ -41,9 +41,7 @@ pub async fn signed_context(pool: &PgPool) -> PgContext {
         .await
         .expect("test harness should assume the dedicated key-control-plane identity");
 
-    sqlx::query(
-        "SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)",
-    )
+    sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
     .bind(&key_id)
     .bind(public_key.to_vec())
     .bind(issuer_name)
@@ -74,13 +72,9 @@ pub async fn signed_context(pool: &PgPool) -> PgContext {
         .expect("control-plane identity must be reset before pool reuse");
     drop(control_plane);
 
-    let config = ContextIssuerConfig::with_default_lifetime(
-        issuer_name,
-        audience,
-        deployment_id,
-        key_id,
-    )
-    .expect("test issuer configuration should be valid");
+    let config =
+        ContextIssuerConfig::with_default_lifetime(issuer_name, audience, deployment_id, key_id)
+            .expect("test issuer configuration should be valid");
     let issuer = ContextIssuer::new(config, signing_key)
         .expect("test issuer configuration and signing key should match");
     PgContext::new(pool.clone(), issuer)
