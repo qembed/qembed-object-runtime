@@ -115,7 +115,9 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     .await
     .expect("explicit Principal-to-Caller delegation should be inserted");
 
-    let first_app = test::init_service(configure_owner_routes(first_pool.clone())).await;
+    let first_context = support::signed_context(&first_pool).await;
+    let first_app =
+        test::init_service(configure_owner_routes(first_pool.clone(), first_context)).await;
 
     let object_response = test::call_service(
         &first_app,
@@ -264,7 +266,7 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
         .expect("valid worker config")
         .with_lease("walking-skeleton-after-restart", 60);
     let worker = InvocationWorker::new(
-        PgExecutionStore::new(second_pool.clone()),
+        PgExecutionStore::new(support::signed_context(&second_pool).await),
         provider,
         worker_config,
     );
@@ -282,7 +284,9 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     );
 
     // Retrieve the durable result through the Owner HTTP API, not from worker memory.
-    let second_app = test::init_service(configure_owner_routes(second_pool.clone())).await;
+    let second_context = support::signed_context(&second_pool).await;
+    let second_app =
+        test::init_service(configure_owner_routes(second_pool.clone(), second_context)).await;
     let inspected = test::call_service(
         &second_app,
         test::TestRequest::get()

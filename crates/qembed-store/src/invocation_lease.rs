@@ -10,7 +10,7 @@ use qembed_domain::provider_call_attempt::{ProviderCallAttempt, ProviderCallAtte
 use qembed_domain::scope::Scope;
 
 use crate::invocation_worker::{InvocationStoreError, PgExecutionStore};
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{execute, fetch_optional};
 
 type InvocationRow = (String, String, String, String, String, String, i64, i64);
 
@@ -23,7 +23,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         lease_seconds: u32,
     ) -> Result<Option<Invocation>, Self::Error> {
         validate_lease_request(owner, lease_seconds)?;
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, InvocationRow>(
@@ -49,7 +49,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         lease_seconds: u32,
     ) -> Result<bool, Self::Error> {
         validate_lease_request(owner, lease_seconds)?;
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -80,7 +80,7 @@ impl InvocationLeaseStore for PgExecutionStore {
                 "terminal transitions require a dedicated atomic result operation",
             ));
         }
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -106,7 +106,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         object_id: ObjectId,
         invocation_id: InvocationId,
     ) -> Result<Option<ProviderCallAttempt>, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, (String, Option<i64>, Option<i64>)>(
@@ -150,7 +150,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         expected_version: u64,
         expected_fencing_token: FencingToken,
     ) -> Result<bool, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -177,7 +177,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         expected_version: u64,
         expected_fencing_token: FencingToken,
     ) -> Result<bool, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -215,7 +215,7 @@ impl InvocationLeaseStore for PgExecutionStore {
                 "provider response must be non-empty and transition Processing to Verifying",
             ));
         }
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let attempt = execute(
             &mut transaction,
             sqlx::query(
@@ -292,7 +292,7 @@ impl InvocationLeaseStore for PgExecutionStore {
 
         // Verify ownership before settlement. Settlement is replay-safe, but a
         // stale worker must not initiate accounting writes after losing its lease.
-        let mut ownership = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut ownership = self.context.begin_principal(scope).await?;
         let live = fetch_optional(
             &mut ownership,
             sqlx::query_as::<_, (String,)>(
@@ -327,7 +327,7 @@ impl InvocationLeaseStore for PgExecutionStore {
             ));
         }
         crate::budget_settlement::settle_invocation_usage(
-            &self.pool,
+            &self.context,
             scope,
             next.id(),
             attempt.usage(),
@@ -335,7 +335,7 @@ impl InvocationLeaseStore for PgExecutionStore {
         .await
         .map_err(InvocationStoreError::Settlement)?;
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
 
         // The canonical SQL trigger permits release of an expired lease on a
         // terminal transition, but rejects changing the owner of a live lease.
@@ -404,7 +404,7 @@ impl InvocationLeaseStore for PgExecutionStore {
                 "failure must use a stable allowlisted provider error code",
             ));
         }
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
 
         // A terminal failure is safe only while the attempt proves that the
         // provider was not authorized to receive the request or rejected it.

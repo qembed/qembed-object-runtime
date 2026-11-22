@@ -27,7 +27,8 @@ async fn setup() -> Fixture {
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
     let version_id = ObjectVersionId::new();
-    let objects = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let objects = ObjectRepository::new(context);
 
     objects
         .create_object(&scope, &Object::new(object_id, tenant_id))

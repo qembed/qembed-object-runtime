@@ -104,7 +104,8 @@ async fn setup() -> (PgPool, ObjectRepository, Scope, ObjectId) {
         .await
         .expect("migrations should be applied");
 
-    let repository = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let repository = ObjectRepository::new(context);
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();

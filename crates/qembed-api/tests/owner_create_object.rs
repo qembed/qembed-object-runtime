@@ -41,7 +41,8 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
     .await
     .expect("owner credential fixture should be inserted");
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let context = support::signed_context(&pool).await;
+    let app = test::init_service(configure_owner_routes(pool.clone(), context)).await;
 
     let oversized_body = test::call_service(
         &app,

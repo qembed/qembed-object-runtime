@@ -29,14 +29,13 @@ use std::str::FromStr;
 use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
-use sqlx::PgPool;
 
-use crate::{begin_tenant_transaction, fetch_optional};
+use crate::{PgContext, fetch_optional};
 
 /// Retrieves immutable snapshots. Creation is owned by ObjectRepository.
 #[derive(Clone, Debug)]
 pub struct SnapshotRepository {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl SnapshotRepository {
@@ -50,10 +49,10 @@ impl SnapshotRepository {
     ///     repository.insert(scope, snapshot).await;
     /// }
     /// ```
-    /// Creates a repository backed by the application's PostgreSQL pool.
+    /// Creates a repository backed by the application's signed PostgreSQL context.
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 
     /// Reads a snapshot and verifies SHA-256 against the exact persisted bytes.
@@ -62,9 +61,11 @@ impl SnapshotRepository {
         scope: &Scope,
         snapshot_id: SnapshotId,
     ) -> Result<Option<Snapshot>, SnapshotRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(SnapshotRepositoryError::Database)?;
+            .map_err(SnapshotRepositoryError::Context)?;
 
         let row = fetch_optional(
             &mut transaction,
@@ -146,6 +147,8 @@ pub enum SnapshotRepositoryError {
     InvalidHashLength,
     /// The persisted snapshot failed a domain invariant, including hash verification.
     Domain(SnapshotError),
+    /// Signed transaction context could not be established.
+    Context(crate::ContextTransactionError),
     /// PostgreSQL rejected the operation or could not complete it.
     Database(sqlx::Error),
 }
@@ -164,6 +167,12 @@ impl fmt::Display for SnapshotRepositoryError {
                 formatter.write_str("persisted snapshot hash is not 32 bytes")
             }
             Self::Domain(error) => write!(formatter, "snapshot domain invariant failed: {error:?}"),
+            Self::Context(error) => {
+                write!(
+                    formatter,
+                    "snapshot repository signed-context error: {error}"
+                )
+            }
             Self::Database(error) => {
                 write!(formatter, "snapshot repository database error: {error}")
             }
@@ -174,6 +183,7 @@ impl fmt::Display for SnapshotRepositoryError {
 impl std::error::Error for SnapshotRepositoryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }

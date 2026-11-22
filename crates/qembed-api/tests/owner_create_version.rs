@@ -47,7 +47,8 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     insert_owner(&pool, tenant_id, &token).await;
     insert_owner(&pool, other_tenant_id, &other_token).await;
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let context = support::signed_context(&pool).await;
+    let app = test::init_service(configure_owner_routes(pool.clone(), context)).await;
 
     let object_response = test::call_service(
         &app,
