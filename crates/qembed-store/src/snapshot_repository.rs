@@ -168,7 +168,10 @@ impl fmt::Display for SnapshotRepositoryError {
             }
             Self::Domain(error) => write!(formatter, "snapshot domain invariant failed: {error:?}"),
             Self::Context(error) => {
-                write!(formatter, "snapshot repository signed-context error: {error}")
+                write!(
+                    formatter,
+                    "snapshot repository signed-context error: {error}"
+                )
             }
             Self::Database(error) => {
                 write!(formatter, "snapshot repository database error: {error}")
