@@ -2,11 +2,11 @@
 
 use std::fmt;
 
+use crate::{PgContext, execute, fetch_optional};
 use qembed_domain::budget::settle_token_usage;
 use qembed_domain::chat::TokenUsage;
 use qembed_domain::ids::InvocationId;
 use qembed_domain::scope::Scope;
-use crate::{PgContext, execute, fetch_optional};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SettlementOutcome {
@@ -64,7 +64,10 @@ impl fmt::Display for UsageSettlementError {
             Self::ArithmeticOverflow => {
                 formatter.write_str("provider token usage exceeds the supported accounting range")
             }
-            Self::Context(error) => write!(formatter, "provider usage settlement signed-context initialization failed: {error}"),
+            Self::Context(error) => write!(
+                formatter,
+                "provider usage settlement signed-context initialization failed: {error}"
+            ),
             Self::Database(error) => write!(
                 formatter,
                 "provider usage settlement database error: {error}"
