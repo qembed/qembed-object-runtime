@@ -163,7 +163,23 @@ async fn setup(provider_attempt_state: &str) -> Fixture {
 #[tokio::test]
 async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_puback_history() {
     let fixture = setup("NotStarted").await;
-    let sweeper = PgInvocationRecoverySweeper::new(fixture.context.clone());
+    // Keep one physical connection so the forged session GUC is guaranteed
+    // to be present when PgContext opens the signed transaction.
+    let context_pool = common::connect_with_max_connections(1).await;
+    let context = common::signed_context(&context_pool).await;
+    let forged_tenant_id = TenantId::new();
+    let mut connection = context_pool
+        .acquire()
+        .await
+        .expect("single test connection should be acquired");
+    sqlx::query("SELECT set_config('app.tenant_id', $1, false)")
+        .bind(forged_tenant_id.to_string())
+        .execute(&mut *connection)
+        .await
+        .expect("legacy tenant GUC should be forged for the regression test");
+    drop(connection);
+
+    let sweeper = PgInvocationRecoverySweeper::new(context);
     let cutoff = SystemTime::now() - Duration::from_secs(60);
 
     let first = sweeper
@@ -247,6 +263,7 @@ async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_pu
         "the first PubAck remains in append-only history"
     );
 
+    context_pool.close().await;
     fixture.pool.close().await;
 }
 
