@@ -231,7 +231,9 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     let retry_after_seconds = decision
                         .retry_after()
                         .map_or(1, |duration| duration.as_secs().max(1));
-                    return Err(OwnerApiBackendError::RateLimited { retry_after_seconds });
+                    return Err(OwnerApiBackendError::RateLimited {
+                        retry_after_seconds,
+                    });
                 }
                 Ok(_) => {}
                 Err(error) => {
