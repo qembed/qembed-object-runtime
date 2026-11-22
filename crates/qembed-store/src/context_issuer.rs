@@ -175,7 +175,7 @@ impl ContextIssuer {
     fn issue(
         &self,
         scope: &Scope,
-        caller: &ResolvedCaller,
+        caller_id: Option<CallerId>,
         binding: &PgContextBinding,
     ) -> Result<String, ContextIssuerError> {
         let now = OffsetDateTime::now_utc();
@@ -189,7 +189,7 @@ impl ContextIssuer {
             version: "1".to_owned(),
             tenant_id: scope.tenant_id().to_string(),
             principal_id: scope.principal().principal_id().to_string(),
-            caller_id: caller.caller_id().to_string(),
+            caller_id: caller_id.map(|id| id.to_string()),
             backend_pid: binding.backend_pid.to_string(),
             transaction_id: binding.transaction_id.clone(),
             database_oid: binding.database_oid.clone(),
@@ -235,7 +235,7 @@ struct ContextClaims {
     version: String,
     tenant_id: String,
     principal_id: String,
-    caller_id: String,
+    caller_id: Option<String>,
     backend_pid: String,
     transaction_id: String,
     database_oid: String,
@@ -286,23 +286,46 @@ pub async fn begin_context_transaction(
     requested_caller_id: CallerId,
     issuer: &ContextIssuer,
 ) -> Result<ContextTransaction, ContextTransactionError> {
+    begin_context_transaction_inner(pool, scope, Some(requested_caller_id), issuer).await
+}
+
+/// Begins a Principal-only signed context. The token contains JSON null for
+/// caller_id; no Caller delegation is selected, resolved, or inferred.
+pub async fn begin_principal_context_transaction(
+    pool: &sqlx::PgPool,
+    scope: &Scope,
+    issuer: &ContextIssuer,
+) -> Result<ContextTransaction, ContextTransactionError> {
+    begin_context_transaction_inner(pool, scope, None, issuer).await
+}
+
+async fn begin_context_transaction_inner(
+    pool: &sqlx::PgPool,
+    scope: &Scope,
+    requested_caller_id: Option<CallerId>,
+    issuer: &ContextIssuer,
+) -> Result<ContextTransaction, ContextTransactionError> {
     let mut transaction = begin_context_tenant_transaction(pool, scope)
         .await
         .map_err(ContextTransactionError::Database)?;
 
     let binding = PgContextBinding::read(&mut transaction).await?;
-    let caller = resolve_delegated_caller(&mut transaction, requested_caller_id)
-        .await
-        .map_err(ContextTransactionError::CallerResolution)?;
-
-    if !caller.is_bound_to(&transaction, scope) {
-        return Err(ContextTransactionError::CallerTransactionMismatch);
-    }
+    let caller_id = if let Some(requested_caller_id) = requested_caller_id {
+        let caller = resolve_delegated_caller(&mut transaction, requested_caller_id)
+            .await
+            .map_err(ContextTransactionError::CallerResolution)?;
+        if !caller.is_bound_to(&transaction, scope) {
+            return Err(ContextTransactionError::CallerTransactionMismatch);
+        }
+        Some(caller.caller_id())
+    } else {
+        None
+    };
 
     // Signing is local and synchronous: no KMS/network operation is performed
     // while delegation row locks are held.
     let token = issuer
-        .issue(scope, &caller, &binding)
+        .issue(scope, caller_id, &binding)
         .map_err(ContextTransactionError::Issuer)?;
 
     sqlx::query("SELECT set_config('app.context_token', $1, true)")
