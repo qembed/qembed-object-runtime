@@ -28,6 +28,7 @@ The control plane is not called for each token. A control-plane outage must not 
 | Runtime DB role | Execute tenant-scoped work and verified-context accessors | Read/write key registry; execute key-management functions |
 | Signer identity | Sign RT-050 payloads with one explicitly assigned key | Register/activate/retire/revoke keys; read arbitrary key inventory |
 | KMCP service identity | Call narrowly scoped administrative database functions | Read/write registry tables directly; sign runtime context tokens |
+| Audit Exporter identity | Poll pending audit-export events and acknowledge external sink delivery | Read/write audit or outbox tables directly; manage keys or sign runtime context tokens |
 | Human Key Operator | Stage a key and initiate a planned rotation | Directly access database tables or private key material |
 | Human Key Approver | Approve activation and planned retirement | Export private key material |
 | Break-glass Revoker | Revoke a compromised key during an incident | Reactivate or replace a key |
@@ -43,7 +44,8 @@ The signer identity is workload identity, not a human identity. It is scoped to 
 Production SQL must create distinct roles:
 
 - `qembed_key_registry_owner` — `NOLOGIN`; owns the registry and SECURITY DEFINER management functions.
-- `qembed_key_control_plane` — dedicated login identity for the KMCP service; no direct table DML; EXECUTE only on the approved management functions.
+- `qembed_key_control_plane` — dedicated login identity for the KMCP service; no direct table DML; EXECUTE only on the approved management and metadata-reader functions.
+- `qembed_key_audit_exporter` — separate login identity for the audit outbox dispatcher; no direct audit/outbox table access; EXECUTE only on pending-event, failure-recording, and delivery-acknowledgement functions.
 - `qembed_runtime` — application runtime role; verified-context access only; no registry read or lifecycle-function execution.
 
 Management functions must:
@@ -56,7 +58,7 @@ Management functions must:
 
 The database records the authenticated database service identity (`session_user`), request ID, actor subject, approval reference, reason, and deployment ID. The actor subject is asserted by the KMCP after OIDC authentication; PostgreSQL does not independently validate the external identity token. The KMCP must also emit the same event to an independently controlled, append-only audit sink. A database audit row alone is not sufficient evidence against compromise of the KMCP service.
 
-Runtime roles must never be members of the control-plane role, directly or through inherited role membership.
+Runtime roles must never be members of the control-plane or audit-exporter roles, directly or through inherited role membership. The control-plane and exporter identities are also separate from each other.
 
 ## 3. Production key lifecycle
 
