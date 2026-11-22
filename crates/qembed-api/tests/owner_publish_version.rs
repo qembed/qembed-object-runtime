@@ -82,7 +82,8 @@ async fn owner_publication_validates_first_version_and_replacement() {
     insert_owner(&pool, tenant_id, &token).await;
     insert_owner(&pool, other_tenant, &other_token).await;
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let context = support::signed_context(&pool).await;
+    let app = test::init_service(configure_owner_routes(pool.clone(), context)).await;
 
     let object_response = owner_post!(&app, "/owner/objects".to_owned(), tenant_id, &token);
     assert_eq!(object_response.status(), StatusCode::CREATED);
