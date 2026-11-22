@@ -7,24 +7,23 @@ use qembed_domain::invocation::InvocationStatus;
 use qembed_domain::invocation_read::InvocationReadModel;
 use qembed_domain::ports::InvocationReadStore;
 use qembed_domain::scope::Scope;
-use sqlx::PgPool;
-
-use crate::{begin_tenant_transaction, fetch_optional};
+use crate::{PgContext, fetch_optional};
 
 #[derive(Clone)]
 pub struct PgInvocationQueryStore {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl PgInvocationQueryStore {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 }
 
 #[derive(Debug)]
 pub enum InvocationQueryError {
+    Context(crate::ContextTransactionError),
     Database(sqlx::Error),
     InvalidPersistedValue(&'static str),
 }
@@ -32,6 +31,7 @@ pub enum InvocationQueryError {
 impl fmt::Display for InvocationQueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Context(error) => write!(formatter, "invocation query signed-context initialization failed: {error}"),
             Self::Database(error) => write!(formatter, "invocation query failed: {error}"),
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted invocation has invalid {field}")
@@ -43,6 +43,7 @@ impl fmt::Display for InvocationQueryError {
 impl std::error::Error for InvocationQueryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             Self::InvalidPersistedValue(_) => None,
         }
@@ -63,7 +64,7 @@ impl InvocationReadStore for PgInvocationQueryStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<Option<InvocationReadModel>, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await.map_err(InvocationQueryError::Context)?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
