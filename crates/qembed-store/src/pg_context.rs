@@ -11,14 +11,10 @@
 use qembed_domain::{ids::CallerId, scope::Scope};
 use sqlx::PgPool;
 
+use crate::caller::ResolvedCaller;
 use crate::{
     ContextIssuer, ContextTransaction, ContextTransactionError,
     begin_caller_context_transaction, begin_principal_context_transaction,
-};
-use crate::caller::ResolvedCaller;
-
-// keep import grouping stable
-
 };
 
 /// PostgreSQL access capability that requires signed context for transactions.
