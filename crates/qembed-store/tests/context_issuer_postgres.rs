@@ -194,17 +194,17 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .expect("test issuer configuration should be valid");
 
     sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
-    .bind(&key_id)
-    .bind(public_key.to_vec())
-    .bind(issuer_name)
-    .bind(&audience)
-    .bind(deployment_id)
-    .bind("operator:rt050-test")
-    .bind(Uuid::new_v4())
-    .bind("integration test key staging")
-    .execute(&mut *admin_connection)
-    .await
-    .expect("the control plane should stage only the public key");
+        .bind(&key_id)
+        .bind(public_key.to_vec())
+        .bind(issuer_name)
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rt050-test")
+        .bind(Uuid::new_v4())
+        .bind("integration test key staging")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("the control plane should stage only the public key");
 
     let _: String = sqlx::query_scalar(
         "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
@@ -579,13 +579,13 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .expect("transaction with rejected token should still be cleanly closable");
 
     sqlx::query("SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)")
-    .bind(&key_id)
-    .bind("break-glass:rt050-test")
-    .bind(Uuid::new_v4())
-    .bind("incident: RT-050 integration emergency revoke")
-    .execute(&mut *admin_connection)
-    .await
-    .expect("break-glass control-plane identity should immediately revoke the retired key");
+        .bind(&key_id)
+        .bind("break-glass:rt050-test")
+        .bind(Uuid::new_v4())
+        .bind("incident: RT-050 integration emergency revoke")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("break-glass control-plane identity should immediately revoke the retired key");
 
     let revoked_pre_retirement_valid: Option<serde_json::Value> =
         sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
@@ -604,17 +604,17 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let emergency_key_id = format!("rt050-emergency-{}", Uuid::new_v4());
     sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
-    .bind(&emergency_key_id)
-    .bind(public_key.to_vec())
-    .bind(issuer_name)
-    .bind(&audience)
-    .bind(deployment_id)
-    .bind("operator:rt050-test")
-    .bind(Uuid::new_v4())
-    .bind("stage emergency test key")
-    .execute(&mut *admin_connection)
-    .await
-    .expect("emergency test key should be staged");
+        .bind(&emergency_key_id)
+        .bind(public_key.to_vec())
+        .bind(issuer_name)
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rt050-test")
+        .bind(Uuid::new_v4())
+        .bind("stage emergency test key")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("emergency test key should be staged");
     let _: String = sqlx::query_scalar(
         "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
     )
