@@ -79,7 +79,7 @@ impl ContextIssuerConfig {
 }
 
 /// Ed25519 detached-signing capability. Implementations sign exact input bytes.
-pub trait ContextSigningKey: Send + Sync {
+pub(crate) trait ContextSigningKey: Send + Sync {
     /// Returns the configured public-key identifier.
     fn key_id(&self) -> &str;
 
@@ -155,12 +155,12 @@ impl ContextIssuer {
     /// Creates an issuer using an injected Ed25519 signing capability.
     pub fn new(
         config: ContextIssuerConfig,
-        signing_key: Arc<dyn ContextSigningKey>,
+        signing_key: RingEd25519SigningKey,
     ) -> Result<Self, ContextIssuerError> {
         if config.key_id != signing_key.key_id() {
             return Err(ContextIssuerError::KeyIdMismatch);
         }
-        Ok(Self { config, signing_key })
+        Ok(Self { config, signing_key: Arc::new(signing_key) })
     }
 
     fn issue(
@@ -414,7 +414,7 @@ mod tests {
         )
         .expect("config must be valid");
         assert!(matches!(
-            ContextIssuer::new(config, Arc::new(signer)),
+            ContextIssuer::new(config, signer),
             Err(ContextIssuerError::KeyIdMismatch)
         ));
     }
