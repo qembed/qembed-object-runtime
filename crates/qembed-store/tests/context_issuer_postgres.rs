@@ -124,6 +124,48 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("Rust store migrations should apply before the RT-050 fixture");
 
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let admin_pool = connect_pool(
+        &database_url,
+        PgPoolConfig {
+            max_connections: 2,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("key lifecycle admin pool should open independent backends");
+    let mut admin_connection = admin_pool
+        .acquire()
+        .await
+        .expect("key control-plane connection should be acquired");
+    sqlx::query("SET SESSION AUTHORIZATION qembed_key_control_plane")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("test harness superuser should assume the dedicated control-plane identity");
+
+    let control_plane_can_read_keys: bool = sqlx::query_scalar(
+        "SELECT has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'SELECT')",
+    )
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control-plane registry read privilege should be inspectable");
+    let control_plane_can_insert_keys: bool = sqlx::query_scalar(
+        "SELECT has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'INSERT')",
+    )
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control-plane registry insert privilege should be inspectable");
+    let control_plane_can_stage_keys: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege(current_user, 'qembed_crypto.stage_verification_key(text,bytea,text,text,text,text,uuid,text)', 'EXECUTE')",
+    )
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control-plane staging privilege should be inspectable");
+    assert!(!control_plane_can_read_keys);
+    assert!(!control_plane_can_insert_keys);
+    assert!(control_plane_can_stage_keys);
+
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let principal_id = scope.principal().principal_id();
@@ -152,18 +194,31 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .expect("test issuer configuration should be valid");
 
     sqlx::query(
-        "INSERT INTO qembed_crypto.verification_keys \
-         (key_id, public_key, issuer, audience, deployment_id) \
-         VALUES ($1, $2, $3, $4, $5)",
+        "SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(&key_id)
     .bind(public_key.to_vec())
     .bind(issuer_name)
     .bind(&audience)
     .bind(deployment_id)
-    .execute(&pool)
+    .bind("operator:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("integration test key staging")
+    .execute(&mut *admin_connection)
     .await
-    .expect("the SQL verifier should receive only the public key");
+    .expect("the control plane should stage only the public key");
+
+    let _: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
+    )
+    .bind(&key_id)
+    .bind("operator:rt050-test")
+    .bind("approver:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("integration test key activation")
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("a distinct approver should activate the staged key");
 
     let issuer = ContextIssuer::new(config, signing_key)
         .expect("issuer configuration and signing key IDs should match");
@@ -218,27 +273,14 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("test transaction should assume the restricted runtime role");
 
-    let runtime_can_read_key_registry: bool = sqlx::query_scalar(
-        "SELECT has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'SELECT')",
-    )
-    .fetch_one(transaction.connection())
-    .await
-    .expect("runtime key-registry privilege should be inspectable");
-    let runtime_can_retire_keys: bool = sqlx::query_scalar(
-        "SELECT has_function_privilege(current_user, 'qembed_crypto.retire_verification_key(text,interval)', 'EXECUTE')",
-    )
-    .fetch_one(transaction.connection())
-    .await
-    .expect("runtime retirement privilege should be inspectable");
-    let runtime_can_revoke_keys: bool = sqlx::query_scalar(
-        "SELECT has_function_privilege(current_user, 'qembed_crypto.revoke_verification_key(text)', 'EXECUTE')",
-    )
-    .fetch_one(transaction.connection())
-    .await
-    .expect("runtime revocation privilege should be inspectable");
-    assert!(!runtime_can_read_key_registry);
-    assert!(!runtime_can_retire_keys);
-    assert!(!runtime_can_revoke_keys);
+    let runtime_privileges: (bool, bool, bool, bool, bool, bool, bool) =
+        sqlx::query_as(
+            "SELECT              has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'SELECT'),              has_table_privilege(current_user, 'qembed_crypto.key_lifecycle_audit', 'SELECT'),              has_function_privilege(current_user, 'qembed_crypto.stage_verification_key(text,bytea,text,text,text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.activate_verification_key(text,text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.retire_verification_key(text,interval,text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.revoke_verification_key(text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.qembed_context_verify_detached(bytea,bytea,bytea)', 'EXECUTE')",
+        )
+        .fetch_one(transaction.connection())
+        .await
+        .expect("runtime key-management privileges should be inspectable");
+    assert_eq!(runtime_privileges, (false, false, false, false, false, false, false));
 
     let tenant_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
         .fetch_one(transaction.connection())
@@ -355,8 +397,6 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .fetch_one(revocation_race_transaction.connection())
         .await
         .expect("revocation-race transaction backend should be readable");
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
     let revocation_pool = connect_pool(
         &database_url,
         PgPoolConfig {
@@ -475,16 +515,6 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .fetch_one(lifecycle_transaction.connection())
             .await
             .expect("pre-retirement token should be installed");
-    let admin_pool = connect_pool(
-        &database_url,
-        PgPoolConfig {
-            max_connections: 1,
-            acquire_timeout: Duration::from_secs(5),
-        },
-    )
-    .await
-    .expect("key lifecycle admin pool should open an independent backend");
-
     let pre_retirement_valid: bool =
         sqlx::query_scalar("SELECT qembed_crypto.verified_context($1) IS NOT NULL")
             .bind(&pre_retirement_token)
@@ -493,12 +523,17 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .expect("pre-retirement token should verify while the key is active");
     assert!(pre_retirement_valid);
 
-    let verify_until: String =
-        sqlx::query_scalar("SELECT qembed_crypto.retire_verification_key($1)::text")
-            .bind(&key_id)
-            .fetch_one(&admin_pool)
-            .await
-            .expect("active key should transition to retired with a verification grace");
+    let verify_until: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.retire_verification_key(         $1, interval '120 seconds', $2, $3, $4, $5)::text",
+    )
+    .bind(&key_id)
+    .bind("operator:rt050-test")
+    .bind("approver:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("integration test planned retirement")
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("a distinct approver should retire the active key with a verification grace");
     assert!(!verify_until.is_empty());
 
     let retired_grace_valid: bool =
@@ -533,11 +568,16 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("transaction with rejected token should still be cleanly closable");
 
-    sqlx::query("SELECT qembed_crypto.revoke_verification_key($1)")
-        .bind(&key_id)
-        .execute(&admin_pool)
-        .await
-        .expect("retired key should be immediately revocable");
+    sqlx::query(
+        "SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)",
+    )
+    .bind(&key_id)
+    .bind("break-glass:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("incident: RT-050 integration emergency revoke")
+    .execute(&mut *admin_connection)
+    .await
+    .expect("break-glass control-plane identity should immediately revoke the retired key");
 
     let revoked_pre_retirement_valid: Option<serde_json::Value> =
         sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
@@ -556,26 +596,47 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let emergency_key_id = format!("rt050-emergency-{}", Uuid::new_v4());
     sqlx::query(
-        "INSERT INTO qembed_crypto.verification_keys \
-         (key_id, public_key, issuer, audience, deployment_id) \
-         VALUES ($1, $2, $3, $4, $5)",
+        "SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(&emergency_key_id)
     .bind(public_key.to_vec())
     .bind(issuer_name)
     .bind(&audience)
     .bind(deployment_id)
-    .execute(&admin_pool)
+    .bind("operator:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("stage emergency test key")
+    .execute(&mut *admin_connection)
     .await
-    .expect("emergency key fixture should start active");
-    let emergency_revoked_at: String =
-        sqlx::query_scalar("SELECT qembed_crypto.revoke_verification_key($1)::text")
-            .bind(&emergency_key_id)
-            .fetch_one(&admin_pool)
-            .await
-            .expect("active key should support direct emergency revocation");
+    .expect("emergency test key should be staged");
+    let _: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
+    )
+    .bind(&emergency_key_id)
+    .bind("operator:rt050-test")
+    .bind("approver:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("activate emergency test key")
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("emergency test key should be activated by a distinct approver");
+    let emergency_revoked_at: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)::text",
+    )
+    .bind(&emergency_key_id)
+    .bind("break-glass:rt050-test")
+    .bind(Uuid::new_v4())
+    .bind("incident: direct active-key revocation test")
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("active key should support direct emergency revocation");
     assert!(!emergency_revoked_at.is_empty());
 
+    sqlx::query("RESET SESSION AUTHORIZATION")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("control-plane session authorization should be reset before pool reuse");
+    drop(admin_connection);
     admin_pool.close().await;
     pool.close().await;
 }
