@@ -24,6 +24,7 @@ pub mod invocation_start;
 pub mod invocation_worker;
 pub mod object_repository;
 pub mod outbox_dispatcher;
+pub mod pg_context;
 pub mod readiness;
 pub mod snapshot_repository;
 pub mod tool_execution_store;
@@ -33,6 +34,7 @@ pub use context_issuer::{
     ContextTransactionError, RingEd25519SigningKey, begin_context_transaction,
     begin_principal_context_transaction,
 };
+pub use pg_context::PgContext;
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
 
 use std::sync::atomic::{AtomicU64, Ordering};
