@@ -6,9 +6,7 @@ use qembed_domain::budget::settle_token_usage;
 use qembed_domain::chat::TokenUsage;
 use qembed_domain::ids::InvocationId;
 use qembed_domain::scope::Scope;
-use sqlx::PgPool;
-
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{PgContext, execute, fetch_optional};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SettlementOutcome {
@@ -43,6 +41,7 @@ pub enum UsageSettlementError {
     InvalidReservationState,
     InvalidPersistedUsage,
     ArithmeticOverflow,
+    Context(crate::ContextTransactionError),
     Database(sqlx::Error),
 }
 
@@ -65,6 +64,7 @@ impl fmt::Display for UsageSettlementError {
             Self::ArithmeticOverflow => {
                 formatter.write_str("provider token usage exceeds the supported accounting range")
             }
+            Self::Context(error) => write!(formatter, "provider usage settlement signed-context initialization failed: {error}"),
             Self::Database(error) => write!(
                 formatter,
                 "provider usage settlement database error: {error}"
@@ -73,9 +73,16 @@ impl fmt::Display for UsageSettlementError {
     }
 }
 
+impl From<crate::ContextTransactionError> for UsageSettlementError {
+    fn from(error: crate::ContextTransactionError) -> Self {
+        Self::Context(error)
+    }
+}
+
 impl std::error::Error for UsageSettlementError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
@@ -89,14 +96,15 @@ impl std::error::Error for UsageSettlementError {
 /// obtains the keys needed to follow that order. All accounting mutations and
 /// the reservation state transition commit together.
 pub async fn settle_invocation_usage(
-    pool: &PgPool,
+    context: &PgContext,
     scope: &Scope,
     invocation_id: InvocationId,
     provider_usage: Option<TokenUsage>,
 ) -> Result<SettlementOutcome, UsageSettlementError> {
-    let mut transaction = begin_tenant_transaction(pool, scope)
+    let mut transaction = context
+        .begin_principal(scope)
         .await
-        .map_err(UsageSettlementError::Database)?;
+        .map_err(UsageSettlementError::Context)?;
 
     let identity = fetch_optional(
         &mut transaction,
