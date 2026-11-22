@@ -28,6 +28,7 @@ pub enum OwnerApiBackendError {
     ValidationRejected,
     Conflict,
     Internal,
+    RateLimited,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -462,7 +463,12 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "conflict",
             "The object changed or is not in a publishable state.",
         ),
-        (_, OwnerApiBackendError::RateLimited) => api_error(\n            StatusCode::TOO_MANY_REQUESTS,\n            "rate_limited",\n            "The request rate limit has been reached.",\n        ),\n        (_, OwnerApiBackendError::Conflict) => api_error(
+        (_, OwnerApiBackendError::RateLimited) => api_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "The request rate limit has been reached.",
+        ),
+        (_, OwnerApiBackendError::Conflict) => api_error(
             StatusCode::CONFLICT,
             "conflict",
             "The invocation conflicts with the current object or idempotency state.",
