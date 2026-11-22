@@ -131,7 +131,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(
           p_tenant_id UUID, p_principal_id UUID, p_caller_id UUID)
         RETURNS TABLE (delegation_id UUID, caller_id UUID, caller_kind TEXT)
-        LANGUAGE plpgsql AS $
+        LANGUAGE plpgsql AS $resolve$
         BEGIN
           RETURN QUERY
           SELECT d.delegation_id, c.id, c.caller_kind
@@ -147,7 +147,8 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
           IF NOT FOUND THEN
             RAISE EXCEPTION 'no active delegation' USING ERRCODE='42501';
           END IF;
-        END;\n        $resolve$"#
+        END;
+        $resolve$"#
     );
     sqlx::query(&resolver)
         .execute(&admin_pool)
