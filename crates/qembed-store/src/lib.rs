@@ -178,14 +178,6 @@ pub(crate) async fn begin_context_tenant_transaction(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
         .execute(&mut *transaction)
         .await?;
-    sqlx::query(
-        "SELECT set_config('app.tenant_id', $1, true), set_config('app.principal_id', $2, true)",
-    )
-    .bind(scope.tenant_id().to_string())
-    .bind(scope.principal().principal_id().to_string())
-    .execute(&mut *transaction)
-    .await?;
-
     Ok(TenantTransaction {
         transaction,
         tenant_id: scope.tenant_id(),
