@@ -223,6 +223,7 @@ These choices require an implementation environment and operational constraints.
 
 - Runtime DB credentials cannot read registry/audit tables or execute management functions.
 - KMCP DB credentials cannot directly select/insert/update/delete registry rows; only approved functions are executable.
+- Audit-exporter DB credentials cannot directly select/update/delete audit or outbox rows; only pending-event, failure-recording, and acknowledgement functions are executable.
 - Registry owner and function owner are NOLOGIN roles.
 - New keys are staged and are never verifiable before explicit activation.
 - Proof-of-possession is checked before staging completes.
