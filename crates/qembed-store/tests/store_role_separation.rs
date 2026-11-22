@@ -116,7 +116,10 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .fetch_one(&owner)
     .await
     .expect("runtime table privileges should be inspectable");
-    assert!(!broad_owner_read, "pre-auth tables must not have broad table SELECT grants");
+    assert!(
+        !broad_owner_read,
+        "pre-auth tables must not have broad table SELECT grants"
+    );
 
     let narrow_owner_read: bool = sqlx::query_scalar(
         "SELECT has_column_privilege('qembed_runtime_test', 'owner_principals', 'tenant_id', 'SELECT')
@@ -128,7 +131,10 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     .fetch_one(&owner)
     .await
     .expect("runtime column privileges should be inspectable");
-    assert!(narrow_owner_read, "runtime should receive only the pre-auth lookup columns");
+    assert!(
+        narrow_owner_read,
+        "runtime should receive only the pre-auth lookup columns"
+    );
 
     let tenant_a = Uuid::new_v4();
     let tenant_b = Uuid::new_v4();
