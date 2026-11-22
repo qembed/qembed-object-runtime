@@ -97,3 +97,29 @@ pub mod test {
         }
     }
 }
+
+
+/// Builds the production Owner router with a deliberately generous test-only
+/// policy so existing API tests exercise authentication and persistence without
+/// accidentally testing product rate thresholds.
+pub fn owner_router(pool: sqlx::PgPool) -> axum::Router {
+    use std::time::Duration;
+
+    use qembed_api::{
+        adapters::valkey_rate_limit::ValkeyRateLimitStore,
+        composition::configure_owner_routes,
+    };
+    use qembed_domain::rate_limit::{RateLimitPolicies, RateLimitPolicy};
+
+    let url = std::env::var("VALKEY_URL")
+        .expect("VALKEY_URL must be set by the integration-test harness");
+    let valkey = ValkeyRateLimitStore::new(&url).expect("Valkey URL is valid");
+    let policy = RateLimitPolicy::new(
+        10_000,
+        10_000,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+    )
+    .expect("generous test policy is valid");
+    configure_owner_routes(pool, valkey, RateLimitPolicies::new(policy, policy, policy))
+}
