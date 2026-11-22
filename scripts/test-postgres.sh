@@ -18,7 +18,7 @@ psql_in_test_db() {
 
 install_rt050_verifier() {
   local postgres_version_num="$1"
-  local sql_commit="6f2614fc27644a549ab04dc088a46e61106151db"
+  local sql_commit="15c5e5824d76c8fc0301b34a2f26937c28b1a343"
   local sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rt050-${sql_commit}"
 
   if (( postgres_version_num < 190000 || postgres_version_num >= 200000 )); then
@@ -78,7 +78,7 @@ pgvector_version="$(psql_in_test_db -Atc "SELECT extversion FROM pg_extension WH
 install_rt050_verifier "$postgres_version_num"
 {
   echo "commit_sha=${GITHUB_SHA:-local}"
-  echo "rt050_sql_commit=6f2614fc27644a549ab04dc088a46e61106151db"
+  echo "rt050_sql_commit=15c5e5824d76c8fc0301b34a2f26937c28b1a343"
   echo "rustc_version=$(rustc --version)"
   echo "postgres_version=$postgres_version"
   echo "postgres_version_num=$postgres_version_num"
