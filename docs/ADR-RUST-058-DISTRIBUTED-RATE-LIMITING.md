@@ -22,7 +22,9 @@ The existing PostgreSQL token-budget reservation system is a separate concern. I
 - Keep `Anonymous`, `Authenticated`, and `Owner` request buckets isolated. Consumption by one class must not consume another class's reserved capacity.
 - Do not add a shared aggregate bucket in this change.
 - Do not add PostgreSQL tables, migrations, or SQLx queries for rate limiting.
-- Deployment topology is not fixed by this ADR. The adapter must not assume a single runtime process or a specific Valkey topology.
+- Deployment topology is not fixed by this ADR. The initial adapter uses redis-rs `ConnectionManager` against one RESP endpoint (standalone Valkey or a managed endpoint that presents one connection endpoint); it is not a native Cluster/Sentinel connection manager.
+- The `RateLimitStore` port keeps a future topology-specific adapter independent from policy/runtime code. Native Valkey Cluster or Sentinel support must be selected and tested after the deployment topology is decided.
+- Keys include a tenant/object hash tag so future multi-key atomic scripts can be placed in one Valkey Cluster slot.
 
 ## Failure semantics
 
