@@ -84,12 +84,19 @@ impl ContextIssuerConfig {
     }
 }
 
-/// Ed25519 detached-signing capability. Implementations sign exact input bytes.
-pub(crate) trait ContextSigningKey: Send + Sync {
-    /// Returns the configured public-key identifier.
+/// Bounded local Ed25519 signing capability used by the ContextIssuer.
+///
+/// Implementations must sign the exact supplied bytes and return a detached
+/// 64-byte signature. The call is synchronous because it runs after PostgreSQL
+/// transaction binding and Caller-delegation locks have been established.
+/// Implementations MUST therefore use a bounded local capability (for example,
+/// an in-process key or a local HSM/agent interface); they MUST NOT perform a
+/// remote KMS/network request on the transaction path.
+pub trait ContextSigner: Send + Sync {
+    /// Returns the immutable public-key identifier associated with this signer.
     fn key_id(&self) -> &str;
 
-    /// Signs exact payload bytes and returns a 64-byte Ed25519 signature.
+    /// Signs exact canonical payload bytes and returns a detached signature.
     fn sign(&self, message: &[u8]) -> Result<[u8; 64], ContextIssuerError>;
 }
 
@@ -127,7 +134,7 @@ impl RingEd25519SigningKey {
     }
 }
 
-impl ContextSigningKey for RingEd25519SigningKey {
+impl ContextSigner for RingEd25519SigningKey {
     fn key_id(&self) -> &str {
         &self.key_id
     }
@@ -154,14 +161,17 @@ impl fmt::Debug for RingEd25519SigningKey {
 #[derive(Clone)]
 pub struct ContextIssuer {
     config: ContextIssuerConfig,
-    signing_key: Arc<dyn ContextSigningKey>,
+    signing_key: Arc<dyn ContextSigner>,
 }
 
 impl ContextIssuer {
-    /// Creates an issuer using an injected Ed25519 signing capability.
+    /// Creates an issuer using an injected bounded local signing capability.
+    ///
+    /// The signer must not perform remote network/KMS calls: issuance occurs
+    /// inside the PostgreSQL transaction after delegation locks are held.
     pub fn new(
         config: ContextIssuerConfig,
-        signing_key: RingEd25519SigningKey,
+        signing_key: impl ContextSigner + 'static,
     ) -> Result<Self, ContextIssuerError> {
         if config.key_id != signing_key.key_id() {
             return Err(ContextIssuerError::KeyIdMismatch);
