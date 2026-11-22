@@ -74,10 +74,13 @@ async fn seed_delegation(
 async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_transaction() {
     let pool = pool_with_one_connection().await;
 
-    let server_version_num: i32 = sqlx::query_scalar("SHOW server_version_num")
+    let server_version_num: String = sqlx::query_scalar("SHOW server_version_num")
         .fetch_one(&pool)
         .await
         .expect("PostgreSQL version should be readable");
+    let server_version_num = server_version_num
+        .parse::<i32>()
+        .expect("server_version_num should be an integer");
     if !(190_000..200_000).contains(&server_version_num) {
         pool.close().await;
         return;
