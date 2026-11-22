@@ -270,7 +270,8 @@ impl OwnerApiBackend for PgOwnerApiBackend {
     > {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
-            let query = InvocationQueryService::new(PgInvocationQueryStore::new(self.pool.clone()));
+            let query =
+                InvocationQueryService::new(PgInvocationQueryStore::new(self.context.clone()));
             get_invocation(&query, &scope, invocation_id)
                 .await
                 .map_err(|_| OwnerApiBackendError::Internal)

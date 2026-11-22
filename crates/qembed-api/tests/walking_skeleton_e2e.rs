@@ -266,7 +266,7 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
         .expect("valid worker config")
         .with_lease("walking-skeleton-after-restart", 60);
     let worker = InvocationWorker::new(
-        PgExecutionStore::new(second_pool.clone()),
+        PgExecutionStore::new(support::signed_context(&second_pool).await),
         provider,
         worker_config,
     );

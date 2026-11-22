@@ -6,7 +6,7 @@ use qembed_domain::ports::{InvocationCancellationOutcome, InvocationCancellation
 use qembed_domain::scope::Scope;
 
 use crate::invocation_worker::{InvocationStoreError, PgExecutionStore};
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{execute, fetch_optional};
 
 impl InvocationCancellationStore for PgExecutionStore {
     type Error = InvocationStoreError;
@@ -16,7 +16,7 @@ impl InvocationCancellationStore for PgExecutionStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<InvocationCancellationOutcome, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
 
         // Lock the provider attempt before touching the invocation. This is the
         // same serialization point used by the pre-send marker and the canonical
