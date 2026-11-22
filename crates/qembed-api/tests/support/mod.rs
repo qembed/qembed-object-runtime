@@ -98,7 +98,6 @@ pub mod test {
     }
 }
 
-
 /// Builds the production Owner router with a deliberately generous test-only
 /// policy so existing API tests exercise authentication and persistence without
 /// accidentally testing product rate thresholds.
