@@ -122,6 +122,7 @@ pub mod object_version;
 pub mod policy;
 pub mod ports;
 pub mod principal;
+pub mod rate_limit;
 pub mod provider_call_attempt;
 pub mod scope;
 pub mod snapshot;
