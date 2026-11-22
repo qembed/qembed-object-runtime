@@ -193,9 +193,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     )
     .expect("test issuer configuration should be valid");
 
-    sqlx::query(
-        "SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)",
-    )
+    sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
     .bind(&key_id)
     .bind(public_key.to_vec())
     .bind(issuer_name)
@@ -275,12 +273,24 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let runtime_privileges: (bool, bool, bool, bool, bool, bool, bool) =
         sqlx::query_as(
-            "SELECT              has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'SELECT'),              has_table_privilege(current_user, 'qembed_crypto.key_lifecycle_audit', 'SELECT'),              has_function_privilege(current_user, 'qembed_crypto.stage_verification_key(text,bytea,text,text,text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.activate_verification_key(text,text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.retire_verification_key(text,interval,text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.revoke_verification_key(text,text,uuid,text)', 'EXECUTE'),              has_function_privilege(current_user, 'qembed_crypto.qembed_context_verify_detached(bytea,bytea,bytea)', 'EXECUTE')",
+            r#"
+            SELECT
+              has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'SELECT'),
+              has_table_privilege(current_user, 'qembed_crypto.key_lifecycle_audit', 'SELECT'),
+              has_function_privilege(current_user, 'qembed_crypto.stage_verification_key(text,bytea,text,text,text,text,uuid,text)', 'EXECUTE'),
+              has_function_privilege(current_user, 'qembed_crypto.activate_verification_key(text,text,text,uuid,text)', 'EXECUTE'),
+              has_function_privilege(current_user, 'qembed_crypto.retire_verification_key(text,interval,text,text,uuid,text)', 'EXECUTE'),
+              has_function_privilege(current_user, 'qembed_crypto.revoke_verification_key(text,text,uuid,text)', 'EXECUTE'),
+              has_function_privilege(current_user, 'qembed_crypto.qembed_context_verify_detached(bytea,bytea,bytea)', 'EXECUTE')
+            "#,
         )
         .fetch_one(transaction.connection())
         .await
         .expect("runtime key-management privileges should be inspectable");
-    assert_eq!(runtime_privileges, (false, false, false, false, false, false, false));
+    assert_eq!(
+        runtime_privileges,
+        (false, false, false, false, false, false, false)
+    );
 
     let tenant_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
         .fetch_one(transaction.connection())
@@ -568,9 +578,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("transaction with rejected token should still be cleanly closable");
 
-    sqlx::query(
-        "SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)",
-    )
+    sqlx::query("SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)")
     .bind(&key_id)
     .bind("break-glass:rt050-test")
     .bind(Uuid::new_v4())
@@ -595,9 +603,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .expect("lifecycle transaction should close after emergency revocation");
 
     let emergency_key_id = format!("rt050-emergency-{}", Uuid::new_v4());
-    sqlx::query(
-        "SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)",
-    )
+    sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
     .bind(&emergency_key_id)
     .bind(public_key.to_vec())
     .bind(issuer_name)
@@ -620,16 +626,15 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .fetch_one(&mut *admin_connection)
     .await
     .expect("emergency test key should be activated by a distinct approver");
-    let emergency_revoked_at: String = sqlx::query_scalar(
-        "SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)::text",
-    )
-    .bind(&emergency_key_id)
-    .bind("break-glass:rt050-test")
-    .bind(Uuid::new_v4())
-    .bind("incident: direct active-key revocation test")
-    .fetch_one(&mut *admin_connection)
-    .await
-    .expect("active key should support direct emergency revocation");
+    let emergency_revoked_at: String =
+        sqlx::query_scalar("SELECT qembed_crypto.revoke_verification_key($1, $2, $3, $4)::text")
+            .bind(&emergency_key_id)
+            .bind("break-glass:rt050-test")
+            .bind(Uuid::new_v4())
+            .bind("incident: direct active-key revocation test")
+            .fetch_one(&mut *admin_connection)
+            .await
+            .expect("active key should support direct emergency revocation");
     assert!(!emergency_revoked_at.is_empty());
 
     sqlx::query("RESET SESSION AUTHORIZATION")
