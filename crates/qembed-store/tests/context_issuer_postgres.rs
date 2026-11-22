@@ -458,10 +458,9 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     // Graceful retirement accepts a token minted before the retirement
     // timestamp, rejects any token minted afterwards, and revocation is
     // immediate even while a pre-retirement transaction remains open.
-    let mut lifecycle_transaction =
-        begin_context_transaction(&pool, &scope, caller_id, &issuer)
-            .await
-            .expect("active key should issue a token before retirement");
+    let mut lifecycle_transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
+        .await
+        .expect("active key should issue a token before retirement");
     let pre_retirement_token: String =
         sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
             .fetch_one(lifecycle_transaction.connection())
@@ -477,31 +476,28 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("key lifecycle admin pool should open an independent backend");
 
-    let pre_retirement_valid: bool = sqlx::query_scalar(
-        "SELECT qembed_crypto.verified_context($1) IS NOT NULL",
-    )
-    .bind(&pre_retirement_token)
-    .fetch_one(lifecycle_transaction.connection())
-    .await
-    .expect("pre-retirement token should verify while the key is active");
+    let pre_retirement_valid: bool =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1) IS NOT NULL")
+            .bind(&pre_retirement_token)
+            .fetch_one(lifecycle_transaction.connection())
+            .await
+            .expect("pre-retirement token should verify while the key is active");
     assert!(pre_retirement_valid);
 
-    let verify_until: String = sqlx::query_scalar(
-        "SELECT qembed_crypto.retire_verification_key($1)::text",
-    )
-    .bind(&key_id)
-    .fetch_one(&admin_pool)
-    .await
-    .expect("active key should transition to retired with a verification grace");
+    let verify_until: String =
+        sqlx::query_scalar("SELECT qembed_crypto.retire_verification_key($1)::text")
+            .bind(&key_id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("active key should transition to retired with a verification grace");
     assert!(!verify_until.is_empty());
 
-    let retired_grace_valid: bool = sqlx::query_scalar(
-        "SELECT qembed_crypto.verified_context($1) IS NOT NULL",
-    )
-    .bind(&pre_retirement_token)
-    .fetch_one(lifecycle_transaction.connection())
-    .await
-    .expect("pre-retirement token should remain valid during the grace period");
+    let retired_grace_valid: bool =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1) IS NOT NULL")
+            .bind(&pre_retirement_token)
+            .fetch_one(lifecycle_transaction.connection())
+            .await
+            .expect("pre-retirement token should remain valid during the grace period");
     assert!(retired_grace_valid);
 
     let mut stale_signing_transaction =
@@ -563,13 +559,12 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .execute(&admin_pool)
     .await
     .expect("emergency key fixture should start active");
-    let emergency_revoked_at: String = sqlx::query_scalar(
-        "SELECT qembed_crypto.revoke_verification_key($1)::text",
-    )
-    .bind(&emergency_key_id)
-    .fetch_one(&admin_pool)
-    .await
-    .expect("active key should support direct emergency revocation");
+    let emergency_revoked_at: String =
+        sqlx::query_scalar("SELECT qembed_crypto.revoke_verification_key($1)::text")
+            .bind(&emergency_key_id)
+            .fetch_one(&admin_pool)
+            .await
+            .expect("active key should support direct emergency revocation");
     assert!(!emergency_revoked_at.is_empty());
 
     admin_pool.close().await;
