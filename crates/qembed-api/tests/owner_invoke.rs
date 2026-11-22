@@ -5,9 +5,8 @@ use qembed_domain::ids::{
 };
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
-use support::test;
+use support::{owner_router, test};
 
-use qembed_api::composition::configure_owner_routes;
 
 #[tokio::test]
 async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
@@ -87,7 +86,7 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     .await
     .expect("explicit Principal-to-Caller delegation should be inserted");
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let app = test::init_service(owner_router(pool.clone())).await;
     let headers = |uri: &str| {
         test::TestRequest::post()
             .uri(uri)
