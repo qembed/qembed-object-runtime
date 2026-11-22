@@ -23,22 +23,21 @@ use qembed_domain::ports::{
 };
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
-use sqlx::PgPool;
 
 use crate::event_outbox::{ObjectEvent, append_object_event};
-use crate::{CasError, begin_tenant_transaction, execute, execute_cas, fetch_optional};
+use crate::{CasError, PgContext, execute, execute_cas, fetch_optional};
 
 /// Persists tenant-owned objects and their draft versions.
 #[derive(Clone, Debug)]
 pub struct ObjectRepository {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl ObjectRepository {
     /// Creates a repository backed by the application's PostgreSQL pool.
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 
     /// Inserts a new Draft object in the tenant identified by the trusted scope.
@@ -54,7 +53,7 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ObjectMustBeDraft);
         }
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
