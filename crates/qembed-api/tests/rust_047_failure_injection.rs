@@ -374,12 +374,13 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
         .await
         .expect("migrations remain safe after restart");
     let restarted_scope = authenticated_scope(&restarted_pool, &fixture).await;
+    let restarted_context = support::signed_context(&restarted_pool).await;
 
     let timeout_provider = MockChatProvider::new()
         .with_error(provider_request(), ChatProviderError::Timeout)
         .expect("timeout script should be unique");
     let timeout_worker = InvocationWorker::new(
-        PgExecutionStore::new(restarted_pool.clone()),
+        PgExecutionStore::new(restarted_context),
         timeout_provider,
         InvocationWorkerConfig::new(MODEL, 128)
             .expect("valid worker config")
@@ -430,11 +431,12 @@ async fn committed_invocation_survives_restart_and_timeout_is_not_retried() {
         .await
         .expect("migrations remain safe on recovery");
     let recovered_scope = authenticated_scope(&recovered_pool, &fixture).await;
+    let recovered_context = support::signed_context(&recovered_pool).await;
     let success_provider = MockChatProvider::new()
         .with_response(provider_request(), provider_response())
         .expect("success script should be unique");
     let recovery_worker = InvocationWorker::new(
-        PgExecutionStore::new(recovered_pool.clone()),
+        PgExecutionStore::new(recovered_context),
         success_provider,
         InvocationWorkerConfig::new(MODEL, 128)
             .expect("valid recovery worker config")

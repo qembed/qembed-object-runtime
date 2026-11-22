@@ -20,13 +20,14 @@ use qembed_store::begin_invocation::{
 };
 use qembed_store::budget_settlement::{UsageSettlementError, settle_invocation_usage};
 use qembed_store::invocation_query::PgInvocationQueryStore;
-use qembed_store::invocation_worker::PgExecutionStore;
+use qembed_store::{PgContext, invocation_worker::PgExecutionStore};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 struct Fixture {
     pool: PgPool,
+    context: PgContext,
     admin_pool: PgPool,
     schema: String,
     object_id: ObjectId,
@@ -192,6 +193,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .await
         .expect("schema-bound test pool should connect");
 
+    let context = common::signed_context(&pool).await;
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
@@ -234,6 +236,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
 
     Fixture {
         pool,
+        context,
         admin_pool,
         schema,
         object_id,
@@ -543,7 +546,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let input = store
         .load_user_input(&fixture.scope, invocation_id)
         .await
@@ -641,7 +644,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     // Simulate a crash after settlement commits but before the terminal
     // invocation transition. Recovery must replay settlement, not double count.
     let first_settlement = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(0, 0)),
@@ -659,7 +662,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     .execute(&fixture.pool)
     .await
     .expect("expire pre-restart lease");
-    let restarted = PgExecutionStore::new(fixture.pool.clone());
+    let restarted = PgExecutionStore::new(fixture.context.clone());
     let recovery_owner = "worker-after-restart";
     let recovered = restarted
         .claim_invocation(&fixture.scope, invocation_id, recovery_owner, 60)
@@ -755,9 +758,10 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .connect(&database_url)
         .await
         .expect("second independent worker session should connect");
+    let second_context = common::signed_context(&second_pool).await;
 
-    let worker_a = PgExecutionStore::new(fixture.pool.clone());
-    let worker_b = PgExecutionStore::new(second_pool.clone());
+    let worker_a = PgExecutionStore::new(fixture.context.clone());
+    let worker_b = PgExecutionStore::new(second_context.clone());
 
     let first_claim = worker_a
         .claim_invocation(&fixture.scope, invocation_id, "worker-a", 60)
@@ -1016,7 +1020,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let query_store = PgInvocationQueryStore::new(common::signed_context(&fixture.pool).await);
+    let query_store = PgInvocationQueryStore::new(fixture.context.clone());
     let queued = query_store
         .get_invocation(&fixture.scope, invocation_id)
         .await
@@ -1036,7 +1040,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         "an invocation from another tenant must be indistinguishable from a missing ID"
     );
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-projection-success";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1226,7 +1230,7 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let claim = store
         .claim_invocation(&fixture.scope, invocation_id, "worker-cancel", 60)
         .await
@@ -1332,7 +1336,7 @@ async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-response-rollback";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1513,7 +1517,7 @@ async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-expired-reservation";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1606,7 +1610,7 @@ async fn provider_response_and_usage_are_durable_before_replay_safe_settlement()
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-provider-response";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1745,7 +1749,7 @@ async fn terminal_failure_is_rejected_after_provider_may_have_been_sent() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-fail-after-marker";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1857,7 +1861,7 @@ async fn cancellation_after_pre_send_marker_keeps_reservation_held() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-cancel-after-marker";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1952,7 +1956,7 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-terminal-failure";
     let current = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -2251,7 +2255,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
     )
     .expect("input estimate");
     let outcome = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(31, 12)),
@@ -2293,7 +2297,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
 
     // A retry with different in-memory input cannot rewrite an already committed settlement.
     let replay = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(900, 900)),
@@ -2353,7 +2357,7 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     )
     .expect("input estimate");
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-missing-usage";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -2459,7 +2463,7 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
             .expect("settle degraded usage and complete")
     );
 
-    let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
+    let replay = settle_invocation_usage(&fixture.context, &fixture.scope, invocation_id, None)
         .await
         .expect("degraded settlement replay");
     assert_eq!(replay.actual_tokens(), estimate);
@@ -2603,16 +2607,17 @@ async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let (first, second) = tokio::join!(
         settle_invocation_usage(
-            &fixture.pool,
+            &fixture.context,
             &fixture.scope,
             invocation_id,
             Some(TokenUsage::new(31, 12)),
         ),
         settle_invocation_usage(
-            &second_pool,
+            &second_context,
             &fixture.scope,
             invocation_id,
             Some(TokenUsage::new(900, 900)),
@@ -2705,7 +2710,7 @@ async fn settlement_database_failure_rolls_back_both_counters_and_reservation() 
     .expect("failure injection trigger");
 
     let error = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(31, 12)),

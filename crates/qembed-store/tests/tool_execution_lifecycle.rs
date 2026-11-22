@@ -20,13 +20,15 @@ use qembed_domain::{
     },
 };
 use qembed_store::{
-    invocation_worker::PgExecutionStore, run_migrations, tool_execution_store::PgToolExecutionStore,
+    PgContext, invocation_worker::PgExecutionStore, run_migrations,
+    tool_execution_store::PgToolExecutionStore,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
 
 struct Fixture {
     pool: PgPool,
+    context: PgContext,
     scope: qembed_domain::scope::Scope,
     invocation_id: InvocationId,
     execution_id: ToolExecutionId,
@@ -38,6 +40,7 @@ async fn setup() -> Fixture {
         .await
         .expect("all store migrations should apply");
 
+    let context = common::signed_context(&pool).await;
     let tenant_id = TenantId::new();
     let object_id = ObjectId::new();
     let caller_id = CallerId::new();
@@ -189,6 +192,7 @@ async fn setup() -> Fixture {
 
     Fixture {
         pool,
+        context,
         scope: scope_for_tenant(tenant_id),
         invocation_id,
         execution_id,
@@ -198,7 +202,7 @@ async fn setup() -> Fixture {
 #[tokio::test]
 async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
     let fixture = setup().await;
-    let invocation_store = PgExecutionStore::new(fixture.pool.clone());
+    let invocation_store = PgExecutionStore::new(fixture.context.clone());
     let invocation = invocation_store
         .claim_invocation(
             &fixture.scope,
