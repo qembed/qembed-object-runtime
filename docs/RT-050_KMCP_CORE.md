@@ -1,7 +1,7 @@
 # RT-050 — Provider-neutral KMCP core contract
 
 **Status:** Implementation slice in progress  
-**Related ADR:** [ADR-RT-050-KMCP](ADR-RT-050-KEY-MANAGEMENT-CONTROL-PLANE.md)  
+**Related ADR:** [accepted KMCP architecture ADR (PR #94)](https://github.com/qembed/qembed-object-runtime/pull/94)  
 **Code:** `crates/qembed-kmcp`  
 **Deployment target:** Selectel or customer-operated infrastructure; no provider selected
 
