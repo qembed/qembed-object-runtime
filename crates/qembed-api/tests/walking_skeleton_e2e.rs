@@ -18,9 +18,8 @@ use qembed_store::{
     run_migrations,
 };
 use sha2::{Digest, Sha256};
-use support::test;
+use support::{owner_router, test};
 
-use qembed_api::composition::configure_owner_routes;
 
 const OWNER_TOKEN_PREFIX: &str = "SECRET_SENTINEL_DO_NOT_LOG_";
 const MOCK_MODEL: &str = "test-chat";
@@ -115,7 +114,7 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     .await
     .expect("explicit Principal-to-Caller delegation should be inserted");
 
-    let first_app = test::init_service(configure_owner_routes(first_pool.clone())).await;
+    let first_app = test::init_service(owner_router(first_pool.clone())).await;
 
     let object_response = test::call_service(
         &first_app,
@@ -282,7 +281,7 @@ async fn walking_skeleton_survives_process_restart_and_returns_tenant_scoped_res
     );
 
     // Retrieve the durable result through the Owner HTTP API, not from worker memory.
-    let second_app = test::init_service(configure_owner_routes(second_pool.clone())).await;
+    let second_app = test::init_service(owner_router(second_pool.clone())).await;
     let inspected = test::call_service(
         &second_app,
         test::TestRequest::get()
