@@ -162,9 +162,23 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .fetch_one(&mut *admin_connection)
     .await
     .expect("control-plane staging privilege should be inspectable");
+    let control_plane_can_list_keys: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege(current_user, 'qembed_crypto.list_verification_keys(text)', 'EXECUTE')",
+    )
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control-plane metadata reader privilege should be inspectable");
+    let control_plane_can_read_operation: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege(current_user, 'qembed_crypto.get_key_lifecycle_operation(uuid)', 'EXECUTE')",
+    )
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control-plane audit reader privilege should be inspectable");
     assert!(!control_plane_can_read_keys);
     assert!(!control_plane_can_insert_keys);
     assert!(control_plane_can_stage_keys);
+    assert!(control_plane_can_list_keys);
+    assert!(control_plane_can_read_operation);
 
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
@@ -193,6 +207,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     )
     .expect("test issuer configuration should be valid");
 
+    let stage_request_id = Uuid::new_v4();
     sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
         .bind(&key_id)
         .bind(public_key.to_vec())
@@ -200,7 +215,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .bind(&audience)
         .bind(deployment_id)
         .bind("operator:rt050-test")
-        .bind(Uuid::new_v4())
+        .bind(stage_request_id)
         .bind("integration test key staging")
         .execute(&mut *admin_connection)
         .await
@@ -217,6 +232,24 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .fetch_one(&mut *admin_connection)
     .await
     .expect("a distinct approver should activate the staged key");
+
+    let listed_key_status: String = sqlx::query_scalar(
+        "SELECT status FROM qembed_crypto.list_verification_keys($1) WHERE key_id = $2",
+    )
+    .bind(deployment_id)
+    .bind(&key_id)
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control plane should read public key metadata through its definer function");
+    assert_eq!(listed_key_status, "active");
+    let stage_audit_state: String = sqlx::query_scalar(
+        "SELECT new_state FROM qembed_crypto.get_key_lifecycle_operation($1)",
+    )
+    .bind(stage_request_id)
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control plane should read audit evidence through its definer function");
+    assert_eq!(stage_audit_state, "staged");
 
     let issuer = ContextIssuer::new(config, signing_key)
         .expect("issuer configuration and signing key IDs should match");
@@ -271,7 +304,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("test transaction should assume the restricted runtime role");
 
-    let runtime_privileges: (bool, bool, bool, bool, bool, bool, bool) =
+    let runtime_privileges: (bool, bool, bool, bool, bool, bool, bool, bool, bool) =
         sqlx::query_as(
             r#"
             SELECT
@@ -281,6 +314,8 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
               has_function_privilege(current_user, 'qembed_crypto.activate_verification_key(text,text,text,uuid,text)', 'EXECUTE'),
               has_function_privilege(current_user, 'qembed_crypto.retire_verification_key(text,interval,text,text,uuid,text)', 'EXECUTE'),
               has_function_privilege(current_user, 'qembed_crypto.revoke_verification_key(text,text,uuid,text)', 'EXECUTE'),
+              has_function_privilege(current_user, 'qembed_crypto.list_verification_keys(text)', 'EXECUTE'),
+              has_function_privilege(current_user, 'qembed_crypto.get_key_lifecycle_operation(uuid)', 'EXECUTE'),
               has_function_privilege(current_user, 'qembed_crypto.qembed_context_verify_detached(bytea,bytea,bytea)', 'EXECUTE')
             "#,
         )
@@ -289,7 +324,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .expect("runtime key-management privileges should be inspectable");
     assert_eq!(
         runtime_privileges,
-        (false, false, false, false, false, false, false)
+        (false, false, false, false, false, false, false, false, false)
     );
 
     let tenant_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
