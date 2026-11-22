@@ -23,7 +23,7 @@ fn setup() -> (ValkeyRateLimitStore, RateLimitPolicy) {
 async fn independent_workers_share_one_atomic_bucket() {
     let (first, policy) = setup();
     let url = std::env::var("VALKEY_URL").unwrap();
-    let stores = vec![
+    let stores = [
         first,
         ValkeyRateLimitStore::new(&url).unwrap(),
         ValkeyRateLimitStore::new(&url).unwrap(),
