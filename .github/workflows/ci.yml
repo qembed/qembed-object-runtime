@@ -1,15 +1,62 @@
 name: Rust CI
 
 on:
+  # Validate the integration branch after merge. Feature branches are validated
+  # once, by pull_request, rather than once on push and again on the PR event.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: Classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Detect relevant changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'crates/**'
+              - 'tests/**'
+              - 'migrations/**'
+              - 'scripts/**'
+              - 'compose.test.yaml'
+              - '.github/workflows/**'
+            docs:
+              - '*.md'
+              - 'docs/**'
+
+  docs:
+    name: Documentation whitespace check
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Check patch whitespace
+        run: git diff --check ${{ github.event.pull_request.base.sha || github.event.before }}...HEAD
+
   rust:
-    name: Format, check, lint, dependency audit, and test (Rust 1.100.0 / PostgreSQL ${{ matrix.postgres }} / pgvector 0.8.7)
+    name: Format, check, lint, dependency audit, and test (Rust 1.100.0 / PostgreSQL 19 / pgvector 0.8.7)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
