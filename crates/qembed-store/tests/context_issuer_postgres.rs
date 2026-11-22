@@ -365,12 +365,11 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let observed_block = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let blocking_pids: Vec<i32> =
-                sqlx::query_scalar("SELECT pg_blocking_pids($1)")
-                    .bind(revoker_backend_pid)
-                    .fetch_one(&monitor_pool)
-                    .await
-                    .expect("blocking backend list should be readable");
+            let blocking_pids: Vec<i32> = sqlx::query_scalar("SELECT pg_blocking_pids($1)")
+                .bind(revoker_backend_pid)
+                .fetch_one(&monitor_pool)
+                .await
+                .expect("blocking backend list should be readable");
             if blocking_pids.contains(&revocation_backend_pid) {
                 break;
             }
