@@ -11,6 +11,7 @@ use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
     ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
     ports::DraftVersionCreation,
+    rate_limit::{RateLimitClass, RateLimitKey, RateLimitPolicies},
 };
 use qembed_runtime::{
     invocation_query::InvocationQueryService,
@@ -19,6 +20,7 @@ use qembed_runtime::{
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
     outbox_relay::{OutboxRelay, OutboxRelayConfig},
+    rate_limit::RateLimitService,
 };
 use qembed_store::{
     PgReadinessFailure, PgReadinessProbe,
@@ -30,7 +32,7 @@ use qembed_store::{
 };
 use sqlx::PgPool;
 
-use crate::adapters::nats_jetstream_publisher::NatsJetStreamPublisher;
+use crate::adapters::{nats_jetstream_publisher::NatsJetStreamPublisher, valkey_rate_limit::ValkeyRateLimitStore};
 
 use crate::handlers::{
     health::{ReadinessProbe, ReadinessStatus, health_router as configure_routes},
