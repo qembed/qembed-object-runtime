@@ -17,6 +17,7 @@ pub async fn connect() -> PgPool {
 /// Creates a test-only signer and registers its public key through the dedicated
 /// PostgreSQL key-control-plane identity. Each test gets a unique key ID so
 /// parallel integration tests cannot interfere with key lifecycle state.
+#[allow(dead_code)]
 pub async fn signed_context(pool: &PgPool) -> PgContext {
     let deployment_id = "rt050-integration-test";
     let database_oid: String =
