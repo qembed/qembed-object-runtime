@@ -172,6 +172,16 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("trusted Scope and database-resolved Caller should issue a context token");
 
+    let transaction_isolation: String =
+        sqlx::query_scalar("SHOW transaction_isolation")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("signed context transaction isolation should be readable");
+    assert_eq!(
+        transaction_isolation, "read committed",
+        "key revocation must be visible to subsequent statement snapshots"
+    );
+
     let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
         .fetch_one(transaction.connection())
         .await
