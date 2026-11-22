@@ -11,10 +11,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Runtime depends on domain ports, never adapters. qembed-api is the sole
-# composition root allowed to depend on concrete adapter crates.
+# Runtime depends on domain ports, never adapters. qembed-kmcp is an isolated
+# administrative policy core and must not depend on runtime or persistence.
+# qembed-api remains the sole application composition root.
 ALLOWED = {
     "qembed-domain": set(),
+    "qembed-kmcp": set(),
     "qembed-store": {"qembed-domain"},
     "qembed-llm": {"qembed-domain"},
     "qembed-tools": {"qembed-domain"},
@@ -29,7 +31,7 @@ ALLOWED = {
 }
 
 FORBIDDEN_HANDLER_IMPORT = re.compile(
-    r"(?:::)?\bqembed_(?:store|llm|tools)\b"
+    r"(?:::)?\bqembed_(?:store|llm|tools|kmcp)\b"
 )
 
 
