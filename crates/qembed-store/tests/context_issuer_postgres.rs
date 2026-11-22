@@ -242,13 +242,14 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("control plane should read public key metadata through its definer function");
     assert_eq!(listed_key_status, "active");
-    let stage_audit_state: String =
-        sqlx::query_scalar("SELECT new_state FROM qembed_crypto.get_key_lifecycle_operation($1)")
-            .bind(stage_request_id)
-            .fetch_one(&mut *admin_connection)
-            .await
-            .expect("control plane should read audit evidence through its definer function");
-    assert_eq!(stage_audit_state, "staged");
+    let stage_audit_state: (String, String) = sqlx::query_as(
+        "SELECT new_state, audit_export_status FROM qembed_crypto.get_key_lifecycle_operation($1)",
+    )
+    .bind(stage_request_id)
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("control plane should read audit evidence and export status through its definer function");
+    assert_eq!(stage_audit_state, ("staged".to_owned(), "pending".to_owned()));
 
     let issuer = ContextIssuer::new(config, signing_key)
         .expect("issuer configuration and signing key IDs should match");
