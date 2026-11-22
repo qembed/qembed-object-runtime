@@ -1,6 +1,6 @@
 # ADR-RT-050-KMCP — Verification Key Management Control Plane
 
-**Status:** Accepted architecture; implementation in progress; provider selection pending  
+**Status:** Accepted architecture; provider selection pending; implementation is in staged Draft PRs  
 **Scope:** Administrative lifecycle of Ed25519 verification/signing keys used by RT-050  
 **Related contract:** [ADR-RT-050-RUST-CONTEXT-ISSUER.md](./ADR-RT-050-RUST-CONTEXT-ISSUER.md)  
 **SQL implementation candidate:** qembed-sql PR #69 (prototype only; not production-approved)
@@ -62,7 +62,7 @@ Runtime roles must never be members of the control-plane or audit-exporter roles
 
 ## 3. Production key lifecycle
 
-The SQL PR #69 fixture currently models `active`, `retired`, and `revoked`. Production adds a non-verifying `staged` state so registration does not activate a key as a side effect.
+The SQL PR #69 feasibility fixture already models `staged`, `active`, `retired`, and `revoked`. It remains a prototype; production canonical-schema adoption and independent release gates are still pending.
 
 | State | May sign | May verify | Meaning |
 |---|---:|---:|---|
@@ -115,7 +115,7 @@ Therefore:
 - The signer is configured for one deployment and a small explicit set of key IDs. It must not be a general-purpose signing oracle exposed over a network.
 - Private key material must never enter PostgreSQL, SQL parameters, GUCs, logs, traces, crash reports, or ordinary application configuration.
 
-The Rust API should depend on a narrow signing capability rather than the concrete `RingEd25519SigningKey` type. The existing ring implementation remains a local software signer/test implementation. A future HSM/agent adapter must preserve exact-byte signing and key-ID matching. This abstraction does not authorize a remote network call inside the transaction.
+The Rust API should depend on a narrow signing capability rather than the concrete `RingEd25519SigningKey` type. The current `ContextIssuer` still uses the ring implementation; PR #95 proposes the `ContextSigner` extension point but is not merged and currently conflicts with `main`. A future HSM/agent adapter must preserve exact-byte signing and key-ID matching. This abstraction does not authorize a remote network call inside the transaction.
 
 If the selected provider cannot offer a bounded local signing path for Ed25519, provider selection is blocked pending an explicit architecture decision; do not silently fall back to a network KMS call.
 
@@ -205,7 +205,7 @@ Logs must not contain private key material, signed payloads, raw tokens, or cred
 4. **Provider adapter:** select and implement the concrete Ed25519 key provider and local signer integration only after verifying algorithm support, custody guarantees, operational latency, and disaster recovery.
 5. **Integration and adversarial tests:** exercise staged-to-active, rotation overlap, stale signer rejection, retirement grace, immediate revoke, concurrent admin operations, partial multi-cluster propagation, audit atomicity, and signer/KMCP outages.
 
-SQL PR #69 remains a feasibility prototype and is not the production registry migration. Its current three-state fixture must not be mistaken for the complete production state machine.
+SQL PR #69 remains a feasibility prototype and is not the production registry migration. Its four-state fixture is more complete than the earlier three-state design, but it does not substitute for canonical-schema adoption, external key custody, production KMCP authentication or rollout evidence.
 
 ## 12. Decisions intentionally left open
 
