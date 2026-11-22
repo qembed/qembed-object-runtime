@@ -28,7 +28,7 @@ The existing PostgreSQL token-budget reservation system is a separate concern. I
 
 The selected guarantee is practical distributed rate limiting, not strict quota enforcement. Normal concurrent requests against the same Valkey state are serialized by the atomic script. Valkey failover may lose recently acknowledged counter updates because replication is asynchronous; a small temporary overrun is accepted.
 
-If Valkey is unavailable, the initial API integration uses fail-open for ordinary invocation admission, emits an observable error/metric, and does not silently substitute per-process counters. Sensitive endpoints may adopt fail-closed behavior through an explicit policy in a later change.
+If Valkey is unavailable, the initial API integration uses fail-open for ordinary invocation admission, logs an observable error, and does not silently substitute per-process counters. Sensitive endpoints may adopt fail-closed behavior through an explicit policy in a later change.
 
 ## Key scope
 
