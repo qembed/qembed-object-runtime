@@ -618,15 +618,14 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
     assert_eq!(resolved.1, "Authenticated");
 
     let missing_caller = Uuid::new_v4();
-    let error = sqlx::query(
-        "SELECT caller_id FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)",
-    )
-        .bind(tenant_a)
-        .bind(principal_id)
-        .bind(missing_caller)
-        .fetch_one(&mut *delegation_tx)
-        .await
-        .expect_err("resolver must reject a Caller without an active delegation");
+    let error =
+        sqlx::query("SELECT caller_id FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)")
+            .bind(tenant_a)
+            .bind(principal_id)
+            .bind(missing_caller)
+            .fetch_one(&mut *delegation_tx)
+            .await
+            .expect_err("resolver must reject a Caller without an active delegation");
     assert_sqlstate(error, "42501");
     delegation_tx
         .rollback()
