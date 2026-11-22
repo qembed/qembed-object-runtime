@@ -3,6 +3,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use crate::{PgContext, execute, fetch_optional};
 use qembed_domain::ids::{CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId};
 use qembed_domain::scope::Scope;
 use qembed_domain::tool_execution::{
@@ -14,7 +15,6 @@ use qembed_domain::tool_execution_lease::{
 use qembed_domain::tool_execution_reconciliation::{
     ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
 };
-use crate::{PgContext, execute, fetch_optional};
 
 type ToolExecutionRow = (
     String,
@@ -54,7 +54,10 @@ pub enum ToolExecutionStoreError {
 impl fmt::Display for ToolExecutionStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Context(error) => write!(formatter, "ToolExecution signed-context initialization failed: {error}"),
+            Self::Context(error) => write!(
+                formatter,
+                "ToolExecution signed-context initialization failed: {error}"
+            ),
             Self::Database(error) => write!(formatter, "ToolExecution persistence failed: {error}"),
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted ToolExecution has invalid {field}")
