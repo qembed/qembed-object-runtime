@@ -21,7 +21,7 @@ use qembed_runtime::{
     outbox_relay::{OutboxRelay, OutboxRelayConfig},
 };
 use qembed_store::{
-    PgReadinessFailure, PgReadinessProbe,
+    PgContext, PgReadinessFailure, PgReadinessProbe,
     auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
     invocation_query::PgInvocationQueryStore,
     invocation_start::PgInvocationStartStore,
@@ -65,6 +65,7 @@ pub fn configure_health_routes(probe: PgReadinessProbe) -> Router {
 
 struct PgOwnerApiBackend {
     pool: PgPool,
+    context: PgContext,
 }
 
 impl PgOwnerApiBackend {
@@ -97,7 +98,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
     ) -> Pin<Box<dyn Future<Output = Result<ObjectId, OwnerApiBackendError>> + Send + '_>> {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
-            let service = ObjectCreationService::new(ObjectRepository::new(self.pool.clone()));
+            let service = ObjectCreationService::new(ObjectRepository::new(self.context.clone()));
             service
                 .create(&scope)
                 .await
@@ -278,13 +279,13 @@ impl OwnerApiBackend for PgOwnerApiBackend {
 
 /// Installs PostgreSQL-backed Owner routes. Authentication and SQL adapters are
 /// wired here, keeping concrete infrastructure out of HTTP handlers.
-pub fn configure_owner_routes(pool: PgPool) -> Router {
-    configure_owner(PgOwnerApiBackend { pool })
+pub fn configure_owner_routes(pool: PgPool, context: PgContext) -> Router {
+    configure_owner(PgOwnerApiBackend { pool, context })
 }
 
 /// Composes the HTTP surface without creating a listener or changing runtime lifecycle.
-pub fn api_router(pool: PgPool, probe: PgReadinessProbe) -> Router {
-    configure_health_routes(probe).merge(configure_owner_routes(pool))
+pub fn api_router(pool: PgPool, context: PgContext, probe: PgReadinessProbe) -> Router {
+    configure_health_routes(probe).merge(configure_owner_routes(pool, context))
 }
 
 /// Composes the PostgreSQL Outbox Relay with its JetStream publisher.
