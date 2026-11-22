@@ -51,7 +51,7 @@
 
 | Crate | Ответственность | Ограничения |
 |---|---|---|
-| `qembed-domain` | IDs, entities, `Scope`, `Principal`, state machines, policy contracts (включая broker-neutral publish/consume contracts), ports, `AllowedCommand` | Без SQLx, Actix, provider SDK, async-nats и сетевого I/O |
+| `qembed-domain` | IDs, entities, `Scope`, `Principal`, state machines, policy contracts (включая broker-neutral publish/consume contracts), ports, `AllowedCommand` | Без SQLx, HTTP framework, provider SDK, async-nats и сетевого I/O |
 | `qembed-store` | SQLx repositories, transaction context, persistence, CAS/fencing | Без HTTP handlers и provider-specific logic |
 | `qembed-llm` | ChatProvider adapters, capability negotiation, structured output, usage/error mapping | Без orchestration и tool authorization |
 | `qembed-tools` | Tool registry adapter, executor/reconciler, SSRF-safe networking, encrypted payload handling | Не принимает policy verdict самостоятельно |
@@ -157,7 +157,7 @@ SQLX_OFFLINE=true cargo check --workspace
 - [x] **RUST-013 (S)** Определить domain ports.
   - Контракты: authentication, execution store, provider, clock/ID generation там, где это нужно.
   - Тесты: compile tests на реализации test doubles; domain crate собирается без adapter dependencies.
-  - DoD: domain не зависит от SQLx, Actix или provider SDK.
+  - DoD: domain не зависит от SQLx, HTTP framework или provider SDK.
 
 - [x] **RUST-014 (M)** Реализовать `AllowedCommand` capability.
   - Реализация: приватные поля; mint boundary только в `qembed-domain::policy`.
@@ -336,7 +336,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: API integration — healthy DB, unavailable DB, migration mismatch; проверка отсутствия secrets в response.
   - DoD: readiness проверяет обязательные зависимости.
 
-- [x] **RUST-044-T (M)** Перейти с Actix-web на Axum + Tower до реализации оставшихся Owner API endpoints.
+- [x] **RUST-044-T (M)** Использовать Axum + Tower как единый HTTP transport stack для `qembed-api` до реализации оставшихся Owner API endpoints.
   - Основание: Owner API ещё небольшой; миграция до добавления оставшихся endpoints сокращает повторную работу и удерживает единый HTTP stack.
   - Архитектурное решение: Axum — HTTP router/handler framework; Tower — service/middleware layer. Сохранить HTTP/JSON Owner API и текущие auth/tenant boundaries. Connect/gRPC/Protobuf в эту задачу не входят и требуют отдельного ADR/решения.
   - MSRV: workspace minimum Rust 1.100.0; `rust-toolchain.toml` фиксирует Rust 1.100.0, а CI запускает основной matrix на той же версии. Исторические записи о Rust 1.85 ниже относятся к фактически выполненным M1a PR и CI runs.
