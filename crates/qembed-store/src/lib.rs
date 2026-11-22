@@ -12,8 +12,8 @@ pub mod begin_invocation;
 mod budget_reservation;
 pub mod budget_settlement;
 pub mod caller;
-pub mod context_issuer;
 mod cas;
+pub mod context_issuer;
 mod event_outbox;
 pub mod idempotency;
 pub mod invocation_cancellation;
@@ -29,9 +29,8 @@ pub mod snapshot_repository;
 pub mod tool_execution_store;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
-    ContextIssuer, ContextIssuerConfig, ContextIssuerError,
-    ContextTransaction, ContextTransactionError, RingEd25519SigningKey,
-    begin_context_transaction,
+    ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextTransaction,
+    ContextTransactionError, RingEd25519SigningKey, begin_context_transaction,
 };
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
 
