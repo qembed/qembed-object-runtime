@@ -43,29 +43,29 @@ pub async fn signed_context(pool: &PgPool) -> PgContext {
         .expect("test harness should assume the dedicated key-control-plane identity");
 
     sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
-    .bind(&key_id)
-    .bind(public_key.to_vec())
-    .bind(issuer_name)
-    .bind(&audience)
-    .bind(deployment_id)
-    .bind("operator:rt050-integration-test")
-    .bind(Uuid::new_v4())
-    .bind("register integration-test signer")
-    .execute(&mut *control_plane)
-    .await
-    .expect("control plane should stage the public verification key");
+        .bind(&key_id)
+        .bind(public_key.to_vec())
+        .bind(issuer_name)
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rt050-integration-test")
+        .bind(Uuid::new_v4())
+        .bind("register integration-test signer")
+        .execute(&mut *control_plane)
+        .await
+        .expect("control plane should stage the public verification key");
 
     let _: String = sqlx::query_scalar(
         "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
     )
-    .bind(&key_id)
-    .bind("operator:rt050-integration-test")
-    .bind("approver:rt050-integration-test")
-    .bind(Uuid::new_v4())
-    .bind("activate integration-test signer")
-    .fetch_one(&mut *control_plane)
-    .await
-    .expect("a distinct approver should activate the integration-test key");
+        .bind(&key_id)
+        .bind("operator:rt050-integration-test")
+        .bind("approver:rt050-integration-test")
+        .bind(Uuid::new_v4())
+        .bind("activate integration-test signer")
+        .fetch_one(&mut *control_plane)
+        .await
+        .expect("a distinct approver should activate the integration-test key");
 
     sqlx::query("RESET SESSION AUTHORIZATION")
         .execute(&mut *control_plane)
