@@ -10,7 +10,7 @@ pub async fn connect() -> PgPool {
         .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
 
     connect_pool(&database_url, PgPoolConfig::default())
-    .await
+        .await
         .expect("the PostgreSQL test database should accept connections")
 }
 
@@ -35,24 +35,24 @@ pub async fn signed_context(pool: &PgPool) -> PgContext {
 
     let mut control_plane = pool
         .acquire()
-    .await
+        .await
         .expect("key control-plane connection should be acquired");
     sqlx::query("SET SESSION AUTHORIZATION qembed_key_control_plane")
         .execute(&mut *control_plane)
-    .await
+        .await
         .expect("test harness should assume the dedicated key-control-plane identity");
 
     sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
-    .bind(&key_id)
-    .bind(public_key.to_vec())
-    .bind(issuer_name)
-    .bind(&audience)
-    .bind(deployment_id)
-    .bind("operator:rt050-integration-test")
-    .bind(Uuid::new_v4())
-    .bind("register integration-test signer")
+        .bind(&key_id)
+        .bind(public_key.to_vec())
+        .bind(issuer_name)
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rt050-integration-test")
+        .bind(Uuid::new_v4())
+        .bind("register integration-test signer")
         .execute(&mut *control_plane)
-    .await
+        .await
         .expect("control plane should stage the public verification key");
 
     let _: String = sqlx::query_scalar(
@@ -69,7 +69,7 @@ pub async fn signed_context(pool: &PgPool) -> PgContext {
 
     sqlx::query("RESET SESSION AUTHORIZATION")
         .execute(&mut *control_plane)
-    .await
+        .await
         .expect("control-plane identity must be reset before pool reuse");
     drop(control_plane);
 
