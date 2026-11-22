@@ -2,6 +2,8 @@
 
 use std::{sync::Arc, time::Duration};
 
+use redis::ErrorKind;
+
 use qembed_domain::rate_limit::{
     RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitStore,
 };
@@ -88,15 +90,19 @@ impl RateLimitStore for ValkeyRateLimitStore {
                 .query_async(&mut connection)
                 .await?;
 
-        let retry_after = if allowed == 1 {
-            None
-        } else {
-            Some(Duration::from_millis(u64::try_from(retry_after_ms).unwrap_or(0)))
-        };
-        Ok(RateLimitDecision::new(
-            allowed == 1,
-            u32::try_from(remaining).unwrap_or(0),
-            retry_after,
-        ))
+        if allowed != 0 && allowed != 1 {
+            return Err(redis::RedisError::from((
+                ErrorKind::TypeError,
+                "Valkey returned an invalid rate-limit decision",
+            )));
+        }
+        let remaining = u32::try_from(remaining).map_err(|_| {
+            redis::RedisError::from((ErrorKind::TypeError, "Valkey returned invalid remaining tokens"))
+        })?;
+        let retry_after_ms = u64::try_from(retry_after_ms).map_err(|_| {
+            redis::RedisError::from((ErrorKind::TypeError, "Valkey returned invalid retry-after"))
+        })?;
+        let retry_after = (allowed == 0).then(|| Duration::from_millis(retry_after_ms));
+        Ok(RateLimitDecision::new(allowed == 1, remaining, retry_after))
     }
 }
