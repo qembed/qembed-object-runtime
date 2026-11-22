@@ -115,7 +115,7 @@ Therefore:
 - The signer is configured for one deployment and a small explicit set of key IDs. It must not be a general-purpose signing oracle exposed over a network.
 - Private key material must never enter PostgreSQL, SQL parameters, GUCs, logs, traces, crash reports, or ordinary application configuration.
 
-The Rust API should depend on a narrow signing capability rather than the concrete `RingEd25519SigningKey` type. The current `ContextIssuer` still uses the ring implementation; PR #95 proposes the `ContextSigner` extension point but is not merged and currently conflicts with `main`. A future HSM/agent adapter must preserve exact-byte signing and key-ID matching. This abstraction does not authorize a remote network call inside the transaction.
+The Rust API should depend on a narrow signing capability rather than the concrete `RingEd25519SigningKey` type. The `ContextIssuer` now depends on the public `ContextSigner` capability, merged in Rust PR #108. `RingEd25519SigningKey` remains the current in-process implementation. A future HSM/agent adapter must preserve exact-byte signing and key-ID matching. This abstraction does not authorize a remote network call inside the transaction.
 
 If the selected provider cannot offer a bounded local signing path for Ed25519, provider selection is blocked pending an explicit architecture decision; do not silently fall back to a network KMS call.
 
