@@ -103,7 +103,9 @@ async fn token_bucket_refills_and_reports_retry_after() {
     assert!(store.consume(&key, policy, 1).await.unwrap().allowed());
     let denied = store.consume(&key, policy, 1).await.unwrap();
     assert!(!denied.allowed());
-    let retry_after = denied.retry_after().expect("denied decision has retry-after");
+    let retry_after = denied
+        .retry_after()
+        .expect("denied decision has retry-after");
     assert!(retry_after <= Duration::from_millis(100));
 
     tokio::time::sleep(Duration::from_millis(150)).await;
