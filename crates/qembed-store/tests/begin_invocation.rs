@@ -2883,6 +2883,8 @@ async fn concurrent_duplicate_idempotency_claim_creates_only_one_reservation() {
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let pool_a = fixture.pool.clone();
     let pool_b = fixture.pool.clone();
+    let context_a = common::signed_context(&pool_a).await;
+    let context_b = common::signed_context(&pool_b).await;
     let scope_a = fixture.scope;
     let scope_b = fixture.scope;
     let command_a = command(&fixture, "same-concurrent-key");
