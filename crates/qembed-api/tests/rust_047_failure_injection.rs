@@ -122,7 +122,8 @@ async fn fixture() -> Fixture {
     .await
     .expect("explicit Principal-to-Caller delegation should be inserted");
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let context = support::signed_context(&pool).await;
+    let app = test::init_service(configure_owner_routes(pool.clone(), context)).await;
     let object_response = test::call_service(
         &app,
         owner_request("/owner/objects", tenant_id, &owner_token).to_request(),
