@@ -16,9 +16,9 @@ GRANT EXECUTE ON FUNCTION qembed_crypto.current_tenant_id() TO qembed_definer;
 GRANT EXECUTE ON FUNCTION qembed_crypto.current_principal_id() TO qembed_definer;
 GRANT EXECUTE ON FUNCTION qembed_crypto.current_caller_id() TO qembed_definer;
 
-DROP FUNCTION resolve_delegated_caller(uuid);
+DROP FUNCTION IF EXISTS resolve_delegated_caller(uuid);
 
-CREATE FUNCTION resolve_delegated_caller(
+CREATE OR REPLACE FUNCTION resolve_delegated_caller(
     p_tenant_id UUID,
     p_principal_id UUID,
     p_caller_id UUID
