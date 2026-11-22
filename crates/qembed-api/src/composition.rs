@@ -169,7 +169,8 @@ impl OwnerApiBackend for PgOwnerApiBackend {
     > {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
-            let service = ObjectPublicationService::new(ObjectRepository::new(self.context.clone()));
+            let service =
+                ObjectPublicationService::new(ObjectRepository::new(self.context.clone()));
             match service.publish(&scope, object_id, version_id).await {
                 Ok(result) => {
                     let report = *result.report();
