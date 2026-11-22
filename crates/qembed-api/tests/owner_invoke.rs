@@ -87,7 +87,8 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     .await
     .expect("explicit Principal-to-Caller delegation should be inserted");
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let context = support::signed_context(&pool).await;
+    let app = test::init_service(configure_owner_routes(pool.clone(), context)).await;
     let headers = |uri: &str| {
         test::TestRequest::post()
             .uri(uri)

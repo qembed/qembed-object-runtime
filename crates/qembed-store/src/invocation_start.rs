@@ -1,24 +1,23 @@
 //! PostgreSQL adapter for the atomic begin-invocation use case.
 
+use crate::PgContext;
+use crate::begin_invocation::{
+    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
+};
 use qembed_domain::{
     ports::{InvocationStartCommand, InvocationStartOutcome, InvocationStartStore},
     scope::Scope,
 };
-use sqlx::PgPool;
-
-use crate::begin_invocation::{
-    BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
-};
 
 #[derive(Clone)]
 pub struct PgInvocationStartStore {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl PgInvocationStartStore {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 }
 
@@ -41,7 +40,7 @@ impl InvocationStartStore for PgInvocationStartStore {
             idempotency_expires_at: command.idempotency_expires_at,
             trace_id: command.trace_id,
         };
-        match begin_invocation(&self.pool, scope, command).await? {
+        match begin_invocation(&self.context, scope, command).await? {
             BeginInvocationOutcome::Created { invocation_id, .. } => {
                 Ok(InvocationStartOutcome::Created { invocation_id })
             }
