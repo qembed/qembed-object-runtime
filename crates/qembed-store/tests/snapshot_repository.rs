@@ -8,8 +8,8 @@ use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{SnapshotBuilder, SnapshotError};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::{DraftCreation, ObjectRepository};
-use qembed_store::{PgContext, run_migrations};
 use qembed_store::snapshot_repository::{SnapshotRepository, SnapshotRepositoryError};
+use qembed_store::{PgContext, run_migrations};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
