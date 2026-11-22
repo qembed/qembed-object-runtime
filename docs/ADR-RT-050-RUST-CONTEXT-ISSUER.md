@@ -83,7 +83,7 @@ The retirement grace defaults to **120 seconds** and may be configured up to one
 
 Emergency revocation transitions an active or retired key directly to `revoked`; it has no grace period. Signed-context transactions explicitly use PostgreSQL **READ COMMITTED** isolation so each new statement obtains a fresh snapshot and observes a committed revocation. A transaction deliberately running under a repeatable-read snapshot could continue to see the old key row; the signed-context entry point must therefore enforce READ COMMITTED rather than inherit a pool/session default.
 
-The SQL prototype currently uses separate payload/signature settings. Its test harness must be adapted to this single-setting contract before Rust/SQL integration is considered complete.
+The selected SQL PR #69 test fixture now implements this single-setting contract. Production schema adoption and RLS migration remain separate release gates.
 
 ## 3. Rust ownership and API boundaries
 
@@ -136,19 +136,24 @@ No external network call or KMS round trip should occur while database row locks
 - Arbitrary SQL may overwrite `app.context_token`, but cannot create a valid replacement without the private key. It may cause denial of service by replacing the setting; it must not gain another identity.
 - No claim is made that this protects against compromise of the application process/ContextIssuer, private signing key, PostgreSQL superuser, or privileged database administrators.
 
-## 6. Required SQL companion changes
+## 6. SQL companion status and production gates
 
-SQL PR #69 remains a feasibility prototype until the following companion contract is implemented and tested:
+The SQL PR #69 feasibility fixture now implements and tests:
+- the single `app.context_token` envelope and verification of original JCS payload bytes;
+- a narrowly privileged verified-context function and typed tenant, Principal and Caller accessors;
+- an uncorrelated scalar-subquery / InitPlan pattern for statement-level RLS verification;
+- active/retired/revoked key lifecycle, monotonic transitions, immutable public key material, bounded retirement grace and privileged management functions;
+- exact version-1 claims, UUID formats, issuer/audience/deployment/database/backend/transaction binding, timestamps and maximum lifetime;
+- fail-closed behavior for unknown JSON fields and forged legacy identity GUCs;
+- runtime inability to read the key registry or invoke the low-level C verifier or key lifecycle functions.
 
-- Replace the two test GUCs with the single `app.context_token` envelope.
-- Expose a narrowly privileged verified-context function and typed claim accessors for tenant, Principal and Caller.
-- Ensure RLS uses an uncorrelated scalar subquery / InitPlan so signature verification is performed once per statement, not once per scanned row.
-- Add the active/retired/revoked verification-key lifecycle, monotonic transitions, immutable key material, bounded retirement grace and privileged management functions; runtime cannot read or mutate the registry or execute lifecycle functions.
-- Validate all required claims, UUID formats, claim version, issuer/audience/deployment/database/backend/transaction binding, timestamps and maximum lifetime.
-- Reject unknown JSON fields or define their forward-compatibility behavior explicitly.
-- Keep `qembed_runtime` unable to invoke the low-level C verifier directly or read verification keys.
-- Add negative tests for forged legacy GUCs, cross-tenant/Principal/Caller substitution, invalid key state, and connection-pool reuse.
-- Keep production RLS migration separate from the feasibility fixture until security review and the supported PostgreSQL matrix are complete.
+These remain **prototype-fixture results**, not production schema approval. Before production:
+- port the verified contract into canonical SQL migrations and production RLS policies;
+- define the production owner/admin role and audited key-management authorization path;
+- validate PostgreSQL version support, extension packaging/provenance and upgrade/rollback behavior;
+- test key lifecycle under representative concurrent load and deployment/clock-skew conditions;
+- complete independent security review, C-extension fuzzing and representative workload performance evidence.
+
 
 ## 7. Open deployment decisions
 
