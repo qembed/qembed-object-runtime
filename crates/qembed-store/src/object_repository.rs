@@ -53,7 +53,9 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ObjectMustBeDraft);
         }
 
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Context)?;
 
@@ -99,7 +101,9 @@ impl ObjectRepository {
         let schema_version = i32::try_from(snapshot.schema_version())
             .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
 
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Context)?;
 
@@ -241,7 +245,9 @@ impl ObjectRepository {
         object_id: ObjectId,
         version_id: ObjectVersionId,
     ) -> Result<Option<PublicationCandidate>, ObjectRepositoryError> {
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Context)?;
 
@@ -332,7 +338,9 @@ impl ObjectRepository {
         scope: &Scope,
         object_id: ObjectId,
     ) -> Result<(), ObjectRepositoryError> {
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Context)?;
 
@@ -362,7 +370,9 @@ impl ObjectRepository {
         scope: &Scope,
         object_id: ObjectId,
     ) -> Result<(), ObjectRepositoryError> {
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Context)?;
 
@@ -416,7 +426,9 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
         }
 
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Context)?;
 
@@ -794,7 +806,9 @@ impl fmt::Display for ObjectRepositoryError {
                 formatter.write_str("current object version is not Published")
             }
             Self::Cas(error) => write!(formatter, "object repository CAS error: {error}"),
-            Self::Context(error) => write!(formatter, "object repository signed-context error: {error}"),
+            Self::Context(error) => {
+                write!(formatter, "object repository signed-context error: {error}")
+            }
             Self::Database(error) => write!(formatter, "object repository database error: {error}"),
         }
     }
