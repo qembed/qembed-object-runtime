@@ -10,16 +10,14 @@ use qembed_domain::ids::{
 };
 use qembed_domain::scope::Scope;
 use serde::Serialize;
-use sqlx::PgPool;
-
 pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
-use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
+use crate::caller::{CallerResolutionError, ResolvedCaller};
 use crate::idempotency::{
     IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
     reserve_invocation_idempotency,
 };
-use crate::{TenantTransaction, begin_tenant_transaction, execute, fetch_optional};
+use crate::{ContextTransactionError, PgContext, TenantTransaction, execute, fetch_optional};
 
 /// All caller-controlled inputs needed to start an invocation.
 ///
@@ -74,6 +72,7 @@ pub enum BeginInvocationError {
     KnowledgeRevisionOutOfRange,
     InvalidInputMessage,
     InvalidMessageExpiry,
+    Context(crate::ContextTransactionError),
     Database(sqlx::Error),
 }
 
@@ -105,6 +104,7 @@ impl fmt::Display for BeginInvocationError {
             }
             Self::InvalidInputMessage => formatter.write_str("input message is empty or too large"),
             Self::InvalidMessageExpiry => formatter.write_str("message expiry is invalid"),
+            Self::Context(error) => write!(formatter, "begin-invocation signed-context initialization failed: {error}"),
             Self::Database(error) => write!(formatter, "begin-invocation database error: {error}"),
         }
     }
@@ -116,8 +116,18 @@ impl std::error::Error for BeginInvocationError {
             Self::CallerResolution(error) => Some(error),
             Self::Idempotency(error) => Some(error),
             Self::Budget(error) => Some(error),
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
+        }
+    }
+}
+
+impl From<ContextTransactionError> for BeginInvocationError {
+    fn from(error: ContextTransactionError) -> Self {
+        match error {
+            ContextTransactionError::CallerResolution(error) => Self::CallerResolution(error),
+            other => Self::Context(other),
         }
     }
 }
@@ -187,15 +197,13 @@ impl InvocationReceivedPayload {
 /// later reads/writes remain in the same transaction. Any error before commit
 /// drops the SQLx transaction and rolls back the claim and every subsequent row.
 pub async fn begin_invocation(
-    pool: &PgPool,
+    context: &PgContext,
     scope: &Scope,
     command: BeginInvocationCommand,
 ) -> Result<BeginInvocationOutcome, BeginInvocationError> {
-    let mut transaction = begin_tenant_transaction(pool, scope)
-        .await
-        .map_err(BeginInvocationError::Database)?;
-
-    let caller = resolve_delegated_caller(&mut transaction, command.requested_caller_id).await?;
+    let (mut transaction, caller) = context
+        .begin_caller(scope, command.requested_caller_id)
+        .await?;
 
     let proposed_invocation_id = InvocationId::new();
     let claim = IdempotencyClaim::new(
