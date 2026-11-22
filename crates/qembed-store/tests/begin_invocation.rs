@@ -2529,7 +2529,7 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
             command(&fixture, "caller-race-a")
         ),
         begin_invocation(
-            &second_pool,
+            &second_context,
             &fixture.scope,
             command(&fixture, "caller-race-b")
         ),
