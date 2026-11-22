@@ -29,14 +29,13 @@ use std::str::FromStr;
 use qembed_domain::ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId};
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
-use sqlx::PgPool;
 
-use crate::{begin_tenant_transaction, fetch_optional};
+use crate::{PgContext, fetch_optional};
 
 /// Retrieves immutable snapshots. Creation is owned by ObjectRepository.
 #[derive(Clone, Debug)]
 pub struct SnapshotRepository {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl SnapshotRepository {
@@ -52,8 +51,8 @@ impl SnapshotRepository {
     /// ```
     /// Creates a repository backed by the application's PostgreSQL pool.
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 
     /// Reads a snapshot and verifies SHA-256 against the exact persisted bytes.
@@ -62,7 +61,7 @@ impl SnapshotRepository {
         scope: &Scope,
         snapshot_id: SnapshotId,
     ) -> Result<Option<Snapshot>, SnapshotRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(SnapshotRepositoryError::Database)?;
 
