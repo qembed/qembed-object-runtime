@@ -20,13 +20,14 @@ use qembed_store::begin_invocation::{
 };
 use qembed_store::budget_settlement::{UsageSettlementError, settle_invocation_usage};
 use qembed_store::invocation_query::PgInvocationQueryStore;
-use qembed_store::invocation_worker::PgExecutionStore;
+use qembed_store::{PgContext, invocation_worker::PgExecutionStore};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 struct Fixture {
     pool: PgPool,
+    context: PgContext,
     admin_pool: PgPool,
     schema: String,
     object_id: ObjectId,
@@ -128,11 +129,10 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .expect("provider attempt trigger should be created");
 
     let resolver = format!(
-        r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(p_caller_id UUID)
+        r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(
+          p_tenant_id UUID, p_principal_id UUID, p_caller_id UUID)
         RETURNS TABLE (delegation_id UUID, caller_id UUID, caller_kind TEXT)
-        LANGUAGE plpgsql AS $$
-        DECLARE v_tenant UUID := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
-                v_principal UUID := NULLIF(current_setting('app.principal_id', true), '')::uuid;
+        LANGUAGE plpgsql AS $resolve$
         BEGIN
           RETURN QUERY
           SELECT d.delegation_id, c.id, c.caller_kind
@@ -141,14 +141,15 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
               ON p.tenant_id=d.tenant_id AND p.caller_id=d.principal_id
             JOIN "{schema}".callers c
               ON c.tenant_id=d.tenant_id AND c.id=d.caller_id
-           WHERE d.tenant_id=v_tenant AND d.principal_id=v_principal
+           WHERE d.tenant_id=p_tenant_id AND d.principal_id=p_principal_id
              AND d.caller_id=p_caller_id AND d.revoked_at IS NULL
              AND p.disabled_at IS NULL AND c.revoked_at IS NULL
            FOR SHARE OF d,p,c;
           IF NOT FOUND THEN
             RAISE EXCEPTION 'no active delegation' USING ERRCODE='42501';
           END IF;
-        END $$"#
+        END;
+        $resolve$"#
     );
     sqlx::query(&resolver)
         .execute(&admin_pool)
@@ -192,6 +193,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
         .await
         .expect("schema-bound test pool should connect");
 
+    let context = common::signed_context(&pool).await;
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
@@ -234,6 +236,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
 
     Fixture {
         pool,
+        context,
         admin_pool,
         schema,
         object_id,
@@ -293,7 +296,7 @@ async fn teardown(fixture: Fixture) {
 #[tokio::test]
 async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
     let fixture = setup(None).await;
-    let outcome = begin_invocation(&fixture.pool, &fixture.scope, command(&fixture, "key-1"))
+    let outcome = begin_invocation(&fixture.context, &fixture.scope, command(&fixture, "key-1"))
         .await
         .expect("begin invocation should commit");
     let invocation_id = match outcome {
@@ -375,7 +378,7 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
 
     let mut replay_command = command(&fixture, "key-1");
     replay_command.message_expires_at = std::time::UNIX_EPOCH;
-    let replay = begin_invocation(&fixture.pool, &fixture.scope, replay_command)
+    let replay = begin_invocation(&fixture.context, &fixture.scope, replay_command)
         .await
         .expect("same key and payload should replay without validating a new message expiry");
     assert_eq!(replay, BeginInvocationOutcome::Replay { invocation_id });
@@ -403,7 +406,7 @@ async fn any_failure_after_idempotency_claim_rolls_back_the_entire_begin() {
         .execute(&fixture.pool)
         .await
         .expect("published pointer should be cleared");
-    let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
+    let error = begin_invocation(&fixture.context, &fixture.scope, invalid)
         .await
         .expect_err("object without a published version must fail");
     assert!(matches!(error, BeginInvocationError::NoPublishedVersion));
@@ -415,7 +418,7 @@ async fn any_failure_after_idempotency_claim_rolls_back_the_entire_begin() {
 async fn invocation_insert_failure_rolls_back_idempotency_claim() {
     let fixture = setup(Some("object_invocations")).await;
     let result = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "fail-invocation"),
     )
@@ -442,7 +445,7 @@ async fn invocation_insert_failure_rolls_back_idempotency_claim() {
 async fn event_insert_failure_rolls_back_invocation_and_idempotency() {
     let fixture = setup(Some("events")).await;
     let result = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "fail-event"),
     )
@@ -456,7 +459,7 @@ async fn event_insert_failure_rolls_back_invocation_and_idempotency() {
 async fn outbox_insert_failure_rolls_back_invocation_idempotency_and_event() {
     let fixture = setup(Some("outbox_messages")).await;
     let result = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "fail-outbox"),
     )
@@ -472,7 +475,7 @@ async fn principal_uuid_is_not_an_implicit_caller_mapping() {
     let mut invalid = command(&fixture, "principal-is-not-caller");
     invalid.requested_caller_id =
         CallerId::from_uuid(fixture.scope.principal().principal_id().into_uuid());
-    let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
+    let error = begin_invocation(&fixture.context, &fixture.scope, invalid)
         .await
         .expect_err("Principal UUID equality must not authorize a Caller");
     assert!(matches!(
@@ -494,7 +497,7 @@ async fn missing_knowledge_revision_rolls_back_the_idempotency_claim() {
         .await
         .expect("knowledge revision fixture should be removed");
     let error = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "missing-revision"),
     )
@@ -517,7 +520,7 @@ async fn inactive_object_rolls_back_the_idempotency_claim() {
         .await
         .expect("object should be suspended");
     let error = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "inactive-object"),
     )
@@ -532,7 +535,7 @@ async fn inactive_object_rolls_back_the_idempotency_claim() {
 async fn worker_store_persists_response_and_resumes_after_process_restart() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "worker-restart"),
     )
@@ -543,7 +546,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let input = store
         .load_user_input(&fixture.scope, invocation_id)
         .await
@@ -641,7 +644,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     // Simulate a crash after settlement commits but before the terminal
     // invocation transition. Recovery must replay settlement, not double count.
     let first_settlement = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(0, 0)),
@@ -659,7 +662,7 @@ async fn worker_store_persists_response_and_resumes_after_process_restart() {
     .execute(&fixture.pool)
     .await
     .expect("expire pre-restart lease");
-    let restarted = PgExecutionStore::new(fixture.pool.clone());
+    let restarted = PgExecutionStore::new(fixture.context.clone());
     let recovery_owner = "worker-after-restart";
     let recovered = restarted
         .claim_invocation(&fixture.scope, invocation_id, recovery_owner, 60)
@@ -715,7 +718,7 @@ async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
     let mut invalid = command(&fixture, "invalid-input");
     invalid.input_message = "   ".to_owned();
 
-    let error = begin_invocation(&fixture.pool, &fixture.scope, invalid)
+    let error = begin_invocation(&fixture.context, &fixture.scope, invalid)
         .await
         .expect_err("blank user input must be rejected");
     assert!(matches!(error, BeginInvocationError::InvalidInputMessage));
@@ -727,7 +730,7 @@ async fn invalid_new_input_rolls_back_idempotency_and_all_begin_rows() {
 async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "lease-fencing"),
     )
@@ -755,9 +758,10 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .connect(&database_url)
         .await
         .expect("second independent worker session should connect");
+    let second_context = common::signed_context(&second_pool).await;
 
-    let worker_a = PgExecutionStore::new(fixture.pool.clone());
-    let worker_b = PgExecutionStore::new(second_pool.clone());
+    let worker_a = PgExecutionStore::new(fixture.context.clone());
+    let worker_b = PgExecutionStore::new(second_context.clone());
 
     let first_claim = worker_a
         .claim_invocation(&fixture.scope, invocation_id, "worker-a", 60)
@@ -1005,7 +1009,7 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
 async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "read-projection-success"),
     )
@@ -1016,7 +1020,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let query_store = PgInvocationQueryStore::new(fixture.pool.clone());
+    let query_store = PgInvocationQueryStore::new(fixture.context.clone());
     let queued = query_store
         .get_invocation(&fixture.scope, invocation_id)
         .await
@@ -1036,7 +1040,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         "an invocation from another tenant must be indistinguishable from a missing ID"
     );
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-projection-success";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1165,7 +1169,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
     assert_eq!(succeeded.error_code(), None);
 
     let failed_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "read-projection-failed"),
     )
@@ -1215,7 +1219,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
 async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "cancel-active-worker"),
     )
@@ -1226,7 +1230,7 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let claim = store
         .claim_invocation(&fixture.scope, invocation_id, "worker-cancel", 60)
         .await
@@ -1322,7 +1326,7 @@ async fn invocation_cancellation_is_idempotent_and_fences_an_active_worker() {
 async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "response-transaction-rollback"),
     )
@@ -1332,7 +1336,7 @@ async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-response-rollback";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1503,7 +1507,7 @@ async fn failed_assistant_insert_rolls_back_response_attempt_transition() {
 async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "send-marker-after-expiry"),
     )
@@ -1513,7 +1517,7 @@ async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-expired-reservation";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1596,7 +1600,7 @@ async fn pre_send_marker_rejects_a_reservation_already_expired_by_sweeper() {
 async fn provider_response_and_usage_are_durable_before_replay_safe_settlement() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "provider-response-settlement"),
     )
@@ -1606,7 +1610,7 @@ async fn provider_response_and_usage_are_durable_before_replay_safe_settlement()
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-provider-response";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1735,7 +1739,7 @@ async fn provider_response_and_usage_are_durable_before_replay_safe_settlement()
 async fn terminal_failure_is_rejected_after_provider_may_have_been_sent() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "fail-after-send-marker"),
     )
@@ -1745,7 +1749,7 @@ async fn terminal_failure_is_rejected_after_provider_may_have_been_sent() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-fail-after-marker";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1847,7 +1851,7 @@ async fn terminal_failure_is_rejected_after_provider_may_have_been_sent() {
 async fn cancellation_after_pre_send_marker_keeps_reservation_held() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "cancel-after-send-marker"),
     )
@@ -1857,7 +1861,7 @@ async fn cancellation_after_pre_send_marker_keeps_reservation_held() {
         BeginInvocationOutcome::Created { invocation_id, .. } => invocation_id,
         other => panic!("expected new invocation, got {other:?}"),
     };
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-cancel-after-marker";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -1941,7 +1945,7 @@ async fn cancellation_after_pre_send_marker_keeps_reservation_held() {
 async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "cancel-terminal"),
     )
@@ -1952,7 +1956,7 @@ async fn invocation_cancellation_does_not_rewrite_another_terminal_state() {
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-terminal-failure";
     let current = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -2015,7 +2019,7 @@ async fn object_daily_limit_is_aggregate_across_pools_and_ignores_anonymous_shar
         .expect("aggregate daily limit should be configured");
 
     let first = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "daily-auth"),
     )
@@ -2025,7 +2029,7 @@ async fn object_daily_limit_is_aggregate_across_pools_and_ignores_anonymous_shar
 
     let mut anonymous = command(&fixture, "daily-anon");
     anonymous.invocation_pool = InvocationPool::Anonymous;
-    let error = begin_invocation(&fixture.pool, &fixture.scope, anonymous)
+    let error = begin_invocation(&fixture.context, &fixture.scope, anonymous)
         .await
         .expect_err("anonymous pool must share the aggregate object ceiling");
     assert!(matches!(
@@ -2057,7 +2061,7 @@ async fn caller_daily_limit_rejects_and_rolls_back_all_begin_rows() {
     .await
     .expect("caller daily limit should be configured");
     let error = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "caller-limit"),
     )
@@ -2087,7 +2091,7 @@ async fn concurrent_invocation_limit_counts_active_reservations() {
         .await
         .expect("concurrency limit should be configured");
     let first = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "concurrent-1"),
     )
@@ -2095,7 +2099,7 @@ async fn concurrent_invocation_limit_counts_active_reservations() {
     .expect("first invocation should reserve the only slot");
     assert!(matches!(first, BeginInvocationOutcome::Created { .. }));
     let error = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "concurrent-2"),
     )
@@ -2141,12 +2145,13 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let first_command = command(&fixture, "race-a");
     let second_command = command(&fixture, "race-b");
     let (first, second) = tokio::join!(
-        begin_invocation(&fixture.pool, &fixture.scope, first_command),
-        begin_invocation(&second_pool, &fixture.scope, second_command),
+        begin_invocation(&fixture.context, &fixture.scope, first_command),
+        begin_invocation(&second_context, &fixture.scope, second_command),
     );
     second_pool.close().await;
 
@@ -2196,7 +2201,7 @@ async fn effective_invocation_cap_is_the_tighter_snapshot_or_live_limit() {
         .await
         .expect("live per-invocation cap should be lowered");
     let error = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "tight-live-cap"),
     )
@@ -2221,7 +2226,7 @@ async fn malformed_snapshot_budget_fails_closed_and_rolls_back_idempotency() {
         .await
         .expect("fixture snapshot projection should be malformed");
     let error = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "missing-snapshot-budget"),
     )
@@ -2236,7 +2241,7 @@ async fn malformed_snapshot_budget_fails_closed_and_rolls_back_idempotency() {
 async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "settle-normalized"),
     )
@@ -2251,7 +2256,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
     )
     .expect("input estimate");
     let outcome = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(31, 12)),
@@ -2293,7 +2298,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
 
     // A retry with different in-memory input cannot rewrite an already committed settlement.
     let replay = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(900, 900)),
@@ -2317,7 +2322,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
         .await
         .expect("set daily cap to original estimate");
     let next = begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "after-settlement-overage"),
     )
@@ -2336,7 +2341,7 @@ async fn provider_usage_settlement_replaces_estimate_and_is_idempotent() {
 async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "settle-missing-usage"),
     )
@@ -2353,7 +2358,7 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
     )
     .expect("input estimate");
 
-    let store = PgExecutionStore::new(fixture.pool.clone());
+    let store = PgExecutionStore::new(fixture.context.clone());
     let owner = "worker-missing-usage";
     let claimed = store
         .claim_invocation(&fixture.scope, invocation_id, owner, 60)
@@ -2459,7 +2464,7 @@ async fn missing_provider_usage_settles_estimate_and_marks_invocation_degraded()
             .expect("settle degraded usage and complete")
     );
 
-    let replay = settle_invocation_usage(&fixture.pool, &fixture.scope, invocation_id, None)
+    let replay = settle_invocation_usage(&fixture.context, &fixture.scope, invocation_id, None)
         .await
         .expect("degraded settlement replay");
     assert_eq!(replay.actual_tokens(), estimate);
@@ -2515,15 +2520,16 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let (first, second) = tokio::join!(
         begin_invocation(
-            &fixture.pool,
+            &fixture.context,
             &fixture.scope,
             command(&fixture, "caller-race-a")
         ),
         begin_invocation(
-            &second_pool,
+            &second_context,
             &fixture.scope,
             command(&fixture, "caller-race-b")
         ),
@@ -2576,7 +2582,7 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
 async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "settlement-race"),
     )
@@ -2603,16 +2609,17 @@ async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let (first, second) = tokio::join!(
         settle_invocation_usage(
-            &fixture.pool,
+            &fixture.context,
             &fixture.scope,
             invocation_id,
             Some(TokenUsage::new(31, 12)),
         ),
         settle_invocation_usage(
-            &second_pool,
+            &second_context,
             &fixture.scope,
             invocation_id,
             Some(TokenUsage::new(900, 900)),
@@ -2675,7 +2682,7 @@ async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
 async fn settlement_database_failure_rolls_back_both_counters_and_reservation() {
     let fixture = setup(None).await;
     let invocation_id = match begin_invocation(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         command(&fixture, "settle-rollback"),
     )
@@ -2705,7 +2712,7 @@ async fn settlement_database_failure_rolls_back_both_counters_and_reservation() 
     .expect("failure injection trigger");
 
     let error = settle_invocation_usage(
-        &fixture.pool,
+        &fixture.context,
         &fixture.scope,
         invocation_id,
         Some(TokenUsage::new(31, 12)),
@@ -2754,7 +2761,7 @@ async fn one_thousand_invocations_of_one_configuration_pin_the_same_snapshot() {
 
     for index in 0..1_000 {
         let outcome = begin_invocation(
-            &fixture.pool,
+            &fixture.context,
             &fixture.scope,
             command(&fixture, &format!("t30-same-config-{index}")),
         )
@@ -2806,6 +2813,8 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let pool_a = fixture.pool.clone();
     let pool_b = fixture.pool.clone();
+    let context_a = common::signed_context(&pool_a).await;
+    let context_b = common::signed_context(&pool_b).await;
     let scope_a = fixture.scope;
     let scope_b = fixture.scope;
     let command_a = command(&fixture, "budget-race-a");
@@ -2815,11 +2824,11 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
 
     let task_a = tokio::spawn(async move {
         barrier_a.wait().await;
-        begin_invocation(&pool_a, &scope_a, command_a).await
+        begin_invocation(&context_a, &scope_a, command_a).await
     });
     let task_b = tokio::spawn(async move {
         barrier_b.wait().await;
-        begin_invocation(&pool_b, &scope_b, command_b).await
+        begin_invocation(&context_b, &scope_b, command_b).await
     });
 
     let result_a = task_a.await.expect("first PostgreSQL task should finish");
@@ -2874,6 +2883,8 @@ async fn concurrent_duplicate_idempotency_claim_creates_only_one_reservation() {
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let pool_a = fixture.pool.clone();
     let pool_b = fixture.pool.clone();
+    let context_a = common::signed_context(&pool_a).await;
+    let context_b = common::signed_context(&pool_b).await;
     let scope_a = fixture.scope;
     let scope_b = fixture.scope;
     let command_a = command(&fixture, "same-concurrent-key");
@@ -2883,11 +2894,11 @@ async fn concurrent_duplicate_idempotency_claim_creates_only_one_reservation() {
 
     let task_a = tokio::spawn(async move {
         barrier_a.wait().await;
-        begin_invocation(&pool_a, &scope_a, command_a).await
+        begin_invocation(&context_a, &scope_a, command_a).await
     });
     let task_b = tokio::spawn(async move {
         barrier_b.wait().await;
-        begin_invocation(&pool_b, &scope_b, command_b).await
+        begin_invocation(&context_b, &scope_b, command_b).await
     });
 
     let result_a = task_a.await.expect("first PostgreSQL task should finish");

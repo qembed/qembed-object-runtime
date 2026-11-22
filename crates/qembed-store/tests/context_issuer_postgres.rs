@@ -4,7 +4,7 @@ use qembed_domain::ids::{CallerId, TenantId};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgPoolConfig, RingEd25519SigningKey,
-    begin_context_transaction, connect_pool, run_migrations,
+    begin_context_transaction, begin_principal_context_transaction, connect_pool, run_migrations,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -304,10 +304,44 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("RLS test rows should be inserted before switching to the runtime role");
 
+    let other_caller_id = CallerId::new();
+    sqlx::query(
+        "INSERT INTO qembed_crypto.caller_rows (caller_id, row_id) \
+         VALUES ($1::uuid, 91011), ($2::uuid, 91012)",
+    )
+    .bind(caller_id.to_string())
+    .bind(other_caller_id.to_string())
+    .execute(transaction.connection())
+    .await
+    .expect("Caller-scoped RLS rows should be inserted before switching to runtime");
+
     sqlx::query("SET LOCAL ROLE qembed_runtime")
         .execute(transaction.connection())
         .await
         .expect("test transaction should assume the restricted runtime role");
+
+    let legacy_selectors_before_forgery: (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT NULLIF(current_setting('app.tenant_id', true), ''), \
+                    NULLIF(current_setting('app.principal_id', true), ''), \
+                    NULLIF(current_setting('app.caller_id', true), '')",
+        )
+        .fetch_one(transaction.connection())
+        .await
+        .expect("legacy identity selectors should be inspectable");
+    assert_eq!(legacy_selectors_before_forgery, (None, None, None));
+
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), \
+                set_config('app.principal_id', $2, true), \
+                set_config('app.caller_id', $3, true)",
+    )
+    .bind(TenantId::new().to_string())
+    .bind(Uuid::new_v4().to_string())
+    .bind(other_caller_id.to_string())
+    .execute(transaction.connection())
+    .await
+    .expect("runtime role can write legacy selectors but must not change signed identity");
 
     let runtime_privileges: (bool, bool, bool, bool, bool, bool, bool, bool, bool) =
         sqlx::query_as(
@@ -359,6 +393,12 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         visible_rows, 1,
         "RLS must return only the signed tenant's row"
     );
+    let visible_caller_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM qembed_crypto.caller_rows")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("Caller-scoped RLS should use the signed Caller claim");
+    assert_eq!(visible_caller_rows, 1);
 
     sqlx::query("SAVEPOINT rt050_savepoint")
         .execute(transaction.connection())
@@ -400,6 +440,75 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .await
             .expect("transaction-local token setting should be readable after commit");
     assert_eq!(token_after_commit, None, "commit must clear the token GUC");
+
+    // A Principal-only transaction deliberately carries JSON null for Caller.
+    // It must not infer a Caller from Principal identity or an available delegation.
+    let mut principal_transaction = begin_principal_context_transaction(&pool, &scope, &issuer)
+        .await
+        .expect("Principal-only context must not require Caller selection");
+    let principal_only_token: String =
+        sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context token should be installed");
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
+        .execute(principal_transaction.connection())
+        .await
+        .expect("Principal-only probe should run under the restricted runtime role");
+    let principal_only_claims: serde_json::Value =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&principal_only_token)
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("PostgreSQL should verify Principal-only claims");
+    assert_eq!(principal_only_claims["tenant_id"], tenant_id.to_string());
+    assert_eq!(
+        principal_only_claims["principal_id"],
+        principal_id.to_string()
+    );
+    assert!(principal_only_claims["caller_id"].is_null());
+
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), \
+                set_config('app.principal_id', $2, true), \
+                set_config('app.caller_id', $3, true)",
+    )
+    .bind(TenantId::new().to_string())
+    .bind(Uuid::new_v4().to_string())
+    .bind(caller_id.to_string())
+    .execute(principal_transaction.connection())
+    .await
+    .expect("Principal-only runtime role can forge legacy selectors without gaining identity");
+
+    let principal_after_forgery: String =
+        sqlx::query_scalar("SELECT qembed_crypto.current_principal_id()::text")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context should ignore the forged Principal GUC");
+    assert_eq!(principal_after_forgery, principal_id.to_string());
+
+    let no_effective_caller: Option<String> =
+        sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context should expose SQL NULL for Caller");
+    assert_eq!(no_effective_caller, None);
+    let principal_tenant_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM qembed_crypto.tenant_rows")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context should retain tenant-scoped RLS access");
+    assert_eq!(principal_tenant_rows, 1);
+    let principal_caller_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM qembed_crypto.caller_rows")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context should safely deny Caller-scoped rows");
+    assert_eq!(principal_caller_rows, 0);
+    principal_transaction
+        .commit()
+        .await
+        .expect("Principal-only context transaction should commit");
 
     let committed_replay: Option<serde_json::Value> =
         sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
