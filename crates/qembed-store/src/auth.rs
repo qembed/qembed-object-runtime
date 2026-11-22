@@ -91,22 +91,11 @@ impl AuthenticationPort for OwnerAuthenticator {
     ) -> Result<AuthenticatedIdentity, Self::Error> {
         let token_hash = Sha256::digest(credentials.token.as_bytes()).to_vec();
 
-        // This lookup happens before a trusted Scope exists. The request-supplied
-        // tenant ID is used only as a transaction-local RLS selector and is also
-        // matched in the query; it is not promoted to an authenticated identity.
-        // Keeping set_config and SELECT in one transaction prevents tenant context
-        // from leaking through a pooled connection after commit or rollback.
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(OwnerAuthenticationError::Database)?;
-        sqlx::query("SELECT set_config('app.tenant_id', $1, true)")
-            .bind(credentials.tenant_id.to_string())
-            .execute(&mut *transaction)
-            .await
-            .map_err(OwnerAuthenticationError::Database)?;
-
+        // This lookup happens before a trusted Scope exists. The canonical
+        // pre-auth owner tables intentionally have no tenant RLS policy; runtime
+        // has only narrow column SELECT grants. The supplied tenant is constrained
+        // in the same statement as the high-entropy token digest and is not treated
+        // as authenticated identity until the persisted Principal is returned.
         let row = sqlx::query_as::<_, (String, String)>(
             r#"
             SELECT principal.tenant_id::text, principal.caller_id::text
@@ -123,14 +112,9 @@ impl AuthenticationPort for OwnerAuthenticator {
         )
         .bind(credentials.tenant_id.to_string())
         .bind(token_hash)
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&self.pool)
         .await
         .map_err(OwnerAuthenticationError::Database)?;
-
-        transaction
-            .commit()
-            .await
-            .map_err(OwnerAuthenticationError::Database)?;
 
         let Some((tenant_id, principal_id)) = row else {
             return Err(OwnerAuthenticationError::InvalidCredentials);
