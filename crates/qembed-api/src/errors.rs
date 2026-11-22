@@ -115,7 +115,8 @@ pub fn map_begin_invocation_error(error: &BeginInvocationError) -> ApiError {
         | BeginInvocationError::SnapshotBudgetInvalid
         | BeginInvocationError::KnowledgeRevisionNotFound
         | BeginInvocationError::KnowledgeRevisionOutOfRange
-        | BeginInvocationError::Database(_) => RuntimeError::Internal,
+        | BeginInvocationError::Database(_)
+        | BeginInvocationError::Context(_) => RuntimeError::Internal,
     };
     map_runtime_error(runtime_error)
 }
