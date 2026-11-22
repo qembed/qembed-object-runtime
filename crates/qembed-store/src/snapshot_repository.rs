@@ -63,7 +63,7 @@ impl SnapshotRepository {
     ) -> Result<Option<Snapshot>, SnapshotRepositoryError> {
         let mut transaction = self.context.begin_principal(scope)
             .await
-            .map_err(SnapshotRepositoryError::Database)?;
+            .map_err(SnapshotRepositoryError::Context)?;
 
         let row = fetch_optional(
             &mut transaction,
@@ -145,6 +145,8 @@ pub enum SnapshotRepositoryError {
     InvalidHashLength,
     /// The persisted snapshot failed a domain invariant, including hash verification.
     Domain(SnapshotError),
+    /// Signed transaction context could not be established.
+    Context(crate::ContextTransactionError),
     /// PostgreSQL rejected the operation or could not complete it.
     Database(sqlx::Error),
 }
@@ -163,6 +165,9 @@ impl fmt::Display for SnapshotRepositoryError {
                 formatter.write_str("persisted snapshot hash is not 32 bytes")
             }
             Self::Domain(error) => write!(formatter, "snapshot domain invariant failed: {error:?}"),
+            Self::Context(error) => {
+                write!(formatter, "snapshot repository signed-context error: {error}")
+            }
             Self::Database(error) => {
                 write!(formatter, "snapshot repository database error: {error}")
             }
@@ -173,6 +178,7 @@ impl fmt::Display for SnapshotRepositoryError {
 impl std::error::Error for SnapshotRepositoryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
