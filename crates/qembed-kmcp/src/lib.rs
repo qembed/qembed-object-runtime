@@ -17,6 +17,6 @@
 pub mod lifecycle;
 
 pub use lifecycle::{
-    LifecycleAction, LifecycleDecision, LifecycleError, LifecycleRequest,
-    LifecycleState, plan_transition,
+    LifecycleAction, LifecycleDecision, LifecycleError, LifecycleRequest, LifecycleState,
+    plan_transition,
 };
