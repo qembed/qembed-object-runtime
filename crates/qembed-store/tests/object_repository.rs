@@ -25,7 +25,8 @@ fn snapshot(version: &ObjectVersion, bytes: &[u8]) -> qembed_domain::snapshot::S
 async fn object_repository_creates_objects_and_only_atomic_draft_version_snapshot_pairs() {
     let pool = common::connect().await;
     run_migrations(&pool).await.expect("migrations should run");
-    let repository = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let repository = ObjectRepository::new(context);
     let tenant_a = TenantId::new();
     let scope_a = scope_for_tenant(tenant_a);
     let object = Object::new(ObjectId::new(), tenant_a);
