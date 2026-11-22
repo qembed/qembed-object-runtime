@@ -43,5 +43,5 @@ Numerical capacities and refill rates are configuration, not hard-coded product 
 - Unit tests cover policy validation, token refill, burst capacity, retry-after calculation, and class isolation.
 - Multi-worker integration tests use independent Valkey connections and concurrent consumers.
 - Tests verify that the three request classes do not consume each other's buckets.
-- A reconnect/failover test documents the accepted bounded-overrun behavior.
+- Multi-worker tests use independent connection managers; Valkey's reconnecting connection manager is used for transient connection loss. Actual replication failover behavior remains a deployment-level acceptance test: the accepted bounded-overrun limitation is documented, not misrepresented as a strict guarantee.
 - Existing PostgreSQL budget reservation tests remain unchanged and continue to run.
