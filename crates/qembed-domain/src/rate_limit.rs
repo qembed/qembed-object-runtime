@@ -154,16 +154,24 @@ impl RateLimitPolicy {
     }
 
     #[must_use]
-    pub const fn capacity(self) -> u32 { self.capacity }
+    pub const fn capacity(self) -> u32 {
+        self.capacity
+    }
 
     #[must_use]
-    pub const fn refill_tokens(self) -> u32 { self.refill_tokens }
+    pub const fn refill_tokens(self) -> u32 {
+        self.refill_tokens
+    }
 
     #[must_use]
-    pub const fn refill_period_ms(self) -> u64 { self.refill_period_ms }
+    pub const fn refill_period_ms(self) -> u64 {
+        self.refill_period_ms
+    }
 
     #[must_use]
-    pub const fn idle_ttl_ms(self) -> u64 { self.idle_ttl_ms }
+    pub const fn idle_ttl_ms(self) -> u64 {
+        self.idle_ttl_ms
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,7 +205,11 @@ impl RateLimitPolicies {
         authenticated: RateLimitPolicy,
         owner: RateLimitPolicy,
     ) -> Self {
-        Self { anonymous, authenticated, owner }
+        Self {
+            anonymous,
+            authenticated,
+            owner,
+        }
     }
 
     #[must_use]
@@ -221,17 +233,27 @@ pub struct RateLimitDecision {
 impl RateLimitDecision {
     #[must_use]
     pub const fn new(allowed: bool, remaining: u32, retry_after: Option<Duration>) -> Self {
-        Self { allowed, remaining, retry_after }
+        Self {
+            allowed,
+            remaining,
+            retry_after,
+        }
     }
 
     #[must_use]
-    pub const fn allowed(self) -> bool { self.allowed }
+    pub const fn allowed(self) -> bool {
+        self.allowed
+    }
 
     #[must_use]
-    pub const fn remaining(self) -> u32 { self.remaining }
+    pub const fn remaining(self) -> u32 {
+        self.remaining
+    }
 
     #[must_use]
-    pub const fn retry_after(self) -> Option<Duration> { self.retry_after }
+    pub const fn retry_after(self) -> Option<Duration> {
+        self.retry_after
+    }
 }
 
 /// Atomic shared-state boundary. Implementations must refill, decide, consume,
@@ -250,7 +272,10 @@ pub trait RateLimitStore: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ids::TenantId, principal::{Principal, PrincipalKind}};
+    use crate::{
+        ids::TenantId,
+        principal::{Principal, PrincipalKind},
+    };
 
     #[test]
     fn policy_rejects_zero_values_and_ttl_shorter_than_full_refill() {
@@ -269,20 +294,24 @@ mod tests {
         let tenant = TenantId::new();
         let object = ObjectId::new();
         let anonymous = RateLimitKey::new(tenant, object, RateLimitClass::Anonymous, "a").unwrap();
-        let authenticated = RateLimitKey::new(tenant, object, RateLimitClass::Authenticated, "a").unwrap();
+        let authenticated =
+            RateLimitKey::new(tenant, object, RateLimitClass::Authenticated, "a").unwrap();
         let owner = RateLimitKey::new(tenant, object, RateLimitClass::Owner, "a").unwrap();
         assert_ne!(anonymous, authenticated);
         assert_ne!(authenticated, owner);
-        assert!(anonymous.as_str().contains(&format!("{{{tenant}:{object}}}")));
+        assert!(
+            anonymous
+                .as_str()
+                .contains(&format!("{{{tenant}:{object}}}"))
+        );
     }
 
     #[test]
     fn owner_key_requires_trusted_owner_scope() {
         let tenant = TenantId::new();
-        let principal = Principal::from_verified_auth(
-            PrincipalId::new(),
-            PrincipalKind::Authenticated,
-        ).unwrap();
+        let principal =
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated)
+                .unwrap();
         let scope = Scope::from_verified_auth(tenant, principal).unwrap();
         assert_eq!(
             RateLimitKey::for_owner(&scope, ObjectId::new()),
