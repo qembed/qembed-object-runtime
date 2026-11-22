@@ -3,11 +3,11 @@
 use std::fmt;
 use std::str::FromStr;
 
+use crate::{PgContext, execute, fetch_all, fetch_optional};
 use qembed_domain::ids::{CallerId, InvocationId, ObjectId, SnapshotId, TenantId};
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::scope::Scope;
-use crate::{PgContext, execute, fetch_all, fetch_optional};
 
 #[derive(Clone)]
 pub struct PgExecutionStore {
@@ -34,7 +34,10 @@ pub enum InvocationStoreError {
 impl fmt::Display for InvocationStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Context(error) => write!(formatter, "invocation signed-context initialization failed: {error}"),
+            Self::Context(error) => write!(
+                formatter,
+                "invocation signed-context initialization failed: {error}"
+            ),
             Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
             Self::Settlement(error) => {
                 write!(formatter, "invocation usage settlement failed: {error}")
