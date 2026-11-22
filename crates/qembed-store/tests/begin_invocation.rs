@@ -2519,6 +2519,7 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let (first, second) = tokio::join!(
         begin_invocation(
@@ -2610,13 +2611,13 @@ async fn concurrent_settlement_of_one_reservation_is_applied_exactly_once() {
 
     let (first, second) = tokio::join!(
         settle_invocation_usage(
-            &fixture.pool,
+            &fixture.context,
             &fixture.scope,
             invocation_id,
             Some(TokenUsage::new(31, 12)),
         ),
         settle_invocation_usage(
-            &second_pool,
+            &second_context,
             &fixture.scope,
             invocation_id,
             Some(TokenUsage::new(900, 900)),
