@@ -551,8 +551,8 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let emergency_key_id = format!("rt050-emergency-{}", Uuid::new_v4());
     sqlx::query(
-        "INSERT INTO qembed_crypto.verification_keys \\
-         (key_id, public_key, issuer, audience, deployment_id) \\
+        "INSERT INTO qembed_crypto.verification_keys \
+         (key_id, public_key, issuer, audience, deployment_id) \
          VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(&emergency_key_id)
