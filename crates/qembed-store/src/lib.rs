@@ -164,6 +164,35 @@ pub async fn begin_tenant_transaction(
     })
 }
 
+/// Begins a signed-context transaction with READ COMMITTED isolation.
+///
+/// Key revocation must become visible to the next statement that verifies the
+/// token. A transaction-level repeatable-read snapshot could otherwise continue
+/// observing a pre-revocation key row until the transaction ends.
+pub(crate) async fn begin_context_tenant_transaction(
+    pool: &PgPool,
+    scope: &Scope,
+) -> Result<TenantTransaction, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), set_config('app.principal_id', $2, true)",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(scope.principal().principal_id().to_string())
+    .execute(&mut *transaction)
+    .await?;
+
+    Ok(TenantTransaction {
+        transaction,
+        tenant_id: scope.tenant_id(),
+        principal_id: scope.principal().principal_id(),
+        transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
+    })
+}
+
 /// Executes a typed row query inside a tenant-scoped transaction.
 ///
 /// Repository methods should accept `&Scope`, begin their work with
