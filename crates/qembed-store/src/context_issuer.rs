@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
+use crate::caller::{CallerResolutionError, resolve_delegated_caller};
 use crate::{TenantTransaction, begin_context_tenant_transaction};
 
 const TOKEN_PREFIX: &str = "qctx1";
