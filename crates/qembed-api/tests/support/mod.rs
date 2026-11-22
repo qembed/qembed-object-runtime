@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 /// Creates a test-only signer and registers its public key through the dedicated
 /// PostgreSQL key-control-plane identity.
+#[allow(dead_code)]
 pub async fn signed_context(pool: &PgPool) -> PgContext {
     let deployment_id = "rt050-api-integration-test";
     let database_oid: String =
