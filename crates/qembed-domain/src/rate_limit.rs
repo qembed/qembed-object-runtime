@@ -5,7 +5,7 @@ use std::{error::Error, future::Future, time::Duration};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ids::{CallerId, ObjectId, PrincipalId, TenantId},
+    ids::{CallerId, ObjectId, TenantId},
     principal::PrincipalKind,
     scope::Scope,
 };
@@ -133,6 +133,12 @@ impl RateLimitPolicy {
             .map_err(|_| RateLimitPolicyError::DurationOutOfRange)?;
         if refill_period_ms == 0 || idle_ttl_ms == 0 {
             return Err(RateLimitPolicyError::ZeroDuration);
+        }
+        // Lua numbers are IEEE-754 doubles; reject durations that cannot be
+        // represented exactly as integer milliseconds.
+        const MAX_SAFE_INTEGER_MS: u64 = 9_007_199_254_740_991;
+        if refill_period_ms > MAX_SAFE_INTEGER_MS || idle_ttl_ms > MAX_SAFE_INTEGER_MS {
+            return Err(RateLimitPolicyError::DurationOutOfRange);
         }
         let full_refill_ms = (u128::from(capacity) * u128::from(refill_period_ms))
             .div_ceil(u128::from(refill_tokens));
