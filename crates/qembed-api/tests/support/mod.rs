@@ -1,8 +1,6 @@
 //! Tower-based test helpers shared by PostgreSQL API integration tests.
 
-use qembed_store::{
-    ContextIssuer, ContextIssuerConfig, PgContext, RingEd25519SigningKey,
-};
+use qembed_store::{ContextIssuer, ContextIssuerConfig, PgContext, RingEd25519SigningKey};
 use sqlx::PgPool;
 use uuid::Uuid;
 
