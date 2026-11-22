@@ -13,8 +13,8 @@ use sqlx::PgPool;
 
 use crate::caller::ResolvedCaller;
 use crate::{
-    ContextIssuer, ContextTransaction, ContextTransactionError,
-    begin_caller_context_transaction, begin_principal_context_transaction,
+    ContextIssuer, ContextTransaction, ContextTransactionError, begin_caller_context_transaction,
+    begin_principal_context_transaction,
 };
 
 /// PostgreSQL access capability that requires signed context for transactions.
