@@ -5,7 +5,6 @@ use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
 use support::{owner_router, test};
 
-
 async fn insert_owner(pool: &sqlx::PgPool, tenant_id: TenantId, token: &str) {
     let principal_id = PrincipalId::new();
     sqlx::query(
