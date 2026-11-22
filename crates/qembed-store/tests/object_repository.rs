@@ -172,7 +172,8 @@ async fn object_repository_creates_objects_and_only_atomic_draft_version_snapsho
 async fn concurrent_draft_creations_allocate_distinct_sequential_version_numbers() {
     let pool = common::connect().await;
     run_migrations(&pool).await.expect("migrations should run");
-    let repository = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let repository = ObjectRepository::new(context);
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object = Object::new(ObjectId::new(), tenant_id);
