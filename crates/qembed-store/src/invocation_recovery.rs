@@ -9,11 +9,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::{PgContext, fetch_all};
 use qembed_domain::{
     ids::{EventId, InvocationId},
     scope::Scope,
 };
-use crate::{PgContext, fetch_all};
 
 /// One invocation whose original Outbox delivery was durably marked for replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
