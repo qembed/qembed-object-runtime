@@ -338,14 +338,14 @@ SQLX_OFFLINE=true cargo check --workspace
 
 - [x] **RUST-044-T (M)** Использовать Axum + Tower как единый HTTP transport stack для `qembed-api` до реализации оставшихся Owner API endpoints.
   - Основание: Owner API ещё небольшой; миграция до добавления оставшихся endpoints сокращает повторную работу и удерживает единый HTTP stack.
-  - Архитектурное решение: Axum — HTTP router/handler framework; Tower — service/middleware layer. Сохранить HTTP/JSON Owner API и текущие auth/tenant boundaries. Connect/gRPC/Protobuf в эту задачу не входят и требуют отдельного ADR/решения.
+  - Архитектурное решение: Axum — HTTP router/handler framework; Tower — service/middleware layer. Сохранить HTTP/JSON Owner API и текущие auth/tenant boundaries. Connect/gRPC/Protobuf в эту задачу не входят и требуют отдельного ADR/решения. Полное решение: [ADR-RT-053](docs/ADR-RT-053-AXUM-TOWER-HTTP-TRANSPORT.md).
   - MSRV: workspace minimum Rust 1.100.0; `rust-toolchain.toml` фиксирует Rust 1.100.0, а CI запускает основной matrix на той же версии. Исторические записи о Rust 1.85 ниже относятся к фактически выполненным M1a PR и CI runs.
-  - Реализация: заменить Actix routing, extractors, middleware и composition wiring на Axum + Tower; перенести health/readiness и Owner routes; убрать actix-web из workspace dependencies и crates; сохранить rust-version 1.85 и существующий MSRV CI.
+  - Реализация: `qembed-api` предоставляет Axum Router, Axum handlers и Tower middleware; health/readiness и Owner routes собраны через общий composition root. `actix-web` не входит в workspace dependencies или crate manifests.
   - Сохранить без изменения публичные HTTP contracts: paths, methods, headers, status codes, DTOs, error codes, response minimization, Bearer auth и недоверенный X-Tenant-ID selector. Не переносить SQLx или бизнес-логику в handlers/middleware.
   - Тесты: Axum router/service integration для каждого endpoint; auth/tenant negative cases; health/readiness behavior; serialization/error mapping; реальные PostgreSQL API integration tests остаются на PostgreSQL и не заменяются router mocks.
   - Граница ответственности: `qembed-api` предоставляет Router, middleware и readiness. Запуск listener, process startup/shutdown и graceful shutdown принадлежат будущему server executable/host и не являются обязанностью API crate; их проверка не блокирует закрытие этой задачи.
-  - DoD: Actix полностью удалён; все API tests проходят на Axum; Rust 1.85 (MSRV) и stable CI зелёные; HTTP contract regression suite подтверждает отсутствие непреднамеренных изменений.
-  - Порядок: архитектурное решение → dependency compatibility audit в рамках Rust 1.85 → framework migration → CI/tests → Owner API endpoints на Axum.
+  - DoD: все API routes и middleware используют Axum + Tower; HTTP contract regression suite и PostgreSQL API integration tests проходят. На момент миграции Rust 1.85 MSRV и stable CI были зелёными; текущая workspace toolchain/MSRV зафиксирована отдельно в Toolchain policy.
+  - Порядок (выполнен): архитектурное решение → dependency compatibility audit → Axum + Tower migration → CI/tests → Owner API endpoints на Axum.
 - [x] **RUST-044 (M)** Собрать Owner API: create object/version, publish, invoke, inspect invocation.
   - Архитектурный контракт: [Owner API and trusted publication validation](docs/OWNER_API_PUBLICATION_VALIDATION.md).
   - Первый кодовый срез: bounded domain validator `m0-r3-bounded-budget-v1`; проверяет только подтверждённый положительный integer `limits.max_tokens_per_invocation` и выпускает snapshot-bound opaque evidence. Полная семантическая валидация не заявляется.
@@ -666,7 +666,7 @@ PR должны оставаться небольшими. Если один п�
 6. **PR-06:** RUST-024…029 — events/outbox, CAS, RLS и role integration tests.
 7. **PR-07:** RUST-030…034 — ChatProvider contract и deterministic mock.
 8. **PR-08:** RUST-035…043 — idempotency, invocation worker, leases, budget, errors, health.
-9. **PR-09a:** RUST-044-T — Axum + Tower migration при сохранении Rust 1.85 MSRV. Выполнено.
+9. **PR-09a:** RUST-044-T — Axum + Tower migration; [ADR-RT-053](docs/ADR-RT-053-AXUM-TOWER-HTTP-TRANSPORT.md). Выполнено.
 10. **PR-09b:** RUST-044 — Owner API endpoints, API integration coverage и PostgreSQL/security DoD. Выполнено.
 12. Затем M1b → M2 → M3 → M4.
 
