@@ -4,9 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use redis::ErrorKind;
 
-use qembed_domain::rate_limit::{
-    RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitStore,
-};
+use qembed_domain::rate_limit::{RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitStore};
 use tokio::sync::OnceCell;
 
 /// One Lua invocation performs time lookup, refill, decision, decrement, and TTL
@@ -58,11 +56,11 @@ impl ValkeyRateLimitStore {
         })
     }
 
-    async fn connection(
-        &self,
-    ) -> Result<&redis::aio::ConnectionManager, redis::RedisError> {
+    async fn connection(&self) -> Result<&redis::aio::ConnectionManager, redis::RedisError> {
         self.connection
-            .get_or_try_init(|| async { redis::aio::ConnectionManager::new(self.client.clone()).await })
+            .get_or_try_init(|| async {
+                redis::aio::ConnectionManager::new(self.client.clone()).await
+            })
             .await
     }
 }
@@ -77,18 +75,17 @@ impl RateLimitStore for ValkeyRateLimitStore {
         cost: u32,
     ) -> Result<RateLimitDecision, Self::Error> {
         let mut connection = self.connection().await?.clone();
-        let (allowed, remaining, retry_after_ms): (i64, i64, i64) =
-            redis::cmd("EVAL")
-                .arg(TOKEN_BUCKET_SCRIPT)
-                .arg(1)
-                .arg(key.as_str())
-                .arg(policy.capacity())
-                .arg(policy.refill_tokens())
-                .arg(policy.refill_period_ms())
-                .arg(policy.idle_ttl_ms())
-                .arg(cost)
-                .query_async(&mut connection)
-                .await?;
+        let (allowed, remaining, retry_after_ms): (i64, i64, i64) = redis::cmd("EVAL")
+            .arg(TOKEN_BUCKET_SCRIPT)
+            .arg(1)
+            .arg(key.as_str())
+            .arg(policy.capacity())
+            .arg(policy.refill_tokens())
+            .arg(policy.refill_period_ms())
+            .arg(policy.idle_ttl_ms())
+            .arg(cost)
+            .query_async(&mut connection)
+            .await?;
 
         if allowed != 0 && allowed != 1 {
             return Err(redis::RedisError::from((
@@ -97,10 +94,16 @@ impl RateLimitStore for ValkeyRateLimitStore {
             )));
         }
         let remaining = u32::try_from(remaining).map_err(|_| {
-            redis::RedisError::from((ErrorKind::TypeError, "Valkey returned invalid remaining tokens"))
+            redis::RedisError::from((
+                ErrorKind::TypeError,
+                "Valkey returned invalid remaining tokens",
+            ))
         })?;
         let retry_after_ms = u64::try_from(retry_after_ms).map_err(|_| {
-            redis::RedisError::from((ErrorKind::TypeError, "Valkey returned invalid retry-after"))
+            redis::RedisError::from((
+                ErrorKind::TypeError,
+                "Valkey returned invalid retry-after",
+            ))
         })?;
         let retry_after = (allowed == 0).then(|| Duration::from_millis(retry_after_ms));
         Ok(RateLimitDecision::new(allowed == 1, remaining, retry_after))
