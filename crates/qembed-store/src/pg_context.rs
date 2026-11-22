@@ -5,8 +5,8 @@
 //! instead of a bare PgPool, so production repository entry points can choose
 //! only an explicit Principal-only or Caller-scoped signed transaction.
 //!
-//! The wrapped pool is crate-private: external callers cannot use this type to
-//! obtain an unscoped connection or silently fall back to legacy identity GUCs.
+//! The wrapped pool is private: external callers cannot obtain an unscoped
+//! connection or silently fall back to legacy identity GUCs.
 
 use qembed_domain::{ids::CallerId, scope::Scope};
 use sqlx::PgPool;
@@ -54,10 +54,6 @@ impl PgContext {
         caller_id: CallerId,
     ) -> Result<ContextTransaction, ContextTransactionError> {
         begin_context_transaction(&self.pool, scope, caller_id, &self.issuer).await
-    }
-
-    pub(crate) fn pool(&self) -> &PgPool {
-        &self.pool
     }
 }
 
