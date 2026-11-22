@@ -24,14 +24,17 @@ pub mod invocation_start;
 pub mod invocation_worker;
 pub mod object_repository;
 pub mod outbox_dispatcher;
+pub mod pg_context;
 pub mod readiness;
 pub mod snapshot_repository;
 pub mod tool_execution_store;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
     ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextTransaction,
-    ContextTransactionError, RingEd25519SigningKey, begin_context_transaction,
+    ContextTransactionError, RingEd25519SigningKey, begin_caller_context_transaction,
+    begin_context_transaction, begin_principal_context_transaction,
 };
+pub use pg_context::PgContext;
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -156,6 +159,27 @@ pub async fn begin_tenant_transaction(
     .execute(&mut *transaction)
     .await?;
 
+    Ok(TenantTransaction {
+        transaction,
+        tenant_id: scope.tenant_id(),
+        principal_id: scope.principal().principal_id(),
+        transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
+    })
+}
+
+/// Begins a signed-context transaction with READ COMMITTED isolation.
+///
+/// Key revocation must become visible to the next statement that verifies the
+/// token. A transaction-level repeatable-read snapshot could otherwise continue
+/// observing a pre-revocation key row until the transaction ends.
+pub(crate) async fn begin_context_tenant_transaction(
+    pool: &PgPool,
+    scope: &Scope,
+) -> Result<TenantTransaction, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        .execute(&mut *transaction)
+        .await?;
     Ok(TenantTransaction {
         transaction,
         tenant_id: scope.tenant_id(),

@@ -60,8 +60,11 @@ pub async fn resolve_delegated_caller(
     let row = fetch_optional(
         transaction,
         sqlx::query_as::<_, (String, String)>(
-            "SELECT caller_id::text, caller_kind FROM resolve_delegated_caller($1::uuid)",
+            "SELECT caller_id::text, caller_kind \
+             FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)",
         )
+        .bind(transaction.tenant_id().to_string())
+        .bind(transaction.principal_id().to_string())
         .bind(requested_caller_id.to_string()),
     )
     .await

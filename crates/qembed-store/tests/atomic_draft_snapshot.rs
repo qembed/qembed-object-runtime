@@ -20,7 +20,8 @@ async fn setup() -> (
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
-    let repository = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let repository = ObjectRepository::new(context);
     repository
         .create_object(&scope, &Object::new(object_id, tenant_id))
         .await

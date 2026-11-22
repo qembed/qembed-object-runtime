@@ -6,9 +6,7 @@ use qembed_domain::ids::{ObjectId, TenantId};
 use qembed_domain::object::Object;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::ObjectRepository;
-use qembed_store::{
-    CasError, PgPoolConfig, begin_tenant_transaction, connect_pool, execute_cas, run_migrations,
-};
+use qembed_store::{CasError, PgPoolConfig, connect_pool, execute_cas, run_migrations};
 use sqlx::PgPool;
 
 async fn single_connection_pool() -> PgPool {
@@ -36,7 +34,9 @@ async fn stale_compare_and_set_conflicts_across_independent_sessions() {
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
-    ObjectRepository::new(first_pool.clone())
+    let first_context = common::signed_context(&first_pool).await;
+    let second_context = common::signed_context(&second_pool).await;
+    ObjectRepository::new(first_context.clone())
         .create_object(&scope, &Object::new(object_id, tenant_id))
         .await
         .expect("object should be created");
@@ -44,10 +44,12 @@ async fn stale_compare_and_set_conflicts_across_independent_sessions() {
     // Both transactions hold different physical PostgreSQL sessions. The
     // second statement is issued after the first commits, so its expected
     // Draft state is stale even though its transaction began earlier.
-    let mut first = begin_tenant_transaction(&first_pool, &scope)
+    let mut first = first_context
+        .begin_principal(&scope)
         .await
         .expect("first tenant transaction should start");
-    let mut second = begin_tenant_transaction(&second_pool, &scope)
+    let mut second = second_context
+        .begin_principal(&scope)
         .await
         .expect("second tenant transaction should start");
 
@@ -104,7 +106,8 @@ async fn compare_and_set_rejects_updates_that_match_multiple_rows() {
     let scope = scope_for_tenant(tenant_id);
     let first_id = ObjectId::new();
     let second_id = ObjectId::new();
-    let repository = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let repository = ObjectRepository::new(context.clone());
 
     repository
         .create_object(&scope, &Object::new(first_id, tenant_id))
@@ -115,7 +118,8 @@ async fn compare_and_set_rejects_updates_that_match_multiple_rows() {
         .await
         .expect("second object should be created");
 
-    let mut transaction = begin_tenant_transaction(&pool, &scope)
+    let mut transaction = context
+        .begin_principal(&scope)
         .await
         .expect("tenant transaction should start");
     let error = execute_cas(

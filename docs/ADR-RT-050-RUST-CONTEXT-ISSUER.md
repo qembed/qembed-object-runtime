@@ -59,7 +59,31 @@ The Rust transaction API installs exactly one transaction-local setting:
 - The SQL verifier extracts `key_id` only to select a candidate public key, verifies the original payload bytes, and only then trusts/parses the claims.
 - The GUC is mutable and visible to SQL. Its security comes solely from the signature and backend/transaction/database binding, not from secrecy or immutability.
 
-The SQL prototype currently uses separate payload/signature settings. Its test harness must be adapted to this single-setting contract before Rust/SQL integration is considered complete.
+## 2.3 Verification-key lifecycle
+
+The PostgreSQL verification-key registry is the authority for whether a key may validate a token. Version 1 uses three monotonic states:
+
+| State | Verification behavior |
+|---|---|
+| `active` | Accept a valid token issued at or after `activated_at`. |
+| `retired` | Do not accept tokens issued after `retired_at`. Accept earlier tokens only while `now < verify_until` and only when `expires_at <= verify_until`. |
+| `revoked` | Reject every token signed by the key, including tokens that have not expired. |
+
+Allowed transitions are `active -> retired -> revoked` and `active -> revoked` for emergency response. Reactivation, key-material replacement, identity edits and deletion of registry rows are forbidden. Public-key rows remain as audit evidence; private-key destruction is a separate custody operation.
+
+The retirement grace defaults to **120 seconds** and may be configured up to one hour. This exceeds the 60-second maximum token lifetime plus 30 seconds of permitted future clock skew, with an additional margin. A retired key is verification-only; a stale Rust instance may still produce a signature locally, but PostgreSQL rejects a token whose `issued_at` is after `retired_at`.
+
+### Planned rotation sequence
+
+1. Register the new public key as `active` while the old key remains active.
+2. Deploy the new signing key/configuration to every Rust issuer instance and verify rollout completion.
+3. Stop all issuance with the old key. Wait at least 30 seconds after the last possible old-key issuance so permitted positive clock skew cannot place a pre-cutover token after the database retirement timestamp.
+4. Retire the old key. Pre-retirement tokens may finish only within the bounded grace and their own expiry; no post-retirement token is accepted.
+5. After `verify_until`, remove/destroy the old private key according to the approved secret-store backup and retention policy. Keep the public registry row for audit.
+
+Emergency revocation transitions an active or retired key directly to `revoked`; it has no grace period. Signed-context transactions explicitly use PostgreSQL **READ COMMITTED** isolation so each new statement obtains a fresh snapshot and observes a committed revocation. A transaction deliberately running under a repeatable-read snapshot could continue to see the old key row; the signed-context entry point must therefore enforce READ COMMITTED rather than inherit a pool/session default.
+
+The selected SQL PR #69 test fixture now implements this single-setting contract. Production schema adoption and RLS migration remain separate release gates.
 
 ## 3. Rust ownership and API boundaries
 
@@ -103,7 +127,7 @@ No external network call or KMS round trip should occur while database row locks
 ## 5. Failure and security behavior
 
 - Issuer/signing-key unavailable: fail closed; no unsigned or legacy-GUC fallback.
-- Unknown, revoked, expired or not-yet-valid key: SQL verification fails.
+- Unknown, retired-for-new-issuance, revoked, expired or not-yet-valid key: SQL verification fails according to the lifecycle rules in §2.3.
 - Wrong backend, transaction, database, deployment, issuer or audience: SQL verification fails.
 - Altered claims, altered signature, malformed envelope or payload over 8 KiB: SQL verification fails.
 - Delegation revoked concurrently: row-lock ordering determines the winner; retain the existing direct-delegation serialization contract.
@@ -112,26 +136,31 @@ No external network call or KMS round trip should occur while database row locks
 - Arbitrary SQL may overwrite `app.context_token`, but cannot create a valid replacement without the private key. It may cause denial of service by replacing the setting; it must not gain another identity.
 - No claim is made that this protects against compromise of the application process/ContextIssuer, private signing key, PostgreSQL superuser, or privileged database administrators.
 
-## 6. Required SQL companion changes
+## 6. SQL companion status and production gates
 
-SQL PR #69 remains a feasibility prototype until the following companion contract is implemented and tested:
+The SQL PR #69 feasibility fixture now implements and tests:
+- the single `app.context_token` envelope and verification of original JCS payload bytes;
+- a narrowly privileged verified-context function and typed tenant, Principal and Caller accessors;
+- an uncorrelated scalar-subquery / InitPlan pattern for statement-level RLS verification;
+- active/retired/revoked key lifecycle, monotonic transitions, immutable public key material, bounded retirement grace and privileged management functions;
+- exact version-1 claims, UUID formats, issuer/audience/deployment/database/backend/transaction binding, timestamps and maximum lifetime;
+- fail-closed behavior for unknown JSON fields and forged legacy identity GUCs;
+- runtime inability to read the key registry or invoke the low-level C verifier or key lifecycle functions.
 
-- Replace the two test GUCs with the single `app.context_token` envelope.
-- Expose a narrowly privileged verified-context function and typed claim accessors for tenant, Principal and Caller.
-- Ensure RLS uses an uncorrelated scalar subquery / InitPlan so signature verification is performed once per statement, not once per scanned row.
-- Add verification-key lifecycle state sufficient for activation, retirement and emergency revocation; runtime cannot read or mutate that table.
-- Validate all required claims, UUID formats, claim version, issuer/audience/deployment/database/backend/transaction binding, timestamps and maximum lifetime.
-- Reject unknown JSON fields or define their forward-compatibility behavior explicitly.
-- Keep `qembed_runtime` unable to invoke the low-level C verifier directly or read verification keys.
-- Add negative tests for forged legacy GUCs, cross-tenant/Principal/Caller substitution, invalid key state, and connection-pool reuse.
-- Keep production RLS migration separate from the feasibility fixture until security review and the supported PostgreSQL matrix are complete.
+These remain **prototype-fixture results**, not production schema approval. Before production:
+- port the verified contract into canonical SQL migrations and production RLS policies;
+- define the production owner/admin role and audited key-management authorization path;
+- validate PostgreSQL version support, extension packaging/provenance and upgrade/rollback behavior;
+- test key lifecycle under representative concurrent load and deployment/clock-skew conditions;
+- complete independent security review, C-extension fuzzing and representative workload performance evidence.
+
 
 ## 7. Open deployment decisions
 
 These do not change the verifier selection, but must be settled before production:
 
 1. Where the private signing key is held and how Rust obtains it (KMS/HSM/secret manager or an explicitly approved local key source).
-2. Key rotation overlap, emergency revocation propagation and public-key distribution.
+2. KMS/HSM key custody, multi-instance rotation orchestration, emergency revocation propagation and public-key distribution. The SQL prototype defines verification semantics, not a production key-management control plane.
 3. Stable deployment-ID provisioning and uniqueness across clusters.
 4. Whether nonce-based single-use semantics are required beyond exact backend/transaction binding.
 5. Supported PostgreSQL versions and extension packaging/provenance policy.
@@ -147,9 +176,16 @@ Rust + PostgreSQL integration must prove:
 - savepoint rollback preserves the outer context;
 - a read-only transaction can obtain the required transaction ID and use context;
 - concurrent delegation revocation is serialized with the invocation-start transaction;
+- old-key tokens remain valid only during the retirement grace; post-retirement issuance is rejected; emergency revocation invalidates pre-existing tokens on subsequent READ COMMITTED statements;
+- runtime cannot read the verification-key registry or execute key lifecycle management functions;
 - forged legacy identity GUCs do not affect RLS;
 - malformed, altered, expired, wrong-key and wrong-binding tokens fail closed;
 - pool reuse cannot expose a previous transaction's identity;
 - the SQL verifier is called once per statement in RLS plans.
 
 Production approval additionally requires independent security review, C-extension fuzzing, packaging/provenance review, supported PostgreSQL matrix, production RLS migration, and representative workload performance evidence.
+
+
+## Principal-only context amendment
+
+Version 1 always includes the `caller_id` claim. It is serialized as JSON `null` for Principal-only transactions and as a UUID string only after an explicitly requested Caller has been resolved against an active delegation. No automatic Principal-to-Caller mapping exists. `begin_principal_context_transaction` establishes tenant/Principal context without selecting or resolving a Caller; `begin_context_transaction` remains the explicit Caller-scoped entry point.
