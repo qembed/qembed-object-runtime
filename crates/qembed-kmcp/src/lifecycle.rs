@@ -111,11 +111,17 @@ impl fmt::Display for LifecycleError {
             Self::ActorAndApproverMustDiffer => "actor and approver must be different subjects",
             Self::UnexpectedApprover => "approver is not valid for this operation",
             Self::MissingIncidentReference => "incident reference is required for revocation",
-            Self::UnexpectedIncidentReference => "incident reference is not valid for this operation",
+            Self::UnexpectedIncidentReference => {
+                "incident reference is not valid for this operation"
+            }
             Self::MissingRetirementGrace => "retirement grace is required",
             Self::UnexpectedRetirementGrace => "retirement grace is not valid for this operation",
-            Self::RetirementGraceOutOfRange => "retirement grace must be between 1 and 3600 seconds",
-            Self::RetirementDeadlineOverflow => "retirement deadline is outside the supported timestamp range",
+            Self::RetirementGraceOutOfRange => {
+                "retirement grace must be between 1 and 3600 seconds"
+            }
+            Self::RetirementDeadlineOverflow => {
+                "retirement deadline is outside the supported timestamp range"
+            }
             Self::KeyAlreadyExists => "key identifier already exists in this deployment",
             Self::KeyDoesNotExist => "key identifier does not exist in this deployment",
             Self::InvalidTransition => "requested key lifecycle transition is not allowed",
@@ -205,7 +211,8 @@ pub fn plan_transition(
             )?;
             require_no_grace(request.retirement_grace_seconds)?;
             match current {
-                Some(LifecycleState::Staged | LifecycleState::Active | LifecycleState::Retired) => {}
+                Some(LifecycleState::Staged | LifecycleState::Active | LifecycleState::Retired) => {
+                }
                 None => return Err(LifecycleError::KeyDoesNotExist),
                 Some(LifecycleState::Revoked) => return Err(LifecycleError::InvalidTransition),
             }
@@ -252,10 +259,7 @@ fn require_no_grace(value: Option<u32>) -> Result<(), LifecycleError> {
     }
 }
 
-fn require_distinct_approvers(
-    actor: &str,
-    approver: Option<&str>,
-) -> Result<(), LifecycleError> {
+fn require_distinct_approvers(actor: &str, approver: Option<&str>) -> Result<(), LifecycleError> {
     let approver = approver.ok_or(LifecycleError::MissingApprover)?;
     require_non_empty(approver, LifecycleError::MissingApprover)?;
     if actor == approver {
@@ -294,14 +298,21 @@ mod tests {
         let mut input = request();
         input.approver_subject = Some("operator:alice");
         assert_eq!(
-            plan_transition(Some(LifecycleState::Staged), LifecycleAction::Activate, input),
+            plan_transition(
+                Some(LifecycleState::Staged),
+                LifecycleAction::Activate,
+                input
+            ),
             Err(LifecycleError::ActorAndApproverMustDiffer)
         );
 
         input.approver_subject = Some("approver:bob");
-        let decision =
-            plan_transition(Some(LifecycleState::Staged), LifecycleAction::Activate, input)
-                .unwrap();
+        let decision = plan_transition(
+            Some(LifecycleState::Staged),
+            LifecycleAction::Activate,
+            input,
+        )
+        .unwrap();
         assert_eq!(decision.next_state, LifecycleState::Active);
     }
 
@@ -310,14 +321,9 @@ mod tests {
         let mut input = request();
         input.approver_subject = Some("approver:bob");
         input.retirement_grace_seconds = Some(120);
-        let decision =
-            plan_transition(Some(LifecycleState::Active), LifecycleAction::Retire, input)
-                .unwrap();
+        let decision = plan_transition(Some(LifecycleState::Active), LifecycleAction::Retire, input).unwrap();
         assert_eq!(decision.next_state, LifecycleState::Retired);
-        assert_eq!(
-            decision.verify_until_unix_seconds,
-            Some(1_800_000_120)
-        );
+        assert_eq!(decision.verify_until_unix_seconds, Some(1_800_000_120));
     }
 
     #[test]
@@ -354,9 +360,12 @@ mod tests {
         );
 
         input.incident_reference = Some("INC-4821");
-        let decision =
-            plan_transition(Some(LifecycleState::Retired), LifecycleAction::Revoke, input)
-                .unwrap();
+        let decision = plan_transition(
+            Some(LifecycleState::Retired),
+            LifecycleAction::Revoke,
+            input,
+        )
+        .unwrap();
         assert_eq!(decision.next_state, LifecycleState::Revoked);
         assert_eq!(decision.verify_until_unix_seconds, None);
     }
@@ -364,7 +373,11 @@ mod tests {
     #[test]
     fn lifecycle_is_monotonic_and_key_ids_cannot_be_reused() {
         assert_eq!(
-            plan_transition(Some(LifecycleState::Active), LifecycleAction::Stage, request()),
+            plan_transition(
+                Some(LifecycleState::Active),
+                LifecycleAction::Stage,
+                request()
+            ),
             Err(LifecycleError::KeyAlreadyExists)
         );
         assert_eq!(
