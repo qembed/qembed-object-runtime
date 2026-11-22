@@ -3,7 +3,7 @@
 **Status:** Accepted architecture; provider selection pending; implementation is in staged Draft PRs  
 **Scope:** Administrative lifecycle of Ed25519 verification/signing keys used by RT-050  
 **Related contract:** [ADR-RT-050-RUST-CONTEXT-ISSUER.md](./ADR-RT-050-RUST-CONTEXT-ISSUER.md)  
-**SQL implementation candidate:** qembed-sql PR #69 (prototype only; not production-approved)
+**SQL implementation candidate:** qembed-sql PR #74 (clean candidate branch; not production-approved)
 
 ## 1. Decision
 
@@ -62,7 +62,7 @@ Runtime roles must never be members of the control-plane or audit-exporter roles
 
 ## 3. Production key lifecycle
 
-The SQL PR #69 feasibility fixture already models `staged`, `active`, `retired`, and `revoked`. It remains a prototype; production canonical-schema adoption and independent release gates are still pending.
+The SQL PR #74 candidate includes the four-state `staged`, `active`, `retired`, and `revoked` key lifecycle fixture plus the canonical signed-context RLS migration. The predecessor PR #72 PostgreSQL 19 end-to-end workflow #45061320489 passed on its exact head. This candidate stack is not merged into SQL `master`; independent security/release gates and production canonical-schema adoption remain pending.
 
 | State | May sign | May verify | Meaning |
 |---|---:|---:|---|
@@ -205,7 +205,7 @@ Logs must not contain private key material, signed payloads, raw tokens, or cred
 4. **Provider adapter:** select and implement the concrete Ed25519 key provider and local signer integration only after verifying algorithm support, custody guarantees, operational latency, and disaster recovery.
 5. **Integration and adversarial tests:** exercise staged-to-active, rotation overlap, stale signer rejection, retirement grace, immediate revoke, concurrent admin operations, partial multi-cluster propagation, audit atomicity, and signer/KMCP outages.
 
-SQL PR #69 remains a feasibility prototype and is not the production registry migration. Its four-state fixture is more complete than the earlier three-state design, but it does not substitute for canonical-schema adoption, external key custody, production KMCP authentication or rollout evidence.
+SQL PR #74 is the clean, current-master-based verifier and signed-context migration candidate. It is still a Draft and is not the production registry migration. Its four-state fixture and canonical RLS migration have candidate-branch validation, but it does not substitute for independent security review, external key custody, production KMCP authentication or rollout evidence.
 
 ## 12. Decisions intentionally left open
 
