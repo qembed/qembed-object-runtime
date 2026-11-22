@@ -10,6 +10,7 @@ use qembed_domain::ids::{
 };
 use qembed_domain::scope::Scope;
 use serde::Serialize;
+
 pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
 use crate::caller::{CallerResolutionError, ResolvedCaller};
@@ -104,7 +105,10 @@ impl fmt::Display for BeginInvocationError {
             }
             Self::InvalidInputMessage => formatter.write_str("input message is empty or too large"),
             Self::InvalidMessageExpiry => formatter.write_str("message expiry is invalid"),
-            Self::Context(error) => write!(formatter, "begin-invocation signed-context initialization failed: {error}"),
+            Self::Context(error) => write!(
+                formatter,
+                "begin-invocation signed-context initialization failed: {error}"
+            ),
             Self::Database(error) => write!(formatter, "begin-invocation database error: {error}"),
         }
     }
