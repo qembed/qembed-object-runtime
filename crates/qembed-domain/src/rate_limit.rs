@@ -273,7 +273,7 @@ pub trait RateLimitStore: Send + Sync {
 mod tests {
     use super::*;
     use crate::{
-        ids::TenantId,
+        ids::{PrincipalId, TenantId},
         principal::{Principal, PrincipalKind},
     };
 
