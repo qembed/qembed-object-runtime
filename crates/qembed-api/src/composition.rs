@@ -67,6 +67,8 @@ pub fn configure_health_routes(probe: PgReadinessProbe) -> Router {
 
 struct PgOwnerApiBackend {
     pool: PgPool,
+    rate_limiter: RateLimitService<ValkeyRateLimitStore>,
+    rate_limit_policies: RateLimitPolicies,
 }
 
 impl PgOwnerApiBackend {
@@ -212,6 +214,21 @@ impl OwnerApiBackend for PgOwnerApiBackend {
     ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>> {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
+            let key = RateLimitKey::for_owner(&scope, object_id)
+                .map_err(|_| OwnerApiBackendError::Internal)?;
+            match self.rate_limiter.check(
+                &key,
+                self.rate_limit_policies.for_class(RateLimitClass::Owner),
+                1,
+            ).await {
+                Ok(decision) if !decision.allowed() => return Err(OwnerApiBackendError::RateLimited),
+                Ok(_) => {}
+                Err(error) => {
+                    // Never substitute per-process counters when shared KV is unavailable.
+                    // The selected practical policy is fail-open for ordinary invocations.
+                    eprintln!("distributed rate limiter unavailable; allowing request: {error}");
+                }
+            }
             let service =
                 InvocationStartService::new(PgInvocationStartStore::new(self.pool.clone()));
             match service
@@ -280,13 +297,26 @@ impl OwnerApiBackend for PgOwnerApiBackend {
 
 /// Installs PostgreSQL-backed Owner routes. Authentication and SQL adapters are
 /// wired here, keeping concrete infrastructure out of HTTP handlers.
-pub fn configure_owner_routes(pool: PgPool) -> Router {
-    configure_owner(PgOwnerApiBackend { pool })
+pub fn configure_owner_routes(
+    pool: PgPool,
+    valkey: ValkeyRateLimitStore,
+    policies: RateLimitPolicies,
+) -> Router {
+    configure_owner(PgOwnerApiBackend {
+        pool,
+        rate_limiter: RateLimitService::new(valkey),
+        rate_limit_policies: policies,
+    })
 }
 
 /// Composes the HTTP surface without creating a listener or changing runtime lifecycle.
-pub fn api_router(pool: PgPool, probe: PgReadinessProbe) -> Router {
-    configure_health_routes(probe).merge(configure_owner_routes(pool))
+pub fn api_router(
+    pool: PgPool,
+    probe: PgReadinessProbe,
+    valkey: ValkeyRateLimitStore,
+    policies: RateLimitPolicies,
+) -> Router {
+    configure_health_routes(probe).merge(configure_owner_routes(pool, valkey, policies))
 }
 
 /// Composes the PostgreSQL Outbox Relay with its JetStream publisher.
