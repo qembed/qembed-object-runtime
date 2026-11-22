@@ -217,7 +217,7 @@ async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
     assert_eq!(invocation.version(), 0);
     assert_eq!(invocation.fencing_token().value(), 0);
 
-    let tool_store = PgToolExecutionStore::new(fixture.pool.clone());
+    let tool_store = PgToolExecutionStore::new(fixture.context.clone());
     let mut unpersisted_claim = tool_store
         .load_tool_execution(&fixture.scope, fixture.execution_id)
         .await
@@ -275,7 +275,7 @@ async fn invocation_lease_does_not_authorize_tool_execution_result_write() {
 #[tokio::test]
 async fn concurrent_workers_get_one_tool_execution_lease_and_only_its_fence_can_commit() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
 
     let (first, second) = tokio::join!(
         store.claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-a", 60),
@@ -439,7 +439,7 @@ async fn tool_execution_persistence_grants_match_the_runtime_capabilities() {
 #[tokio::test]
 async fn expired_tool_execution_becomes_unknown_and_cannot_be_retried() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
     let claimed = store
         .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-a", 1)
         .await
@@ -501,7 +501,7 @@ async fn expired_tool_execution_becomes_unknown_and_cannot_be_retried() {
 #[tokio::test]
 async fn live_or_stale_tool_execution_checkpoint_cannot_be_marked_unknown() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
     let claimed = store
         .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-a", 60)
         .await
@@ -601,7 +601,7 @@ fn reconciliation_request(execution: &ToolExecution) -> ToolExecutionReconciliat
 #[tokio::test]
 async fn postgres_reconciliation_commits_confirmed_success_with_matching_state() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
     let unknown = transition_fixture_to_unknown(&fixture, &store).await;
     let request = reconciliation_request(&unknown);
     let outcome = ToolExecutionReconciliationOutcome::ConfirmedSucceeded {
@@ -649,7 +649,7 @@ async fn postgres_reconciliation_commits_confirmed_success_with_matching_state()
 #[tokio::test]
 async fn postgres_reconciliation_commits_confirmed_failure() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
     let unknown = transition_fixture_to_unknown(&fixture, &store).await;
     let request = reconciliation_request(&unknown);
     let outcome = ToolExecutionReconciliationOutcome::ConfirmedFailed {
@@ -697,7 +697,7 @@ async fn postgres_reconciliation_commits_confirmed_failure() {
 #[tokio::test]
 async fn postgres_reconciliation_rejects_stale_fencing_token() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
     let unknown = transition_fixture_to_unknown(&fixture, &store).await;
     let stale_token =
         ToolExecutionFencingToken::from_value(unknown.fencing_token().value().saturating_sub(1));
@@ -757,7 +757,7 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
 #[tokio::test]
 async fn postgres_reconciliation_rejects_mismatched_invocation_provenance() {
     let fixture = setup().await;
-    let store = PgToolExecutionStore::new(fixture.pool.clone());
+    let store = PgToolExecutionStore::new(fixture.context.clone());
     let unknown = transition_fixture_to_unknown(&fixture, &store).await;
     let forged_invocation_id = InvocationId::new();
     let outcome = ToolExecutionReconciliationOutcome::ConfirmedSucceeded {

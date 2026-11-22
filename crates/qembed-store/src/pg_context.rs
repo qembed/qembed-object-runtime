@@ -11,8 +11,9 @@
 use qembed_domain::{ids::CallerId, scope::Scope};
 use sqlx::PgPool;
 
+use crate::caller::ResolvedCaller;
 use crate::{
-    ContextIssuer, ContextTransaction, ContextTransactionError, begin_context_transaction,
+    ContextIssuer, ContextTransaction, ContextTransactionError, begin_caller_context_transaction,
     begin_principal_context_transaction,
 };
 
@@ -52,8 +53,8 @@ impl PgContext {
         &self,
         scope: &Scope,
         caller_id: CallerId,
-    ) -> Result<ContextTransaction, ContextTransactionError> {
-        begin_context_transaction(&self.pool, scope, caller_id, &self.issuer).await
+    ) -> Result<(ContextTransaction, ResolvedCaller), ContextTransactionError> {
+        begin_caller_context_transaction(&self.pool, scope, caller_id, &self.issuer).await
     }
 }
 
