@@ -238,19 +238,11 @@ mod tests {
     #[test]
     fn verified_identity_requires_non_empty_subject_and_deployment() {
         assert_eq!(
-            AuthorizedAdmin::from_verified_claims(
-                "",
-                "prod-1",
-                vec![AdminPermission::StageKey]
-            ),
+            AuthorizedAdmin::from_verified_claims("", "prod-1", vec![AdminPermission::StageKey]),
             Err(AuthorizationError::InvalidVerifiedIdentity)
         );
         assert_eq!(
-            AuthorizedAdmin::from_verified_claims(
-                "alice",
-                " ",
-                vec![AdminPermission::StageKey]
-            ),
+            AuthorizedAdmin::from_verified_claims("alice", " ", vec![AdminPermission::StageKey]),
             Err(AuthorizationError::InvalidVerifiedIdentity)
         );
     }
