@@ -1016,7 +1016,7 @@ async fn invocation_read_projection_is_tenant_scoped_and_hides_unfinished_output
         other => panic!("expected new invocation, got {other:?}"),
     };
 
-    let query_store = PgInvocationQueryStore::new(fixture.pool.clone());
+    let query_store = PgInvocationQueryStore::new(common::signed_context(&fixture.pool).await);
     let queued = query_store
         .get_invocation(&fixture.scope, invocation_id)
         .await
