@@ -104,3 +104,28 @@ QSA-003 remains open. Production adoption still requires canonical SQL migration
 - Registry tests for CAS conflict and idempotency payload binding.
 - Outbox tests for lease expiry, retry and duplicate sink delivery.
 - Fault injection across provider creation and registry persistence.
+
+## 9. Application orchestration slice
+
+The orchestration entry points now live in `crates/qembed-kmcp/src/orchestration.rs`:
+
+- `stage_key`: authorize the operator, replay-check the durable request ID, provision through the provider using that request ID as its idempotency key, verify the Ed25519 proof-of-possession challenge, then atomically persist the staged registry row, operation idempotency, audit event and outbox.
+- `activate_key` and `retire_key`: authorize actor and approver independently, enforce deployment scope and explicit permission for both, then compute policy and persist with bounded compare-and-set retries.
+- `revoke_key`: require the emergency-revoke permission and let the pure lifecycle policy enforce an incident reference and immediate revocation.
+- Every mutation checks the stored idempotency result before recomputing policy. A retry with the same request ID but different actor, approver, reason, incident reference, action or retirement grace is rejected.
+
+### Provider/registry partial failure
+
+The provider provisioning port now accepts `request_id` as a provider-side idempotency key. The provider contract requires the same deployment/request/key tuple to resolve to the same key identity on retries while signing the newly supplied challenge. This closes duplicate-key creation when provider creation succeeds but PostgreSQL registration fails.
+
+The proof challenge is generated from the operating system CSPRNG. The service verifies the Ed25519 signature against the returned public key before registering it. If proof verification fails, provider disable is attempted best-effort. This is not a substitute for a durable provider-inventory reconciler: provider/registry distributed atomicity does not exist, and the adapter must expose unknown or unregistered keys for reconciliation.
+
+### Concurrency and replay
+
+The registry must check request-ID idempotency before the CAS predicate. A stale version is never overwritten. The service reloads and recomputes up to three times after CAS conflicts; if a concurrent identical request committed, it returns the original stored result. Reuse of an idempotency key with a different payload is a hard error.
+
+### Explicit limitations
+
+This slice supplies orchestration logic and adapter contracts only. It does not yet include a production OIDC implementation, concrete PostgreSQL `KeyRegistry`, production key provider, durable orphan-key reconciler, audit sink worker, CLI/HTTP transport, or signer/key disable coordination. The `AuthorizedAdmin::from_verified_claims` constructor remains a trust-boundary API: only the injected trusted authorizer may call it after real credential verification. This is not a claim that Rust's type system authenticates arbitrary third-party trait implementations.
+
+QSA-003 remains open until the signed context replaces all legacy identity-GUC authorization reads in the canonical SQL schema, all SQL/Rust integration tests pass against the target PostgreSQL release, and the production deployment/security gates are satisfied.
