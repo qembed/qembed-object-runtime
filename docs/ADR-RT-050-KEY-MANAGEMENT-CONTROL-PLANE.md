@@ -1,6 +1,6 @@
 # ADR-RT-050-KMCP — Verification Key Management Control Plane
 
-**Status:** Proposed architecture; implementation authorized, provider selection pending  
+**Status:** Accepted architecture; implementation in progress; provider selection pending  
 **Scope:** Administrative lifecycle of Ed25519 verification/signing keys used by RT-050  
 **Related contract:** [ADR-RT-050-RUST-CONTEXT-ISSUER.md](./ADR-RT-050-RUST-CONTEXT-ISSUER.md)  
 **SQL implementation candidate:** qembed-sql PR #69 (prototype only; not production-approved)
