@@ -480,6 +480,13 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("Principal-only runtime role can forge legacy selectors without gaining identity");
 
+    let principal_after_forgery: String =
+        sqlx::query_scalar("SELECT qembed_crypto.current_principal_id()::text")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context should ignore the forged Principal GUC");
+    assert_eq!(principal_after_forgery, principal_id.to_string());
+
     let no_effective_caller: Option<String> =
         sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
             .fetch_one(principal_transaction.connection())
