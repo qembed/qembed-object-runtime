@@ -403,10 +403,9 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     // A Principal-only transaction deliberately carries JSON null for Caller.
     // It must not infer a Caller from Principal identity or an available delegation.
-    let mut principal_transaction =
-        begin_principal_context_transaction(&pool, &scope, &issuer)
-            .await
-            .expect("Principal-only context must not require Caller selection");
+    let mut principal_transaction = begin_principal_context_transaction(&pool, &scope, &issuer)
+        .await
+        .expect("Principal-only context must not require Caller selection");
     let principal_only_token: String =
         sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
             .fetch_one(principal_transaction.connection())
@@ -419,7 +418,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .await
             .expect("PostgreSQL should verify Principal-only claims");
     assert_eq!(principal_only_claims["tenant_id"], tenant_id.to_string());
-    assert_eq!(principal_only_claims["principal_id"], principal_id.to_string());
+    assert_eq!(
+        principal_only_claims["principal_id"],
+        principal_id.to_string()
+    );
     assert!(principal_only_claims["caller_id"].is_null());
     let no_effective_caller: Option<String> =
         sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
@@ -433,7 +435,9 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .await
             .expect("Principal-only context should retain tenant-scoped RLS access");
     assert_eq!(principal_tenant_rows, 1);
-    principal_transaction.commit().await
+    principal_transaction
+        .commit()
+        .await
         .expect("Principal-only context transaction should commit");
 
     let committed_replay: Option<serde_json::Value> =
