@@ -14,9 +14,7 @@ use qembed_domain::tool_execution_lease::{
 use qembed_domain::tool_execution_reconciliation::{
     ToolExecutionReconciliationCompletion, ToolExecutionReconciliationOutcome,
 };
-use sqlx::PgPool;
-
-use crate::{begin_tenant_transaction, execute, fetch_optional};
+use crate::{PgContext, execute, fetch_optional};
 
 type ToolExecutionRow = (
     String,
@@ -33,20 +31,21 @@ type ToolExecutionRow = (
 /// PostgreSQL implementation of the ToolExecution lease store port.
 #[derive(Clone)]
 pub struct PgToolExecutionStore {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl PgToolExecutionStore {
-    /// Creates a store over the application's PostgreSQL pool.
+    /// Creates a store over the application's signed PostgreSQL context.
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 }
 
 /// Failure to load or mutate a persisted ToolExecution.
 #[derive(Debug)]
 pub enum ToolExecutionStoreError {
+    Context(crate::ContextTransactionError),
     Database(sqlx::Error),
     InvalidPersistedValue(&'static str),
     InvalidRequestedValue(&'static str),
@@ -55,6 +54,7 @@ pub enum ToolExecutionStoreError {
 impl fmt::Display for ToolExecutionStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Context(error) => write!(formatter, "ToolExecution signed-context initialization failed: {error}"),
             Self::Database(error) => write!(formatter, "ToolExecution persistence failed: {error}"),
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted ToolExecution has invalid {field}")
@@ -69,9 +69,16 @@ impl fmt::Display for ToolExecutionStoreError {
 impl std::error::Error for ToolExecutionStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             Self::InvalidPersistedValue(_) | Self::InvalidRequestedValue(_) => None,
         }
+    }
+}
+
+impl From<crate::ContextTransactionError> for ToolExecutionStoreError {
+    fn from(error: crate::ContextTransactionError) -> Self {
+        Self::Context(error)
     }
 }
 
@@ -89,7 +96,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         scope: &Scope,
         execution_id: ToolExecutionId,
     ) -> Result<Option<ToolExecution>, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, ToolExecutionRow>(
@@ -112,7 +119,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         lease_seconds: u32,
     ) -> Result<Option<ToolExecution>, Self::Error> {
         validate_lease_request(owner, lease_seconds)?;
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, ToolExecutionRow>(
@@ -149,7 +156,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         lease_seconds: u32,
     ) -> Result<bool, Self::Error> {
         validate_lease_request(owner, lease_seconds)?;
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -185,7 +192,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         expected_version: u64,
         expected_fencing_token: ToolExecutionFencingToken,
     ) -> Result<bool, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -249,7 +256,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
                 ));
             }
         };
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
@@ -358,7 +365,7 @@ impl ToolExecutionReconciliationStore for PgToolExecutionStore {
             ));
         }
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
