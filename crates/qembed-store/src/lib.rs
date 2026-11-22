@@ -29,7 +29,7 @@ pub mod snapshot_repository;
 pub mod tool_execution_store;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
-    ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextTransaction,
+    ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigner, ContextTransaction,
     ContextTransactionError, RingEd25519SigningKey, begin_context_transaction,
 };
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
