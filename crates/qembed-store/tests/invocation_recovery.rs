@@ -10,14 +10,15 @@ use qembed_domain::{
     test_support::scope_for_tenant,
 };
 use qembed_store::{
-    invocation_recovery::PgInvocationRecoverySweeper, outbox_dispatcher::PgOutboxDispatcher,
-    run_migrations,
+    PgContext, invocation_recovery::PgInvocationRecoverySweeper,
+    outbox_dispatcher::PgOutboxDispatcher, run_migrations,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
 
 struct Fixture {
     pool: PgPool,
+    context: PgContext,
     tenant_id: TenantId,
     invocation_id: InvocationId,
     delivery_id: EventId,
@@ -147,8 +148,11 @@ async fn setup(provider_attempt_state: &str) -> Fixture {
     .await
     .expect("first PubAck is retained");
 
+    let context = common::signed_context(&pool).await;
+
     Fixture {
         pool,
+        context,
         tenant_id,
         invocation_id,
         delivery_id,
@@ -159,7 +163,23 @@ async fn setup(provider_attempt_state: &str) -> Fixture {
 #[tokio::test]
 async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_puback_history() {
     let fixture = setup("NotStarted").await;
-    let sweeper = PgInvocationRecoverySweeper::new(fixture.pool.clone());
+    // Keep one physical connection so the forged session GUC is guaranteed
+    // to be present when PgContext opens the signed transaction.
+    let context_pool = common::connect_with_max_connections(1).await;
+    let context = common::signed_context(&context_pool).await;
+    let forged_tenant_id = TenantId::new();
+    let mut connection = context_pool
+        .acquire()
+        .await
+        .expect("single test connection should be acquired");
+    sqlx::query("SELECT set_config('app.tenant_id', $1, false)")
+        .bind(forged_tenant_id.to_string())
+        .execute(&mut *connection)
+        .await
+        .expect("legacy tenant GUC should be forged for the regression test");
+    drop(connection);
+
+    let sweeper = PgInvocationRecoverySweeper::new(context);
     let cutoff = SystemTime::now() - Duration::from_secs(60);
 
     let first = sweeper
@@ -243,13 +263,14 @@ async fn stale_received_invocation_replays_same_outbox_identity_and_preserves_pu
         "the first PubAck remains in append-only history"
     );
 
+    context_pool.close().await;
     fixture.pool.close().await;
 }
 
 #[tokio::test]
 async fn recovery_fails_closed_for_unknown_provider_outcome() {
     let fixture = setup("OutcomeUnknown").await;
-    let sweeper = PgInvocationRecoverySweeper::new(fixture.pool.clone());
+    let sweeper = PgInvocationRecoverySweeper::new(fixture.context.clone());
     let cutoff = SystemTime::now() - Duration::from_secs(60);
 
     let replayed = sweeper
@@ -283,7 +304,7 @@ async fn recovery_does_not_replay_received_invocation_with_a_live_lease() {
     .await
     .expect("a live invocation lease is established");
 
-    let sweeper = PgInvocationRecoverySweeper::new(fixture.pool.clone());
+    let sweeper = PgInvocationRecoverySweeper::new(fixture.context.clone());
     let cutoff = SystemTime::now() - Duration::from_secs(60);
     let replayed = sweeper
         .sweep_before(&fixture.scope, cutoff, 10)

@@ -23,22 +23,21 @@ use qembed_domain::ports::{
 };
 use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{Snapshot, SnapshotError};
-use sqlx::PgPool;
 
 use crate::event_outbox::{ObjectEvent, append_object_event};
-use crate::{CasError, begin_tenant_transaction, execute, execute_cas, fetch_optional};
+use crate::{CasError, PgContext, execute, execute_cas, fetch_optional};
 
 /// Persists tenant-owned objects and their draft versions.
 #[derive(Clone, Debug)]
 pub struct ObjectRepository {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl ObjectRepository {
-    /// Creates a repository backed by the application's PostgreSQL pool.
+    /// Creates a repository backed by the application's signed PostgreSQL context.
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 
     /// Inserts a new Draft object in the tenant identified by the trusted scope.
@@ -54,9 +53,11 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ObjectMustBeDraft);
         }
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(ObjectRepositoryError::Database)?;
+            .map_err(ObjectRepositoryError::Context)?;
 
         execute(
             &mut transaction,
@@ -100,9 +101,11 @@ impl ObjectRepository {
         let schema_version = i32::try_from(snapshot.schema_version())
             .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(ObjectRepositoryError::Database)?;
+            .map_err(ObjectRepositoryError::Context)?;
 
         // Serialize version-number allocation per tenant-owned object. The lock
         // is held until commit/rollback, so concurrent creators cannot observe
@@ -242,9 +245,11 @@ impl ObjectRepository {
         object_id: ObjectId,
         version_id: ObjectVersionId,
     ) -> Result<Option<PublicationCandidate>, ObjectRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(ObjectRepositoryError::Database)?;
+            .map_err(ObjectRepositoryError::Context)?;
 
         let row = fetch_optional(
             &mut transaction,
@@ -333,9 +338,11 @@ impl ObjectRepository {
         scope: &Scope,
         object_id: ObjectId,
     ) -> Result<(), ObjectRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(ObjectRepositoryError::Database)?;
+            .map_err(ObjectRepositoryError::Context)?;
 
         execute_cas(
             &mut transaction,
@@ -363,9 +370,11 @@ impl ObjectRepository {
         scope: &Scope,
         object_id: ObjectId,
     ) -> Result<(), ObjectRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(ObjectRepositoryError::Database)?;
+            .map_err(ObjectRepositoryError::Context)?;
 
         execute_cas(
             &mut transaction,
@@ -417,9 +426,11 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
         }
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(ObjectRepositoryError::Database)?;
+            .map_err(ObjectRepositoryError::Context)?;
 
         let object = fetch_optional(
             &mut transaction,
@@ -737,6 +748,8 @@ pub enum ObjectRepositoryError {
     CurrentVersionNotPublished,
     /// A repository compare-and-set violated its single-row contract.
     Cas(CasError),
+    /// Signed transaction context could not be established.
+    Context(crate::ContextTransactionError),
     /// PostgreSQL rejected the operation or could not complete it.
     Database(sqlx::Error),
 }
@@ -793,6 +806,9 @@ impl fmt::Display for ObjectRepositoryError {
                 formatter.write_str("current object version is not Published")
             }
             Self::Cas(error) => write!(formatter, "object repository CAS error: {error}"),
+            Self::Context(error) => {
+                write!(formatter, "object repository signed-context error: {error}")
+            }
             Self::Database(error) => write!(formatter, "object repository database error: {error}"),
         }
     }
@@ -802,6 +818,7 @@ impl std::error::Error for ObjectRepositoryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Cas(error) => Some(error),
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
