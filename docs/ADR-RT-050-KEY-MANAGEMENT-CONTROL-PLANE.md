@@ -1,9 +1,9 @@
 # ADR-RT-050-KMCP — Verification Key Management Control Plane
 
-**Status:** Accepted architecture; provider selection pending; implementation is in staged Draft PRs  
+**Status:** Accepted architecture; KMCP policy core, adapter ports and orchestration merged; concrete provider selection/adapters pending
 **Scope:** Administrative lifecycle of Ed25519 verification/signing keys used by RT-050  
 **Related contract:** [ADR-RT-050-RUST-CONTEXT-ISSUER.md](./ADR-RT-050-RUST-CONTEXT-ISSUER.md)  
-**SQL implementation candidate:** qembed-sql PR #69 (prototype only; not production-approved)
+**SQL implementation candidate:** qembed-sql PR #73 (Draft prototype only; not production-approved)
 
 ## 1. Decision
 
@@ -62,7 +62,7 @@ Runtime roles must never be members of the control-plane or audit-exporter roles
 
 ## 3. Production key lifecycle
 
-The SQL PR #69 feasibility fixture already models `staged`, `active`, `retired`, and `revoked`. It remains a prototype; production canonical-schema adoption and independent release gates are still pending.
+The SQL PR #73 candidate includes the four-state `staged`, `active`, `retired`, and `revoked` key lifecycle fixture and canonical clean-install signed-context RLS migration. Its PostgreSQL 19 candidate workflows pass, but it remains Draft and is not production-approved; independent security/release gates and real Rust ContextIssuer validation against the canonical migration are still pending.
 
 | State | May sign | May verify | Meaning |
 |---|---:|---:|---|
@@ -205,7 +205,9 @@ Logs must not contain private key material, signed payloads, raw tokens, or cred
 4. **Provider adapter:** select and implement the concrete Ed25519 key provider and local signer integration only after verifying algorithm support, custody guarantees, operational latency, and disaster recovery.
 5. **Integration and adversarial tests:** exercise staged-to-active, rotation overlap, stale signer rejection, retirement grace, immediate revoke, concurrent admin operations, partial multi-cluster propagation, audit atomicity, and signer/KMCP outages.
 
-SQL PR #69 remains a feasibility prototype and is not the production registry migration. Its four-state fixture is more complete than the earlier three-state design, but it does not substitute for canonical-schema adoption, external key custody, production KMCP authentication or rollout evidence.
+The provider-neutral Rust implementation slices are merged: lifecycle core in PR #111, adapter ports in PR #113, and lifecycle orchestration in PR #114. The public bounded-local `ContextSigner` capability is merged in PR #108. Concrete PostgreSQL, OIDC/SSO, KMS/HSM/local-agent, external audit-sink and deployment adapters remain unimplemented.
+
+SQL PR #73 is the current feasibility candidate; its four-state fixture and canonical clean-install RLS migration pass the PostgreSQL 19 prototype workflow, but it is not the production registry migration. It does not substitute for real Rust ContextIssuer validation against the canonical migration, external key custody, production KMCP authentication or rollout evidence.
 
 ## 12. Decisions intentionally left open
 
