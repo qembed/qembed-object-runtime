@@ -184,3 +184,8 @@ Rust + PostgreSQL integration must prove:
 - the SQL verifier is called once per statement in RLS plans.
 
 Production approval additionally requires independent security review, C-extension fuzzing, packaging/provenance review, supported PostgreSQL matrix, production RLS migration, and representative workload performance evidence.
+
+
+## Principal-only context amendment
+
+Version 1 always includes the `caller_id` claim. It is serialized as JSON `null` for Principal-only transactions and as a UUID string only after an explicitly requested Caller has been resolved against an active delegation. No automatic Principal-to-Caller mapping exists. `begin_principal_context_transaction` establishes tenant/Principal context without selecting or resolving a Caller; `begin_context_transaction` remains the explicit Caller-scoped entry point.
