@@ -5,7 +5,6 @@ use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
 use support::{owner_router, test};
 
-
 #[tokio::test]
 async fn owner_create_object_authenticates_and_persists_a_server_generated_draft() {
     let database_url = std::env::var("DATABASE_URL")
