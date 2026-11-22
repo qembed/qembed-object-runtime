@@ -460,8 +460,7 @@ mod tests {
     #[test]
     fn issuer_accepts_an_alternate_bounded_local_signer() {
         let signer = AlternateLocalSigner(
-            RingEd25519SigningKey::from_seed("key-1", &[9_u8; 32])
-                .expect("seed must be accepted"),
+            RingEd25519SigningKey::from_seed("key-1", &[9_u8; 32]).expect("seed must be accepted"),
         );
         let config = ContextIssuerConfig::with_default_lifetime(
             "qembed-runtime",
