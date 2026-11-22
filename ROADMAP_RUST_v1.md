@@ -445,8 +445,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: совокупный consumed + reserved usage не превышает effective object/caller budget; replay не создаёт вторую reservation.
 
 - [ ] **RUST-058 (S)** Реализовать distributed rate limiting и pool isolation.
-  - Тесты: concurrency tests на несколько workers; fairness tests для Anonymous/Authenticated/Owner.
-  - DoD: лимиты согласованы между экземплярами runtime.
+  - Архитектура: Valkey через RESP/redis-rs; provider-neutral `RateLimitStore` и runtime `RateLimitService`; Token Bucket с атомарным Lua script и временем Valkey; отдельные request buckets для Anonymous/Authenticated/Owner.
+  - Граница: rate-limit state хранится только во внешнем KV. Существующие PostgreSQL `InvocationPool` и token-budget reservations не меняются; они остаются durable accounting, а не request throttling.
+  - Отказ: fail-open для обычного invocation admission при недоступности KV; локальный per-process fallback запрещён. Допускается небольшой overrun при асинхронном replication failover.
+  - Тесты: independent Valkey connection managers и конкурентные workers; общий capacity не превышается при штатной работе; fairness/isolation для Anonymous/Authenticated/Owner; policy validation и key scoping.
+  - DoD: одинаковый bucket state виден независимым runtime workers; один класс не расходует квоту другого; PostgreSQL schema и budget semantics не меняются.
 
 - [ ] **RUST-059 (M)** Реализовать hierarchical kill-switch evaluation.
   - Тесты: unit на precedence Platform/Tenant/Object/Tool; integration — disabled scope блокирует действие до side effect.
