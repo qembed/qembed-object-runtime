@@ -49,7 +49,7 @@ impl SnapshotRepository {
     ///     repository.insert(scope, snapshot).await;
     /// }
     /// ```
-    /// Creates a repository backed by the application's PostgreSQL pool.
+    /// Creates a repository backed by the application's signed PostgreSQL context.
     #[must_use]
     pub fn new(context: PgContext) -> Self {
         Self { context }
