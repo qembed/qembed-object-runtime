@@ -51,11 +51,10 @@ async fn setup() -> (PgPool, String) {
     }
 
     let resolver = format!(
-        r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(p_caller_id UUID)
+        r#"CREATE FUNCTION "{schema}".resolve_delegated_caller(
+          p_tenant_id UUID, p_principal_id UUID, p_caller_id UUID)
         RETURNS TABLE (caller_id UUID, caller_kind TEXT)
-        LANGUAGE plpgsql AS $$
-        DECLARE v_tenant UUID := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
-                v_principal UUID := NULLIF(current_setting('app.principal_id', true), '')::uuid;
+        LANGUAGE plpgsql AS $
         BEGIN
           RETURN QUERY
           SELECT c.id, c.caller_kind
@@ -64,14 +63,14 @@ async fn setup() -> (PgPool, String) {
               ON p.tenant_id=d.tenant_id AND p.caller_id=d.principal_id
             JOIN "{schema}".callers c
               ON c.tenant_id=d.tenant_id AND c.id=d.caller_id
-           WHERE d.tenant_id=v_tenant AND d.principal_id=v_principal
+           WHERE d.tenant_id=p_tenant_id AND d.principal_id=p_principal_id
              AND d.caller_id=p_caller_id AND d.revoked_at IS NULL
              AND p.disabled_at IS NULL AND c.revoked_at IS NULL
            FOR SHARE OF d,p,c;
           IF NOT FOUND THEN
             RAISE EXCEPTION 'no active delegation' USING ERRCODE='42501';
           END IF;
-        END $$"#
+        END $"#
     );
     sqlx::query(&resolver)
         .execute(&pool)
