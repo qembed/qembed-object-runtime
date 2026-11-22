@@ -70,6 +70,40 @@ async fn seed_delegation(
     .expect("active direct delegation fixture should be inserted");
 }
 
+async fn seed_additional_delegation(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    principal_id: Uuid,
+    caller_id: CallerId,
+) -> Uuid {
+    sqlx::query(
+        "INSERT INTO callers (id, tenant_id, token_hash, caller_kind) \
+         VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')",
+    )
+    .bind(caller_id.to_string())
+    .bind(tenant_id.to_string())
+    .bind(vec![1_u8; 32])
+    .execute(pool)
+    .await
+    .expect("additional Caller fixture should be inserted");
+
+    let delegation_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO principal_caller_delegations \
+         (delegation_id, tenant_id, principal_id, caller_id) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)",
+    )
+    .bind(delegation_id.to_string())
+    .bind(tenant_id.to_string())
+    .bind(principal_id.to_string())
+    .bind(caller_id.to_string())
+    .execute(pool)
+    .await
+    .expect("additional direct delegation fixture should be inserted");
+
+    delegation_id
+}
+
 #[tokio::test]
 async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_transaction() {
     let pool = pool_with_one_connection().await;
@@ -276,6 +310,97 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         rollback_replay.is_none(),
         "rolled-back token must fail on pooled connection reuse"
     );
+
+    let revocable_caller = CallerId::new();
+    let revocable_delegation_id =
+        seed_additional_delegation(&pool, tenant_id, principal_id.into_uuid(), revocable_caller)
+            .await;
+    let mut revocation_race_transaction =
+        begin_context_transaction(&pool, &scope, revocable_caller, &issuer)
+            .await
+            .expect("active delegation should allow context issuance");
+
+    let revocation_backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(revocation_race_transaction.connection())
+        .await
+        .expect("revocation-race transaction backend should be readable");
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let revocation_pool = connect_pool(
+        &database_url,
+        PgPoolConfig {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("revocation pool should open an independent backend");
+    let revoker_backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&revocation_pool)
+        .await
+        .expect("revoker backend PID should be readable");
+    assert_ne!(revoker_backend_pid, revocation_backend_pid);
+
+    let monitor_pool = connect_pool(
+        &database_url,
+        PgPoolConfig {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("monitor pool should open an independent backend");
+    let revocation_pool_for_task = revocation_pool.clone();
+    let revocation_task = tokio::spawn(async move {
+        sqlx::query(
+            "UPDATE principal_caller_delegations \
+             SET revoked_at = clock_timestamp(), revoked_by_principal_id = $1::uuid \
+             WHERE delegation_id = $2::uuid",
+        )
+        .bind(principal_id.to_string())
+        .bind(revocable_delegation_id.to_string())
+        .execute(&revocation_pool_for_task)
+        .await
+    });
+
+    let observed_block = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let blocking_pids: Vec<i32> =
+                sqlx::query_scalar("SELECT pg_blocking_pids($1)")
+                    .bind(revoker_backend_pid)
+                    .fetch_one(&monitor_pool)
+                    .await
+                    .expect("blocking backend list should be readable");
+            if blocking_pids.contains(&revocation_backend_pid) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(
+        observed_block.is_ok(),
+        "Caller revocation must wait while the issuer holds the delegation row lock"
+    );
+
+    revocation_race_transaction
+        .commit()
+        .await
+        .expect("context transaction should release its delegation lock");
+    tokio::time::timeout(Duration::from_secs(5), revocation_task)
+        .await
+        .expect("revocation should proceed after context transaction completes")
+        .expect("revocation task should not panic")
+        .expect("revocation update should succeed");
+
+    let revoked_caller_attempt =
+        begin_context_transaction(&pool, &scope, revocable_caller, &issuer).await;
+    assert!(
+        revoked_caller_attempt.is_err(),
+        "a revoked Caller must not receive a new signed context"
+    );
+    monitor_pool.close().await;
+    revocation_pool.close().await;
 
     let other_database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
