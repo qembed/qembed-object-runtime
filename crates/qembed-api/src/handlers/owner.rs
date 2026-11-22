@@ -463,7 +463,12 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "conflict",
             "The object changed or is not in a publishable state.",
         ),
-        (_, OwnerApiBackendError::RateLimited { retry_after_seconds }) => {
+        (
+            _,
+            OwnerApiBackendError::RateLimited {
+                retry_after_seconds,
+            },
+        ) => {
             let mut response = api_error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limited",
@@ -473,7 +478,7 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
                 response.headers_mut().insert(header::RETRY_AFTER, value);
             }
             response
-        },
+        }
         (_, OwnerApiBackendError::Conflict) => api_error(
             StatusCode::CONFLICT,
             "conflict",
