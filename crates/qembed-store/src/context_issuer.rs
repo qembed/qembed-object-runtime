@@ -341,11 +341,11 @@ impl fmt::Display for ContextIssuerError {
         match self {
             Self::InvalidConfiguration => {
                 formatter.write_str("invalid ContextIssuer configuration")
-            },
+            }
             Self::InvalidSigningKey => formatter.write_str("invalid Ed25519 signing seed"),
             Self::KeyIdMismatch => {
                 formatter.write_str("signing key ID does not match issuer configuration")
-            },
+            }
             Self::Canonicalization => formatter.write_str("failed to canonicalize context claims"),
             Self::TimestampFormat => formatter.write_str("failed to format context timestamp"),
             Self::PayloadTooLarge => formatter.write_str("context payload exceeds 8 KiB"),
@@ -371,7 +371,7 @@ impl fmt::Display for ContextTransactionError {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
             Self::CallerTransactionMismatch => {
                 formatter.write_str("resolved Caller is not bound to this transaction and Scope")
-            },
+            }
             Self::Issuer(error) => write!(formatter, "ContextIssuer failed: {error}"),
             Self::Database(error) => {
                 write!(formatter, "context transaction database error: {error}")
