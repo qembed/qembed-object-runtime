@@ -12,8 +12,8 @@ use qembed_domain::{ids::CallerId, scope::Scope};
 use sqlx::PgPool;
 
 use crate::{
-    ContextIssuer, ContextTransaction, ContextTransactionError,
-    begin_context_transaction, begin_principal_context_transaction,
+    ContextIssuer, ContextTransaction, ContextTransactionError, begin_context_transaction,
+    begin_principal_context_transaction,
 };
 
 /// PostgreSQL access capability that requires signed context for transactions.
