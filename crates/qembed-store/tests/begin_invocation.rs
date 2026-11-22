@@ -758,6 +758,7 @@ async fn invocation_lease_reclaim_fences_the_previous_worker_across_sessions() {
         .connect(&database_url)
         .await
         .expect("second independent worker session should connect");
+    let second_context = common::signed_context(&second_pool).await;
 
     let worker_a = PgExecutionStore::new(fixture.context.clone());
     let worker_b = PgExecutionStore::new(second_context.clone());
@@ -2144,7 +2145,6 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
-    let second_context = common::signed_context(&second_pool).await;
 
     let first_command = command(&fixture, "race-a");
     let second_command = command(&fixture, "race-b");
