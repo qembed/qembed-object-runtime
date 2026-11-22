@@ -12,6 +12,7 @@ pub mod begin_invocation;
 mod budget_reservation;
 pub mod budget_settlement;
 pub mod caller;
+pub mod context_issuer;
 mod cas;
 mod event_outbox;
 pub mod idempotency;
@@ -27,6 +28,11 @@ pub mod readiness;
 pub mod snapshot_repository;
 pub mod tool_execution_store;
 pub use cas::{CasError, execute_cas};
+pub use context_issuer::{
+    ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigningKey,
+    ContextTransaction, ContextTransactionError, RingEd25519SigningKey,
+    begin_context_transaction,
+};
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
 
 use std::sync::atomic::{AtomicU64, Ordering};
