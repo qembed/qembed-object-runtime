@@ -321,7 +321,8 @@ mod tests {
         let mut input = request();
         input.approver_subject = Some("approver:bob");
         input.retirement_grace_seconds = Some(120);
-        let decision = plan_transition(Some(LifecycleState::Active), LifecycleAction::Retire, input).unwrap();
+        let decision =
+            plan_transition(Some(LifecycleState::Active), LifecycleAction::Retire, input).unwrap();
         assert_eq!(decision.next_state, LifecycleState::Retired);
         assert_eq!(decision.verify_until_unix_seconds, Some(1_800_000_120));
     }
