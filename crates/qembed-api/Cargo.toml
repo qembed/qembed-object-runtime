@@ -15,11 +15,13 @@ qembed-runtime = { path = "../qembed-runtime" }
 qembed-store = { path = "../qembed-store" }
 qembed-llm = { path = "../qembed-llm" }
 qembed-tools = { path = "../qembed-tools" }
+redis.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 
 [dev-dependencies]
+qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
 sha2.workspace = true
 tokio.workspace = true
 tower.workspace = true
