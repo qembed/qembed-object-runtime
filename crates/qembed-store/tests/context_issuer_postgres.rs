@@ -428,6 +428,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .fetch_one(principal_transaction.connection())
             .await
             .expect("Principal-only context token should be installed");
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
+        .execute(principal_transaction.connection())
+        .await
+        .expect("Principal-only probe should run under the restricted runtime role");
     let principal_only_claims: serde_json::Value =
         sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
             .bind(&principal_only_token)
