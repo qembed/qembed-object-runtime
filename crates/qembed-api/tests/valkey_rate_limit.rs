@@ -85,3 +85,33 @@ async fn anonymous_authenticated_and_owner_buckets_are_isolated() {
         assert!(!store.consume(key, policy, 1).await.unwrap().allowed());
     }
 }
+
+
+#[tokio::test]
+async fn token_bucket_refills_and_reports_retry_after() {
+    let url = std::env::var("VALKEY_URL").expect("VALKEY_URL is set by scripts/test-postgres.sh");
+    let store = ValkeyRateLimitStore::new(&url).expect("Valkey URL is valid");
+    let policy = RateLimitPolicy::new(
+        1,
+        1,
+        Duration::from_millis(100),
+        Duration::from_secs(1),
+    )
+    .expect("short refill policy is valid");
+    let key = RateLimitKey::new(
+        TenantId::new(),
+        ObjectId::new(),
+        RateLimitClass::Owner,
+        "refill-subject",
+    )
+    .unwrap();
+
+    assert!(store.consume(&key, policy, 1).await.unwrap().allowed());
+    let denied = store.consume(&key, policy, 1).await.unwrap();
+    assert!(!denied.allowed());
+    let retry_after = denied.retry_after().expect("denied decision has retry-after");
+    assert!(retry_after <= Duration::from_millis(100));
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert!(store.consume(&key, policy, 1).await.unwrap().allowed());
+}
