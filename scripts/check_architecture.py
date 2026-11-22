@@ -31,7 +31,7 @@ ALLOWED = {
 }
 
 FORBIDDEN_HANDLER_IMPORT = re.compile(
-    r"(?:::)?\bqembed_(?:store|llm|tools)\b"
+    r"(?:::)?\bqembed_(?:store|llm|tools|kmcp)\b"
 )
 
 
