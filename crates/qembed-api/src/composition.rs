@@ -123,7 +123,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
             let service =
-                ObjectVersionCreationService::new(ObjectRepository::new(self.pool.clone()));
+                ObjectVersionCreationService::new(ObjectRepository::new(self.context.clone()));
             match service
                 .create(&scope, object_id, schema_version, canonical_json)
                 .await
@@ -169,7 +169,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
     > {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
-            let service = ObjectPublicationService::new(ObjectRepository::new(self.pool.clone()));
+            let service = ObjectPublicationService::new(ObjectRepository::new(self.context.clone()));
             match service.publish(&scope, object_id, version_id).await {
                 Ok(result) => {
                     let report = *result.report();
