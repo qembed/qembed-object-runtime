@@ -12,8 +12,8 @@ use qembed_domain::ids::CallerId;
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::Serialize;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
@@ -74,7 +74,13 @@ impl ContextIssuerConfig {
         deployment_id: impl Into<String>,
         key_id: impl Into<String>,
     ) -> Result<Self, ContextIssuerError> {
-        Self::new(issuer, audience, deployment_id, key_id, DEFAULT_TOKEN_LIFETIME)
+        Self::new(
+            issuer,
+            audience,
+            deployment_id,
+            key_id,
+            DEFAULT_TOKEN_LIFETIME,
+        )
     }
 }
 
@@ -160,7 +166,10 @@ impl ContextIssuer {
         if config.key_id != signing_key.key_id() {
             return Err(ContextIssuerError::KeyIdMismatch);
         }
-        Ok(Self { config, signing_key: Arc::new(signing_key) })
+        Ok(Self {
+            config,
+            signing_key: Arc::new(signing_key),
+        })
     }
 
     fn issue(
@@ -188,13 +197,17 @@ impl ContextIssuer {
             issuer: self.config.issuer.clone(),
             audience: self.config.audience.clone(),
             key_id: self.config.key_id.clone(),
-            issued_at: now.format(&Rfc3339).map_err(|_| ContextIssuerError::TimestampFormat)?,
-            expires_at: expires_at.format(&Rfc3339).map_err(|_| ContextIssuerError::TimestampFormat)?,
+            issued_at: now
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            expires_at: expires_at
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
             nonce: Uuid::new_v4().to_string(),
         };
 
-        let payload = serde_jcs::to_vec(&claims)
-            .map_err(|_| ContextIssuerError::Canonicalization)?;
+        let payload =
+            serde_jcs::to_vec(&claims).map_err(|_| ContextIssuerError::Canonicalization)?;
         if payload.len() > MAX_PAYLOAD_BYTES {
             return Err(ContextIssuerError::PayloadTooLarge);
         }
@@ -326,9 +339,13 @@ pub enum ContextIssuerError {
 impl fmt::Display for ContextIssuerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidConfiguration => formatter.write_str("invalid ContextIssuer configuration"),
+            Self::InvalidConfiguration => {
+                formatter.write_str("invalid ContextIssuer configuration")
+            },
             Self::InvalidSigningKey => formatter.write_str("invalid Ed25519 signing seed"),
-            Self::KeyIdMismatch => formatter.write_str("signing key ID does not match issuer configuration"),
+            Self::KeyIdMismatch => {
+                formatter.write_str("signing key ID does not match issuer configuration")
+            },
             Self::Canonicalization => formatter.write_str("failed to canonicalize context claims"),
             Self::TimestampFormat => formatter.write_str("failed to format context timestamp"),
             Self::PayloadTooLarge => formatter.write_str("context payload exceeds 8 KiB"),
@@ -352,9 +369,13 @@ impl fmt::Display for ContextTransactionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
-            Self::CallerTransactionMismatch => formatter.write_str("resolved Caller is not bound to this transaction and Scope"),
+            Self::CallerTransactionMismatch => {
+                formatter.write_str("resolved Caller is not bound to this transaction and Scope")
+            },
             Self::Issuer(error) => write!(formatter, "ContextIssuer failed: {error}"),
-            Self::Database(error) => write!(formatter, "context transaction database error: {error}"),
+            Self::Database(error) => {
+                write!(formatter, "context transaction database error: {error}")
+            },
         }
     }
 }
@@ -381,9 +402,24 @@ mod tests {
 
     #[test]
     fn issuer_configuration_rejects_empty_identity_and_long_lifetime() {
-        assert!(ContextIssuerConfig::new("", "aud", "deployment", "key-1", Duration::from_secs(30)).is_err());
-        assert!(ContextIssuerConfig::new("issuer", "aud", "deployment", "key-1", Duration::from_secs(61)).is_err());
-        assert!(ContextIssuerConfig::new("issuer", "aud", "deployment", "key-1", Duration::ZERO).is_err());
+        assert!(
+            ContextIssuerConfig::new("", "aud", "deployment", "key-1", Duration::from_secs(30))
+                .is_err()
+        );
+        assert!(
+            ContextIssuerConfig::new(
+                "issuer",
+                "aud",
+                "deployment",
+                "key-1",
+                Duration::from_secs(61)
+            )
+            .is_err()
+        );
+        assert!(
+            ContextIssuerConfig::new("issuer", "aud", "deployment", "key-1", Duration::ZERO)
+                .is_err()
+        );
     }
 
     #[test]
@@ -392,10 +428,7 @@ mod tests {
             .expect("32-byte Ed25519 seed must be accepted");
         let message = b"canonical transaction context";
         let signature = signer.sign(message).expect("signing must succeed");
-        ring::signature::UnparsedPublicKey::new(
-            &ring::signature::ED25519,
-            &signer.public_key(),
-        )
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &signer.public_key())
         .verify(message, &signature)
         .expect("signature must verify");
         assert_ne!(signature, [0_u8; 64]);
@@ -404,8 +437,8 @@ mod tests {
 
     #[test]
     fn issuer_rejects_a_mismatched_key_id() {
-        let signer = RingEd25519SigningKey::from_seed("key-a", &[3_u8; 32])
-            .expect("seed must be accepted");
+        let signer =
+            RingEd25519SigningKey::from_seed("key-a", &[3_u8; 32]).expect("seed must be accepted");
         let config = ContextIssuerConfig::with_default_lifetime(
             "qembed-runtime",
             "postgres://deployment/db",
