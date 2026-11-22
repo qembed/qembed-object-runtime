@@ -91,8 +91,16 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     seed_delegation(&pool, tenant_id, principal_id.into_uuid(), caller_id).await;
 
     let issuer_name = "qembed-runtime";
-    let audience = format!("urn:qembed:postgres:deployment:rt050-test:{}", Uuid::new_v4());
     let deployment_id = "rt050-test-deployment";
+    let database_oid: String = sqlx::query_scalar(
+        "SELECT oid::text FROM pg_database WHERE datname = current_database()",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("database OID should be readable");
+    let audience = format!(
+        "urn:qembed:postgres:deployment:{deployment_id}:database:{database_oid}"
+    );
     let key_id = format!("rt050-test-{}", Uuid::new_v4());
     let signing_key = RingEd25519SigningKey::from_seed(key_id.clone(), &[42_u8; 32])
         .expect("the fixed test seed should create a valid Ed25519 signer");
