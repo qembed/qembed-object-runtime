@@ -2145,12 +2145,13 @@ async fn competing_sessions_cannot_overspend_the_object_daily_budget() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let first_command = command(&fixture, "race-a");
     let second_command = command(&fixture, "race-b");
     let (first, second) = tokio::join!(
         begin_invocation(&fixture.context, &fixture.scope, first_command),
-        begin_invocation(&second_pool, &fixture.scope, second_command),
+        begin_invocation(&second_context, &fixture.scope, second_command),
     );
     second_pool.close().await;
 
@@ -2519,6 +2520,7 @@ async fn competing_sessions_cannot_overspend_the_per_caller_daily_budget() {
         .connect(&database_url)
         .await
         .expect("second independent pool");
+    let second_context = common::signed_context(&second_pool).await;
 
     let (first, second) = tokio::join!(
         begin_invocation(
@@ -2811,6 +2813,8 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let pool_a = fixture.pool.clone();
     let pool_b = fixture.pool.clone();
+    let context_a = common::signed_context(&pool_a).await;
+    let context_b = common::signed_context(&pool_b).await;
     let scope_a = fixture.scope;
     let scope_b = fixture.scope;
     let command_a = command(&fixture, "budget-race-a");
@@ -2820,11 +2824,11 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
 
     let task_a = tokio::spawn(async move {
         barrier_a.wait().await;
-        begin_invocation(&pool_a, &scope_a, command_a).await
+        begin_invocation(&context_a, &scope_a, command_a).await
     });
     let task_b = tokio::spawn(async move {
         barrier_b.wait().await;
-        begin_invocation(&pool_b, &scope_b, command_b).await
+        begin_invocation(&context_b, &scope_b, command_b).await
     });
 
     let result_a = task_a.await.expect("first PostgreSQL task should finish");
@@ -2888,11 +2892,11 @@ async fn concurrent_duplicate_idempotency_claim_creates_only_one_reservation() {
 
     let task_a = tokio::spawn(async move {
         barrier_a.wait().await;
-        begin_invocation(&pool_a, &scope_a, command_a).await
+        begin_invocation(&context_a, &scope_a, command_a).await
     });
     let task_b = tokio::spawn(async move {
         barrier_b.wait().await;
-        begin_invocation(&pool_b, &scope_b, command_b).await
+        begin_invocation(&context_b, &scope_b, command_b).await
     });
 
     let result_a = task_a.await.expect("first PostgreSQL task should finish");
