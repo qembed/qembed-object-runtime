@@ -1,0 +1,288 @@
+mod common;
+
+use std::time::Duration;
+
+use qembed_domain::ids::{CallerId, TenantId};
+use qembed_domain::test_support::scope_for_tenant;
+use qembed_store::{
+    ContextIssuer, ContextIssuerConfig, PgPoolConfig, RingEd25519SigningKey,
+    begin_context_transaction, connect_pool, run_migrations,
+};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+async fn pool_with_one_connection() -> PgPool {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    connect_pool(
+        &database_url,
+        PgPoolConfig {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("the PostgreSQL test database should accept connections")
+}
+
+async fn seed_delegation(pool: &PgPool, tenant_id: TenantId, principal_id: Uuid, caller_id: CallerId) {
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
+        .bind(tenant_id.to_string())
+        .execute(pool)
+        .await
+        .expect("tenant fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) \
+         VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
+    )
+    .bind(tenant_id.to_string())
+    .bind(principal_id.to_string())
+    .execute(pool)
+    .await
+    .expect("authenticated Principal fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO callers (id, tenant_id, token_hash, caller_kind) \
+         VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')",
+    )
+    .bind(caller_id.to_string())
+    .bind(tenant_id.to_string())
+    .bind(vec![0_u8; 32])
+    .execute(pool)
+    .await
+    .expect("Caller fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO principal_caller_delegations \
+         (delegation_id, tenant_id, principal_id, caller_id) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(tenant_id.to_string())
+    .bind(principal_id.to_string())
+    .bind(caller_id.to_string())
+    .execute(pool)
+    .await
+    .expect("active direct delegation fixture should be inserted");
+}
+
+#[tokio::test]
+async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_transaction() {
+    let pool = pool_with_one_connection().await;
+
+    let server_version_num: i32 = sqlx::query_scalar("SHOW server_version_num")
+        .fetch_one(&pool)
+        .await
+        .expect("PostgreSQL version should be readable");
+    if !(190_000..200_000).contains(&server_version_num) {
+        pool.close().await;
+        return;
+    }
+
+    run_migrations(&pool)
+        .await
+        .expect("Rust store migrations should apply before the RT-050 fixture");
+
+    let tenant_id = TenantId::new();
+    let scope = scope_for_tenant(tenant_id);
+    let principal_id = scope.principal().principal_id();
+    let caller_id = CallerId::new();
+    seed_delegation(&pool, tenant_id, principal_id.into_uuid(), caller_id).await;
+
+    let issuer_name = "qembed-runtime";
+    let audience = format!("urn:qembed:postgres:deployment:rt050-test:{}", Uuid::new_v4());
+    let deployment_id = "rt050-test-deployment";
+    let key_id = format!("rt050-test-{}", Uuid::new_v4());
+    let signing_key = RingEd25519SigningKey::from_seed(&key_id, &[42_u8; 32])
+        .expect("the fixed test seed should create a valid Ed25519 signer");
+    let public_key = signing_key.public_key();
+    let config = ContextIssuerConfig::with_default_lifetime(
+        issuer_name,
+        &audience,
+        deployment_id,
+        &key_id,
+    )
+    .expect("test issuer configuration should be valid");
+
+    sqlx::query(
+        "INSERT INTO qembed_crypto.verification_keys \
+         (key_id, public_key, issuer, audience, deployment_id) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&key_id)
+    .bind(public_key.to_vec())
+    .bind(issuer_name)
+    .bind(&audience)
+    .bind(deployment_id)
+    .execute(&pool)
+    .await
+    .expect("the SQL verifier should receive only the public key");
+
+    let issuer = ContextIssuer::new(config, signing_key)
+        .expect("issuer configuration and signing key IDs should match");
+
+    let mut transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
+        .await
+        .expect("trusted Scope and database-resolved Caller should issue a context token");
+
+    let backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("transaction backend PID should be readable");
+    let token: String = sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("Rust should install the single qctx1 token setting");
+    assert!(token.starts_with("qctx1:"));
+
+    let verified_claims: serde_json::Value =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&token)
+            .fetch_one(transaction.connection())
+            .await
+            .expect("PostgreSQL should verify the Rust serde_jcs/Ed25519 payload");
+    assert_eq!(verified_claims["version"], "1");
+    assert_eq!(verified_claims["tenant_id"], tenant_id.to_string());
+    assert_eq!(verified_claims["principal_id"], principal_id.to_string());
+    assert_eq!(verified_claims["caller_id"], caller_id.to_string());
+    assert_eq!(verified_claims["backend_pid"], backend_pid.to_string());
+
+    sqlx::query(
+        "INSERT INTO qembed_crypto.tenant_rows (tenant_id, row_id) \
+         VALUES ($1::uuid, 91001), ($2::uuid, 91002)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(TenantId::new().to_string())
+    .execute(transaction.connection())
+    .await
+    .expect("RLS test rows should be inserted before switching to the runtime role");
+
+    sqlx::query("SET LOCAL ROLE qembed_runtime")
+        .execute(transaction.connection())
+        .await
+        .expect("test transaction should assume the restricted runtime role");
+
+    let tenant_claim: String =
+        sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("typed tenant accessor should verify the token");
+    let principal_claim: String =
+        sqlx::query_scalar("SELECT qembed_crypto.current_principal_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("typed Principal accessor should verify the token");
+    let caller_claim: String =
+        sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("typed Caller accessor should verify the token");
+    assert_eq!(tenant_claim, tenant_id.to_string());
+    assert_eq!(principal_claim, principal_id.to_string());
+    assert_eq!(caller_claim, caller_id.to_string());
+
+    let visible_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM qembed_crypto.tenant_rows")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("RLS should execute through the signed tenant context");
+    assert_eq!(visible_rows, 1, "RLS must return only the signed tenant's row");
+
+    sqlx::query("SAVEPOINT rt050_savepoint")
+        .execute(transaction.connection())
+        .await
+        .expect("savepoint should be created");
+    sqlx::query("SELECT set_config('app.caller_id', $1, true)")
+        .bind(TenantId::new().to_string())
+        .execute(transaction.connection())
+        .await
+        .expect("forged legacy Caller selector should be settable");
+    sqlx::query("ROLLBACK TO SAVEPOINT rt050_savepoint")
+        .execute(transaction.connection())
+        .await
+        .expect("savepoint rollback should preserve the outer transaction");
+    let caller_after_savepoint: String =
+        sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("outer signed Caller should survive savepoint rollback");
+    assert_eq!(caller_after_savepoint, caller_id.to_string());
+
+    transaction
+        .commit()
+        .await
+        .expect("signed-context transaction should commit");
+
+    let backend_after_commit: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&pool)
+        .await
+        .expect("the pooled backend should remain available");
+    assert_eq!(backend_after_commit, backend_pid, "single-connection pool should reuse the same backend");
+
+    let token_after_commit: Option<String> = sqlx::query_scalar(
+        "SELECT NULLIF(current_setting('app.context_token', true), '')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("transaction-local token setting should be readable after commit");
+    assert_eq!(token_after_commit, None, "commit must clear the token GUC");
+
+    let committed_replay: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&token)
+            .fetch_one(&pool)
+            .await
+            .expect("replay probe should execute");
+    assert!(committed_replay.is_none(), "committed token must fail in the next transaction");
+
+    let mut rollback_transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
+        .await
+        .expect("a retry must mint a fresh transaction-bound token");
+    let rollback_token: String =
+        sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
+            .fetch_one(rollback_transaction.connection())
+            .await
+            .expect("rollback transaction should install a token");
+    rollback_transaction
+        .rollback()
+        .await
+        .expect("signed-context transaction should roll back");
+
+    let rollback_replay: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&rollback_token)
+            .fetch_one(&pool)
+            .await
+            .expect("rollback replay probe should execute");
+    assert!(rollback_replay.is_none(), "rolled-back token must fail on pooled connection reuse");
+
+    let other_database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let other_pool = connect_pool(
+        &other_database_url,
+        PgPoolConfig {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("second pool should open an independent PostgreSQL backend");
+    let other_backend_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&other_pool)
+        .await
+        .expect("second backend PID should be readable");
+    assert_ne!(other_backend_pid, backend_pid, "second pool must use another backend");
+    let other_backend_replay: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&token)
+            .fetch_one(&other_pool)
+            .await
+            .expect("cross-backend replay probe should execute");
+    assert!(
+        other_backend_replay.is_none(),
+        "token from another backend must be rejected"
+    );
+
+    other_pool.close().await;
+    pool.close().await;
+}
