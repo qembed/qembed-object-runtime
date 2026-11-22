@@ -306,7 +306,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let other_caller_id = CallerId::new();
     sqlx::query(
-        "INSERT INTO qembed_crypto.caller_rows (caller_id, row_id) \\
+        "INSERT INTO qembed_crypto.caller_rows (caller_id, row_id) \
          VALUES ($1::uuid, 91011), ($2::uuid, 91012)",
     )
     .bind(caller_id.to_string())
