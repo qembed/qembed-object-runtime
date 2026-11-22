@@ -4,7 +4,7 @@ use qembed_domain::ids::{CallerId, TenantId};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgPoolConfig, RingEd25519SigningKey,
-    begin_context_transaction, begin_principal_context_transaction, connect_pool, run_migrations,
+    begin_context_transaction, begin_principal_context_transaction, connect_pool,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -105,6 +105,7 @@ async fn seed_additional_delegation(
 }
 
 #[tokio::test]
+#[ignore = "requires the canonical qembed-sql QSA-003 signed-context migration; run from scripts/test-postgres.sh"]
 async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_transaction() {
     let pool = pool_with_one_connection().await;
 
@@ -119,10 +120,6 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         pool.close().await;
         return;
     }
-
-    run_migrations(&pool)
-        .await
-        .expect("Rust store migrations should apply before the RT-050 fixture");
 
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
