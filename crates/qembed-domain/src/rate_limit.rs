@@ -36,7 +36,7 @@ impl RateLimitClass {
 pub struct RateLimitKey(String);
 
 impl RateLimitKey {
-    pub fn new(
+    fn new(
         tenant_id: TenantId,
         object_id: ObjectId,
         class: RateLimitClass,
