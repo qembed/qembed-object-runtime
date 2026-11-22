@@ -9,13 +9,11 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::{ContextTransactionError, PgContext, fetch_all};
 use qembed_domain::{
     ids::{EventId, InvocationId},
     scope::Scope,
 };
-use sqlx::PgPool;
-
-use crate::{begin_tenant_transaction, fetch_all};
 
 /// One invocation whose original Outbox delivery was durably marked for replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +41,7 @@ pub enum InvocationRecoveryError {
     InvalidBatchSize,
     InvalidCutoff,
     InvalidPersistedId,
+    Context(ContextTransactionError),
     Database(sqlx::Error),
 }
 
@@ -61,6 +60,10 @@ impl fmt::Display for InvocationRecoveryError {
             Self::InvalidPersistedId => {
                 formatter.write_str("recovery function returned an invalid persisted ID")
             }
+            Self::Context(error) => write!(
+                formatter,
+                "invocation recovery signed-context initialization failed: {error}"
+            ),
             Self::Database(error) => {
                 write!(
                     formatter,
@@ -74,6 +77,7 @@ impl fmt::Display for InvocationRecoveryError {
 impl Error for InvocationRecoveryError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             _ => None,
         }
@@ -83,13 +87,13 @@ impl Error for InvocationRecoveryError {
 /// Tenant-scoped PostgreSQL sweeper. The caller schedules it periodically.
 #[derive(Clone)]
 pub struct PgInvocationRecoverySweeper {
-    pool: PgPool,
+    context: PgContext,
 }
 
 impl PgInvocationRecoverySweeper {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 
     /// Sweeps invocations whose last progress is older than progress_timeout.
@@ -125,9 +129,11 @@ impl PgInvocationRecoverySweeper {
             .as_micros();
         let micros = i64::try_from(micros).map_err(|_| InvocationRecoveryError::InvalidCutoff)?;
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
-            .map_err(InvocationRecoveryError::Database)?;
+            .map_err(InvocationRecoveryError::Context)?;
         let rows = fetch_all(
             &mut transaction,
             sqlx::query_as::<_, (String, String)>(

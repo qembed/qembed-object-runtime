@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use crate::caller::{CallerResolutionError, resolve_delegated_caller};
+use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
 use crate::{TenantTransaction, begin_context_tenant_transaction};
 
 const TOKEN_PREFIX: &str = "qctx1";
@@ -286,7 +286,24 @@ pub async fn begin_context_transaction(
     requested_caller_id: CallerId,
     issuer: &ContextIssuer,
 ) -> Result<ContextTransaction, ContextTransactionError> {
-    begin_context_transaction_inner(pool, scope, Some(requested_caller_id), issuer).await
+    begin_context_transaction_inner(pool, scope, Some(requested_caller_id), issuer)
+        .await
+        .map(|(transaction, _)| transaction)
+}
+
+/// Begins a Caller-scoped signed context and returns the exact database-resolved
+/// Caller value while its delegation lock remains held by the open transaction.
+pub async fn begin_caller_context_transaction(
+    pool: &sqlx::PgPool,
+    scope: &Scope,
+    requested_caller_id: CallerId,
+    issuer: &ContextIssuer,
+) -> Result<(ContextTransaction, ResolvedCaller), ContextTransactionError> {
+    let (transaction, caller) =
+        begin_context_transaction_inner(pool, scope, Some(requested_caller_id), issuer).await?;
+    caller
+        .map(|caller| (transaction, caller))
+        .ok_or(ContextTransactionError::CallerTransactionMismatch)
 }
 
 /// Begins a Principal-only signed context. The token contains JSON null for
@@ -296,7 +313,9 @@ pub async fn begin_principal_context_transaction(
     scope: &Scope,
     issuer: &ContextIssuer,
 ) -> Result<ContextTransaction, ContextTransactionError> {
-    begin_context_transaction_inner(pool, scope, None, issuer).await
+    begin_context_transaction_inner(pool, scope, None, issuer)
+        .await
+        .map(|(transaction, _)| transaction)
 }
 
 async fn begin_context_transaction_inner(
@@ -304,23 +323,24 @@ async fn begin_context_transaction_inner(
     scope: &Scope,
     requested_caller_id: Option<CallerId>,
     issuer: &ContextIssuer,
-) -> Result<ContextTransaction, ContextTransactionError> {
+) -> Result<(ContextTransaction, Option<ResolvedCaller>), ContextTransactionError> {
     let mut transaction = begin_context_tenant_transaction(pool, scope)
         .await
         .map_err(ContextTransactionError::Database)?;
 
     let binding = PgContextBinding::read(&mut transaction).await?;
-    let caller_id = if let Some(requested_caller_id) = requested_caller_id {
+    let caller = if let Some(requested_caller_id) = requested_caller_id {
         let caller = resolve_delegated_caller(&mut transaction, requested_caller_id)
             .await
             .map_err(ContextTransactionError::CallerResolution)?;
         if !caller.is_bound_to(&transaction, scope) {
             return Err(ContextTransactionError::CallerTransactionMismatch);
         }
-        Some(caller.caller_id())
+        Some(caller)
     } else {
         None
     };
+    let caller_id = caller.map(ResolvedCaller::caller_id);
 
     // Signing is local and synchronous: no KMS/network operation is performed
     // while delegation row locks are held.
@@ -334,7 +354,7 @@ async fn begin_context_transaction_inner(
         .await
         .map_err(ContextTransactionError::Database)?;
 
-    Ok(transaction)
+    Ok((transaction, caller))
 }
 
 fn lowercase_hex(bytes: &[u8]) -> String {
