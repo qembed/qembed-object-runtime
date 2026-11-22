@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use qembed_api::adapters::valkey_rate_limit::ValkeyRateLimitStore;
 use qembed_domain::{
-    ids::{ObjectId, TenantId},
+    ids::{CallerId, ObjectId, TenantId},
     rate_limit::{RateLimitClass, RateLimitKey, RateLimitPolicy, RateLimitStore},
 };
 
@@ -30,11 +30,11 @@ async fn independent_workers_share_one_atomic_bucket() {
         ValkeyRateLimitStore::new(&url).unwrap(),
     ];
     let key = Arc::new(
-        RateLimitKey::new(
+        RateLimitKey::for_caller(
             TenantId::new(),
             ObjectId::new(),
             RateLimitClass::Authenticated,
-            "multi-worker-subject",
+            CallerId::new(),
         )
         .unwrap(),
     );
@@ -68,16 +68,12 @@ async fn anonymous_authenticated_and_owner_buckets_are_isolated() {
         RateLimitPolicy::new(1, 1, Duration::from_secs(3_600), Duration::from_secs(3_600)).unwrap();
 
     let keys = [
-        RateLimitKey::new(tenant, object, RateLimitClass::Anonymous, "same-subject").unwrap(),
-        RateLimitKey::new(
-            tenant,
-            object,
-            RateLimitClass::Authenticated,
-            "same-subject",
-        )
-        .unwrap(),
-        RateLimitKey::new(tenant, object, RateLimitClass::Owner, "same-subject").unwrap(),
+        RateLimitKey::for_caller(tenant, object, RateLimitClass::Anonymous, CallerId::new())
+            .unwrap(),
+        RateLimitKey::for_caller(tenant, object, RateLimitClass::Authenticated, CallerId::new())
+            .unwrap(),
     ];
+    assert!(RateLimitKey::for_caller(tenant, object, RateLimitClass::Owner, CallerId::new()).is_err());
     for key in &keys {
         assert!(store.consume(key, policy, 1).await.unwrap().allowed());
     }
@@ -92,11 +88,11 @@ async fn token_bucket_refills_and_reports_retry_after() {
     let store = ValkeyRateLimitStore::new(&url).expect("Valkey URL is valid");
     let policy = RateLimitPolicy::new(1, 1, Duration::from_millis(100), Duration::from_secs(1))
         .expect("short refill policy is valid");
-    let key = RateLimitKey::new(
+    let key = RateLimitKey::for_caller(
         TenantId::new(),
         ObjectId::new(),
-        RateLimitClass::Owner,
-        "refill-subject",
+        RateLimitClass::Authenticated,
+        CallerId::new(),
     )
     .unwrap();
 
