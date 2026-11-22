@@ -60,7 +60,7 @@ async fn independent_workers_share_one_atomic_bucket() {
 }
 
 #[tokio::test]
-async fn anonymous_authenticated_and_owner_buckets_are_isolated() {
+async fn anonymous_and_authenticated_buckets_are_isolated_and_owner_cannot_be_forged() {
     let (store, _) = setup();
     let tenant = TenantId::new();
     let object = ObjectId::new();
