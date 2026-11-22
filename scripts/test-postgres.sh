@@ -18,7 +18,7 @@ psql_in_test_db() {
 
 install_rt050_verifier() {
   local postgres_version_num="$1"
-  local sql_commit="c78348b29a3d78e1a7ac77be6986b447387d6bc7"
+  local sql_commit="e7759dd7178b9ac703414edc067601e24db18f5f"
   local sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rt050-${sql_commit}"
 
   if (( postgres_version_num < 190000 || postgres_version_num >= 200000 )); then
@@ -46,7 +46,22 @@ install_rt050_verifier() {
 
   "${compose[@]}" cp "$sql_repo_dir/tests/qembed_context_verify_transaction_setup.sql" postgres:/tmp/qembed_context_verify_transaction_setup.sql
   psql_in_test_db -f /tmp/qembed_context_verify_transaction_setup.sql
-  echo "RT-050 verifier installed from qembed-sql commit $sql_commit"
+  "${compose[@]}" cp "$sql_repo_dir/migrations/rt050_signed_context_rls.sql" postgres:/tmp/rt050_signed_context_rls.sql
+  echo "RT-050 verifier and canonical migration staged from qembed-sql commit $sql_commit"
+}
+
+apply_signed_context_rls() {
+  local postgres_version_num="$1"
+
+  if (( postgres_version_num < 190000 || postgres_version_num >= 200000 )); then
+    echo "Skipping RT-050 signed-context RLS migration: PostgreSQL 19 is required (got $postgres_version_num)."
+    return
+  fi
+
+  echo "Applying Rust Store migrations before canonical signed-context RLS migration"
+  cargo run -p qembed-store --bin qembed-migrate
+  psql_in_test_db -f /tmp/rt050_signed_context_rls.sql
+  echo "Canonical RT-050 signed-context RLS migration applied"
 }
 
 write_concurrency_results() {
@@ -76,9 +91,10 @@ postgres_version="$(psql_in_test_db -Atc 'SHOW server_version')"
 postgres_version_num="$(psql_in_test_db -Atc "SHOW server_version_num")"
 pgvector_version="$(psql_in_test_db -Atc "SELECT extversion FROM pg_extension WHERE extname = 'vector'")"
 install_rt050_verifier "$postgres_version_num"
+apply_signed_context_rls "$postgres_version_num"
 {
   echo "commit_sha=${GITHUB_SHA:-local}"
-  echo "rt050_sql_commit=c78348b29a3d78e1a7ac77be6986b447387d6bc7"
+  echo "rt050_sql_commit=e7759dd7178b9ac703414edc067601e24db18f5f"
   echo "rustc_version=$(rustc --version)"
   echo "postgres_version=$postgres_version"
   echo "postgres_version_num=$postgres_version_num"
