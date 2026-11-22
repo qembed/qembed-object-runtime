@@ -445,6 +445,35 @@ mod tests {
         assert!(!format!("{signer:?}").contains("070707"));
     }
 
+    struct AlternateLocalSigner(RingEd25519SigningKey);
+
+    impl ContextSigner for AlternateLocalSigner {
+        fn key_id(&self) -> &str {
+            self.0.key_id()
+        }
+
+        fn sign(&self, message: &[u8]) -> Result<[u8; 64], ContextIssuerError> {
+            self.0.sign(message)
+        }
+    }
+
+    #[test]
+    fn issuer_accepts_an_alternate_bounded_local_signer() {
+        let signer = AlternateLocalSigner(
+            RingEd25519SigningKey::from_seed("key-1", &[9_u8; 32])
+                .expect("seed must be accepted"),
+        );
+        let config = ContextIssuerConfig::with_default_lifetime(
+            "qembed-runtime",
+            "postgres://deployment/db",
+            "deployment-a",
+            "key-1",
+        )
+        .expect("config must be valid");
+
+        assert!(ContextIssuer::new(config, signer).is_ok());
+    }
+
     #[test]
     fn issuer_rejects_a_mismatched_key_id() {
         let signer =
