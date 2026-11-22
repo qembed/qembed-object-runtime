@@ -179,7 +179,11 @@ Every mutation emits:
 - provider key reference fingerprint (never secret material);
 - propagation targets and acknowledgements.
 
-The database audit table is append-only and written atomically with the state transition. The KMCP also writes to an independently administered immutable audit sink. Logs must not contain private key material, signed payloads, raw tokens, or credentials. Metrics cover staged/active/retired/revoked counts, signer key adoption, rotation duration, propagation lag, failed authorization, and rejected lifecycle transitions.
+The database audit table is append-only. Each lifecycle function inserts both the audit event and a transactional audit-export outbox record in the **same database transaction** as the key state change. An independent exporter, using its own restricted database identity and SECURITY DEFINER read/acknowledgement functions, delivers events to an independently administered immutable audit sink. Delivery is at-least-once and idempotent by event ID; the exporter records delivery acknowledgement separately from the immutable audit event.
+
+No network call to the external audit sink occurs while key-registry locks are held. If the sink is unavailable, the key state change and local audit remain durable while export stays visibly pending and is retried. Emergency revocation must not wait for the external sink; the control plane reports local revocation separately from audit-export completion. If the outbox record cannot be committed, the key state transition rolls back.
+
+Logs must not contain private key material, signed payloads, raw tokens, or credentials. Metrics cover staged/active/retired/revoked counts, signer key adoption, rotation duration, revocation propagation lag, audit-export backlog/age, failed authorization, and rejected lifecycle transitions.
 
 ## 10. Failure behavior
 
