@@ -121,7 +121,7 @@ impl ExecutionStore for PgExecutionStore {
                 "worker execution states require a live lease",
             ));
         }
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let result = execute(
             &mut transaction,
             sqlx::query(
