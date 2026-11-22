@@ -93,6 +93,43 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .expect("all store migrations should apply");
     provision_test_logins(&owner).await;
 
+    // Canonical SQL classifies these as pre-auth tables: no tenant RLS, only
+    // narrow column SELECT grants for the credential lookup.
+    let owner_principals_rls: bool = sqlx::query_scalar(
+        "SELECT relrowsecurity FROM pg_class WHERE oid = 'owner_principals'::regclass",
+    )
+    .fetch_one(&owner)
+    .await
+    .expect("owner_principals relation should exist");
+    let owner_credentials_rls: bool = sqlx::query_scalar(
+        "SELECT relrowsecurity FROM pg_class WHERE oid = 'owner_credentials'::regclass",
+    )
+    .fetch_one(&owner)
+    .await
+    .expect("owner_credentials relation should exist");
+    assert!(!owner_principals_rls && !owner_credentials_rls);
+
+    let broad_owner_read: bool = sqlx::query_scalar(
+        "SELECT has_table_privilege('qembed_runtime_test', 'owner_principals', 'SELECT')
+            OR has_table_privilege('qembed_runtime_test', 'owner_credentials', 'SELECT')",
+    )
+    .fetch_one(&owner)
+    .await
+    .expect("runtime table privileges should be inspectable");
+    assert!(!broad_owner_read, "pre-auth tables must not have broad table SELECT grants");
+
+    let narrow_owner_read: bool = sqlx::query_scalar(
+        "SELECT has_column_privilege('qembed_runtime_test', 'owner_principals', 'tenant_id', 'SELECT')
+            AND has_column_privilege('qembed_runtime_test', 'owner_principals', 'disabled_at', 'SELECT')
+            AND has_column_privilege('qembed_runtime_test', 'owner_credentials', 'token_hash', 'SELECT')
+            AND has_column_privilege('qembed_runtime_test', 'owner_credentials', 'revoked_at', 'SELECT')
+            AND NOT has_column_privilege('qembed_runtime_test', 'owner_credentials', 'created_at', 'SELECT')",
+    )
+    .fetch_one(&owner)
+    .await
+    .expect("runtime column privileges should be inspectable");
+    assert!(narrow_owner_read, "runtime should receive only the pre-auth lookup columns");
+
     let tenant_a = Uuid::new_v4();
     let tenant_b = Uuid::new_v4();
     let object_a = Uuid::new_v4();
@@ -534,9 +571,8 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .await
         .expect("unscoped transaction should roll back");
 
-    // Pre-authentication must also work under the real runtime login. The
-    // requested tenant is only a lookup selector; the token digest must match
-    // an active principal in that same tenant before a trusted Scope is minted.
+    // Pre-authentication works without tenant RLS or a legacy GUC: the tenant
+    // selector and token digest are bound in the same lookup before Scope exists.
     let auth_tenant = Uuid::new_v4();
     let auth_caller = Uuid::new_v4();
     let owner_token = format!("role-test-owner-{}", Uuid::new_v4());
@@ -569,7 +605,7 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         OwnerCredentials::new(auth_tenant_id, owner_token),
     )
     .await
-    .expect("runtime login should authenticate using tenant-scoped RLS lookup");
+    .expect("runtime login should authenticate using narrow pre-auth column grants");
     assert_eq!(
         authenticated.tenant_id().to_string(),
         auth_tenant.to_string()
