@@ -2,12 +2,12 @@
 
 use std::fmt;
 
+use crate::{PgContext, fetch_optional};
 use qembed_domain::ids::InvocationId;
 use qembed_domain::invocation::InvocationStatus;
 use qembed_domain::invocation_read::InvocationReadModel;
 use qembed_domain::ports::InvocationReadStore;
 use qembed_domain::scope::Scope;
-use crate::{PgContext, fetch_optional};
 
 #[derive(Clone)]
 pub struct PgInvocationQueryStore {
@@ -31,7 +31,10 @@ pub enum InvocationQueryError {
 impl fmt::Display for InvocationQueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Context(error) => write!(formatter, "invocation query signed-context initialization failed: {error}"),
+            Self::Context(error) => write!(
+                formatter,
+                "invocation query signed-context initialization failed: {error}"
+            ),
             Self::Database(error) => write!(formatter, "invocation query failed: {error}"),
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted invocation has invalid {field}")
@@ -64,7 +67,11 @@ impl InvocationReadStore for PgInvocationQueryStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<Option<InvocationReadModel>, Self::Error> {
-        let mut transaction = self.context.begin_principal(scope).await.map_err(InvocationQueryError::Context)?;
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
+            .await
+            .map_err(InvocationQueryError::Context)?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
