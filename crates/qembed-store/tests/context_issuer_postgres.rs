@@ -1,5 +1,3 @@
-mod common;
-
 use std::time::Duration;
 
 use qembed_domain::ids::{CallerId, TenantId};
