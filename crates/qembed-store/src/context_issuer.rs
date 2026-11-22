@@ -394,7 +394,7 @@ mod tests {
         let signature = signer.sign(message).expect("signing must succeed");
         ring::signature::UnparsedPublicKey::new(
             &ring::signature::ED25519,
-            signer.public_key(),
+            &signer.public_key(),
         )
         .verify(message, &signature)
         .expect("signature must verify");
