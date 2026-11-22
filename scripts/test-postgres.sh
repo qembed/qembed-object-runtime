@@ -16,6 +16,39 @@ psql_in_test_db() {
   "${compose[@]}" exec -T postgres psql -U qembed_test -d qembed_test -v ON_ERROR_STOP=1 "$@"
 }
 
+install_rt050_verifier() {
+  local postgres_version_num="$1"
+  local sql_commit="aa76baaf0b3e49080c19f9c98db98189a12dfb8b"
+  local sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rt050-${sql_commit}"
+
+  if [[ ! "$postgres_version_num" =~ ^19[0-9]{3}$ ]]; then
+    echo "Skipping RT-050 C verifier fixture: PostgreSQL 19 is required (got $postgres_version_num)."
+    return
+  fi
+
+  if [[ ! -d "$sql_repo_dir/.git" ]]; then
+    rm -rf "$sql_repo_dir"
+    git clone --no-checkout https://github.com/qembed/qembed-sql.git "$sql_repo_dir"
+    git -C "$sql_repo_dir" fetch --depth 1 origin "$sql_commit"
+    git -C "$sql_repo_dir" checkout --detach "$sql_commit"
+  fi
+
+  "${compose[@]}" exec -T --user root postgres bash -euxc '
+    apt-get update
+    apt-get install -y --no-install-recommends build-essential pkg-config libsodium-dev postgresql-server-dev-19
+  '
+
+  "${compose[@]}" cp "$sql_repo_dir/extensions/qembed_context_verify" postgres:/tmp/qembed_context_verify
+  "${compose[@]}" exec -T --user root postgres bash -euxc '
+    make -C /tmp/qembed_context_verify PG_CONFIG="$(command -v pg_config)"
+    make -C /tmp/qembed_context_verify PG_CONFIG="$(command -v pg_config)" install
+  '
+
+  "${compose[@]}" cp "$sql_repo_dir/tests/qembed_context_verify_transaction_setup.sql" postgres:/tmp/qembed_context_verify_transaction_setup.sql
+  psql_in_test_db -f /tmp/qembed_context_verify_transaction_setup.sql
+  echo "RT-050 verifier installed from qembed-sql commit $sql_commit"
+}
+
 write_concurrency_results() {
   local log_file=""
   if [[ -f "$evidence_dir/nextest.log" ]]; then
@@ -42,8 +75,10 @@ psql_in_test_db -c "CREATE EXTENSION IF NOT EXISTS vector"
 postgres_version="$(psql_in_test_db -Atc 'SHOW server_version')"
 postgres_version_num="$(psql_in_test_db -Atc "SHOW server_version_num")"
 pgvector_version="$(psql_in_test_db -Atc "SELECT extversion FROM pg_extension WHERE extname = 'vector'")"
+install_rt050_verifier "$postgres_version_num"
 {
   echo "commit_sha=${GITHUB_SHA:-local}"
+  echo "rt050_sql_commit=aa76baaf0b3e49080c19f9c98db98189a12dfb8b"
   echo "rustc_version=$(rustc --version)"
   echo "postgres_version=$postgres_version"
   echo "postgres_version_num=$postgres_version_num"
