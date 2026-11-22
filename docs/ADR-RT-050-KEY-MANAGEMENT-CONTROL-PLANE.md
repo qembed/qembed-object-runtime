@@ -226,6 +226,8 @@ These choices require an implementation environment and operational constraints.
 - Proof-of-possession is checked before staging completes.
 - Key identity/material cannot be replaced, key IDs cannot be reused, and rows cannot be deleted.
 - All lifecycle transitions are monotonic, idempotent, serialized, and audited atomically.
+- Each lifecycle transaction writes an append-only audit event and export-outbox record atomically with the key state change.
+- Audit export uses a separate restricted identity, at-least-once delivery, idempotent event IDs, explicit acknowledgements, and observable retry/backlog state; external network delivery never runs under key-registry locks.
 - Planned activation/retirement enforce distinct operator and approver identities.
 - Emergency revoke requires break-glass authorization and incident reference, has no grace period, and records propagation acknowledgements.
 - Per-token signing does not call a remote KMS over the network while PostgreSQL delegation locks are held.
