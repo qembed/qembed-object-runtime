@@ -242,13 +242,12 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("control plane should read public key metadata through its definer function");
     assert_eq!(listed_key_status, "active");
-    let stage_audit_state: String = sqlx::query_scalar(
-        "SELECT new_state FROM qembed_crypto.get_key_lifecycle_operation($1)",
-    )
-    .bind(stage_request_id)
-    .fetch_one(&mut *admin_connection)
-    .await
-    .expect("control plane should read audit evidence through its definer function");
+    let stage_audit_state: String =
+        sqlx::query_scalar("SELECT new_state FROM qembed_crypto.get_key_lifecycle_operation($1)")
+            .bind(stage_request_id)
+            .fetch_one(&mut *admin_connection)
+            .await
+            .expect("control plane should read audit evidence through its definer function");
     assert_eq!(stage_audit_state, "staged");
 
     let issuer = ContextIssuer::new(config, signing_key)
@@ -324,7 +323,9 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .expect("runtime key-management privileges should be inspectable");
     assert_eq!(
         runtime_privileges,
-        (false, false, false, false, false, false, false, false, false)
+        (
+            false, false, false, false, false, false, false, false, false
+        )
     );
 
     let tenant_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
