@@ -604,28 +604,25 @@ async fn runtime_dispatcher_and_admin_have_separate_database_capabilities() {
         .begin()
         .await
         .expect("runtime delegation transaction should begin");
-    sqlx::query(
-        "SELECT set_config('app.tenant_id', $1, true),
-                set_config('app.principal_id', $2, true)",
-    )
-    .bind(tenant_a.to_string())
-    .bind(principal_id.to_string())
-    .execute(&mut *delegation_tx)
-    .await
-    .expect("trusted tenant and Principal context should be set");
     let resolved: (String, String) = sqlx::query_as(
         "SELECT caller_id::text, caller_kind
-           FROM resolve_delegated_caller($1::uuid)",
+           FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)",
     )
+    .bind(tenant_a)
+    .bind(principal_id)
     .bind(caller_a)
     .fetch_one(&mut *delegation_tx)
     .await
-    .expect("runtime should resolve an active delegated Caller");
+    .expect("runtime should resolve an active delegated Caller without identity GUCs");
     assert_eq!(resolved.0, caller_a.to_string());
     assert_eq!(resolved.1, "Authenticated");
 
     let missing_caller = Uuid::new_v4();
-    let error = sqlx::query("SELECT caller_id FROM resolve_delegated_caller($1::uuid)")
+    let error = sqlx::query(
+        "SELECT caller_id FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)",
+    )
+        .bind(tenant_a)
+        .bind(principal_id)
         .bind(missing_caller)
         .fetch_one(&mut *delegation_tx)
         .await
