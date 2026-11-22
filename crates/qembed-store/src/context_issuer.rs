@@ -17,7 +17,7 @@ use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
-use crate::{TenantTransaction, begin_tenant_transaction};
+use crate::{TenantTransaction, begin_context_tenant_transaction};
 
 const TOKEN_PREFIX: &str = "qctx1";
 const MAX_PAYLOAD_BYTES: usize = 8 * 1024;
@@ -286,7 +286,7 @@ pub async fn begin_context_transaction(
     requested_caller_id: CallerId,
     issuer: &ContextIssuer,
 ) -> Result<ContextTransaction, ContextTransactionError> {
-    let mut transaction = begin_tenant_transaction(pool, scope)
+    let mut transaction = begin_context_tenant_transaction(pool, scope)
         .await
         .map_err(ContextTransactionError::Database)?;
 
