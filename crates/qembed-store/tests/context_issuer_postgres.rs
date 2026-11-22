@@ -320,6 +320,29 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("test transaction should assume the restricted runtime role");
 
+    let legacy_selectors_before_forgery: (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT NULLIF(current_setting('app.tenant_id', true), ''), \
+                    NULLIF(current_setting('app.principal_id', true), ''), \
+                    NULLIF(current_setting('app.caller_id', true), '')",
+        )
+        .fetch_one(transaction.connection())
+        .await
+        .expect("legacy identity selectors should be inspectable");
+    assert_eq!(legacy_selectors_before_forgery, (None, None, None));
+
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), \
+                set_config('app.principal_id', $2, true), \
+                set_config('app.caller_id', $3, true)",
+    )
+    .bind(TenantId::new().to_string())
+    .bind(Uuid::new_v4().to_string())
+    .bind(other_caller_id.to_string())
+    .execute(transaction.connection())
+    .await
+    .expect("runtime role can write legacy selectors but must not change signed identity");
+
     let runtime_privileges: (bool, bool, bool, bool, bool, bool, bool, bool, bool) =
         sqlx::query_as(
             r#"
@@ -444,6 +467,19 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         principal_id.to_string()
     );
     assert!(principal_only_claims["caller_id"].is_null());
+
+    sqlx::query(
+        "SELECT set_config('app.tenant_id', $1, true), \
+                set_config('app.principal_id', $2, true), \
+                set_config('app.caller_id', $3, true)",
+    )
+    .bind(TenantId::new().to_string())
+    .bind(Uuid::new_v4().to_string())
+    .bind(caller_id.to_string())
+    .execute(principal_transaction.connection())
+    .await
+    .expect("Principal-only runtime role can forge legacy selectors without gaining identity");
+
     let no_effective_caller: Option<String> =
         sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
             .fetch_one(principal_transaction.connection())
