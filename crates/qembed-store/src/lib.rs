@@ -29,7 +29,7 @@ pub mod snapshot_repository;
 pub mod tool_execution_store;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
-    ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigningKey,
+    ContextIssuer, ContextIssuerConfig, ContextIssuerError,
     ContextTransaction, ContextTransactionError, RingEd25519SigningKey,
     begin_context_transaction,
 };
