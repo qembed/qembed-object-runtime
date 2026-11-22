@@ -61,7 +61,10 @@ impl fmt::Display for InvocationRecoveryError {
                 formatter.write_str("recovery function returned an invalid persisted ID")
             }
             Self::Context(error) => {
-                write!(formatter, "invocation recovery signed-context initialization failed: {error}")
+                write!(
+                    formatter,
+                    "invocation recovery signed-context initialization failed: {error}"
+                )
             }
             Self::Database(error) => {
                 write!(
