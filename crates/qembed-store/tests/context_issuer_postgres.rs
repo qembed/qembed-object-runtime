@@ -23,7 +23,12 @@ async fn pool_with_one_connection() -> PgPool {
     .expect("the PostgreSQL test database should accept connections")
 }
 
-async fn seed_delegation(pool: &PgPool, tenant_id: TenantId, principal_id: Uuid, caller_id: CallerId) {
+async fn seed_delegation(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    principal_id: Uuid,
+    caller_id: CallerId,
+) {
     sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
         .bind(tenant_id.to_string())
         .execute(pool)
@@ -90,15 +95,13 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let issuer_name = "qembed-runtime";
     let deployment_id = "rt050-test-deployment";
-    let database_oid: String = sqlx::query_scalar(
-        "SELECT oid::text FROM pg_database WHERE datname = current_database()",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("database OID should be readable");
-    let audience = format!(
-        "urn:qembed:postgres:deployment:{deployment_id}:database:{database_oid}"
-    );
+    let database_oid: String =
+        sqlx::query_scalar("SELECT oid::text FROM pg_database WHERE datname = current_database()")
+            .fetch_one(&pool)
+            .await
+            .expect("database OID should be readable");
+    let audience =
+        format!("urn:qembed:postgres:deployment:{deployment_id}:database:{database_oid}");
     let key_id = format!("rt050-test-{}", Uuid::new_v4());
     let signing_key = RingEd25519SigningKey::from_seed(key_id.clone(), &[42_u8; 32])
         .expect("the fixed test seed should create a valid Ed25519 signer");
@@ -169,21 +172,19 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("test transaction should assume the restricted runtime role");
 
-    let tenant_claim: String =
-        sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
-            .fetch_one(transaction.connection())
-            .await
-            .expect("typed tenant accessor should verify the token");
+    let tenant_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("typed tenant accessor should verify the token");
     let principal_claim: String =
         sqlx::query_scalar("SELECT qembed_crypto.current_principal_id()::text")
             .fetch_one(transaction.connection())
             .await
             .expect("typed Principal accessor should verify the token");
-    let caller_claim: String =
-        sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
-            .fetch_one(transaction.connection())
-            .await
-            .expect("typed Caller accessor should verify the token");
+    let caller_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("typed Caller accessor should verify the token");
     assert_eq!(tenant_claim, tenant_id.to_string());
     assert_eq!(principal_claim, principal_id.to_string());
     assert_eq!(caller_claim, caller_id.to_string());
@@ -192,7 +193,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .fetch_one(transaction.connection())
         .await
         .expect("RLS should execute through the signed tenant context");
-    assert_eq!(visible_rows, 1, "RLS must return only the signed tenant's row");
+    assert_eq!(
+        visible_rows, 1,
+        "RLS must return only the signed tenant's row"
+    );
 
     sqlx::query("SAVEPOINT rt050_savepoint")
         .execute(transaction.connection())
@@ -223,14 +227,16 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .fetch_one(&pool)
         .await
         .expect("the pooled backend should remain available");
-    assert_eq!(backend_after_commit, backend_pid, "single-connection pool should reuse the same backend");
+    assert_eq!(
+        backend_after_commit, backend_pid,
+        "single-connection pool should reuse the same backend"
+    );
 
-    let token_after_commit: Option<String> = sqlx::query_scalar(
-        "SELECT NULLIF(current_setting('app.context_token', true), '')",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("transaction-local token setting should be readable after commit");
+    let token_after_commit: Option<String> =
+        sqlx::query_scalar("SELECT NULLIF(current_setting('app.context_token', true), '')")
+            .fetch_one(&pool)
+            .await
+            .expect("transaction-local token setting should be readable after commit");
     assert_eq!(token_after_commit, None, "commit must clear the token GUC");
 
     let committed_replay: Option<serde_json::Value> =
@@ -239,7 +245,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .fetch_one(&pool)
             .await
             .expect("replay probe should execute");
-    assert!(committed_replay.is_none(), "committed token must fail in the next transaction");
+    assert!(
+        committed_replay.is_none(),
+        "committed token must fail in the next transaction"
+    );
 
     let mut rollback_transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
         .await
@@ -260,7 +269,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .fetch_one(&pool)
             .await
             .expect("rollback replay probe should execute");
-    assert!(rollback_replay.is_none(), "rolled-back token must fail on pooled connection reuse");
+    assert!(
+        rollback_replay.is_none(),
+        "rolled-back token must fail on pooled connection reuse"
+    );
 
     let other_database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
@@ -277,7 +289,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .fetch_one(&other_pool)
         .await
         .expect("second backend PID should be readable");
-    assert_ne!(other_backend_pid, backend_pid, "second pool must use another backend");
+    assert_ne!(
+        other_backend_pid, backend_pid,
+        "second pool must use another backend"
+    );
     let other_backend_replay: Option<serde_json::Value> =
         sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
             .bind(&token)
