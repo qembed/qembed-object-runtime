@@ -132,7 +132,7 @@ async fn snapshot_read_is_immutable_and_preserves_exact_bytes() {
 #[tokio::test]
 async fn repository_reads_source_bytes_instead_of_jsonb_projection() {
     let fixture = setup().await;
-    let repository = SnapshotRepository::new(fixture.pool.clone());
+    let repository = SnapshotRepository::new(fixture.context.clone());
     let bytes = br#"{"a":1,"z":0}"#;
     let snapshot = persist_pair(&fixture, 1, bytes).await;
     let (stored_bytes, stored_hash, projection): (Vec<u8>, Vec<u8>, String) = sqlx::query_as(
@@ -154,7 +154,7 @@ async fn repository_reads_source_bytes_instead_of_jsonb_projection() {
 #[tokio::test]
 async fn repository_rejects_noncanonical_source_even_when_hash_and_projection_match() {
     let fixture = setup().await;
-    let repository = SnapshotRepository::new(fixture.pool.clone());
+    let repository = SnapshotRepository::new(fixture.context.clone());
     let seed = persist_pair(&fixture, 1, br#"{"seed":true}"#).await;
     let snapshot_id = SnapshotId::new();
     let bytes = br#"{ "a":1}"#;
@@ -184,7 +184,7 @@ async fn repository_rejects_noncanonical_source_even_when_hash_and_projection_ma
 #[tokio::test]
 async fn repository_rejects_persisted_hash_mismatch() {
     let fixture = setup().await;
-    let repository = SnapshotRepository::new(fixture.pool.clone());
+    let repository = SnapshotRepository::new(fixture.context.clone());
     let seed = persist_pair(&fixture, 1, br#"{"seed":true}"#).await;
     let snapshot_id = SnapshotId::new();
     let bytes = br#"{"trusted":true}"#;
