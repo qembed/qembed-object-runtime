@@ -105,3 +105,46 @@ pub trait AuditOutboxExporter: Send + Sync {
     fn acknowledge(&self, event_id: &str, lease_token: &str, sink_receipt: &str) -> Result<(), AuditExportError>;
     fn release_failed(&self, event_id: &str, lease_token: &str, sanitized_error: &str) -> Result<(), AuditExportError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verified_identity_requires_non_empty_subject_and_deployment() {
+        assert_eq!(
+            AuthorizedAdmin::from_verified_claims("", "prod-1", vec![AdminPermission::StageKey]),
+            Err(AuthorizationError::InvalidVerifiedIdentity)
+        );
+        assert_eq!(
+            AuthorizedAdmin::from_verified_claims("alice", " ", vec![AdminPermission::StageKey]),
+            Err(AuthorizationError::InvalidVerifiedIdentity)
+        );
+    }
+
+    #[test]
+    fn permissions_are_explicit_and_deployment_scoped() {
+        let admin = AuthorizedAdmin::from_verified_claims(
+            "oidc:alice",
+            "prod-eu-1",
+            vec![AdminPermission::StageKey, AdminPermission::ReadKeyMetadata],
+        ).unwrap();
+
+        assert_eq!(admin.subject(), "oidc:alice");
+        assert_eq!(admin.deployment_id(), "prod-eu-1");
+        assert!(admin.permits(AdminPermission::StageKey));
+        assert!(!admin.permits(AdminPermission::EmergencyRevokeKey));
+    }
+
+    #[test]
+    fn provisioned_key_contains_public_material_only() {
+        let key = ProvisionedKey {
+            key_id: "ctx-2026-02".into(),
+            public_key: [7; 32],
+            provider_reference: "opaque-ref".into(),
+            proof_signature: [9; 64],
+        };
+        assert_eq!(key.public_key.len(), 32);
+        assert_eq!(key.proof_signature.len(), 64);
+    }
+}
