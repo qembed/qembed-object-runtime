@@ -221,7 +221,12 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                 self.rate_limit_policies.for_class(RateLimitClass::Owner),
                 1,
             ).await {
-                Ok(decision) if !decision.allowed() => return Err(OwnerApiBackendError::RateLimited),
+                Ok(decision) if !decision.allowed() => {
+                    let retry_after_seconds = decision
+                        .retry_after()
+                        .map_or(1, |duration| duration.as_secs().max(1));
+                    return Err(OwnerApiBackendError::RateLimited { retry_after_seconds });
+                }
                 Ok(_) => {}
                 Err(error) => {
                     // Never substitute per-process counters when shared KV is unavailable.
