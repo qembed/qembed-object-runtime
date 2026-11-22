@@ -3,9 +3,8 @@ mod support;
 use qembed_domain::ids::{ObjectId, PrincipalId, TenantId};
 use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
-use support::test;
+use support::{owner_router, test};
 
-use qembed_api::composition::configure_owner_routes;
 
 async fn insert_owner(pool: &sqlx::PgPool, tenant_id: TenantId, token: &str) {
     let principal_id = PrincipalId::new();
@@ -47,7 +46,7 @@ async fn owner_create_version_persists_canonical_draft_and_reuses_identical_cont
     insert_owner(&pool, tenant_id, &token).await;
     insert_owner(&pool, other_tenant_id, &other_token).await;
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let app = test::init_service(owner_router(pool.clone())).await;
 
     let object_response = test::call_service(
         &app,
