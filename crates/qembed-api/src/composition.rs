@@ -32,7 +32,9 @@ use qembed_store::{
 };
 use sqlx::PgPool;
 
-use crate::adapters::{nats_jetstream_publisher::NatsJetStreamPublisher, valkey_rate_limit::ValkeyRateLimitStore};
+use crate::adapters::{
+    nats_jetstream_publisher::NatsJetStreamPublisher, valkey_rate_limit::ValkeyRateLimitStore,
+};
 
 use crate::handlers::{
     health::{ReadinessProbe, ReadinessStatus, health_router as configure_routes},
@@ -216,11 +218,15 @@ impl OwnerApiBackend for PgOwnerApiBackend {
             let scope = self.authenticate(tenant_id, owner_token).await?;
             let key = RateLimitKey::for_owner(&scope, object_id)
                 .map_err(|_| OwnerApiBackendError::Internal)?;
-            match self.rate_limiter.check(
-                &key,
-                self.rate_limit_policies.for_class(RateLimitClass::Owner),
-                1,
-            ).await {
+            match self
+                .rate_limiter
+                .check(
+                    &key,
+                    self.rate_limit_policies.for_class(RateLimitClass::Owner),
+                    1,
+                )
+                .await
+            {
                 Ok(decision) if !decision.allowed() => {
                     let retry_after_seconds = decision
                         .retry_after()
