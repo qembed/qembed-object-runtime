@@ -304,6 +304,17 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("RLS test rows should be inserted before switching to the runtime role");
 
+    let other_caller_id = CallerId::new();
+    sqlx::query(
+        "INSERT INTO qembed_crypto.caller_rows (caller_id, row_id) \\
+         VALUES ($1::uuid, 91011), ($2::uuid, 91012)",
+    )
+    .bind(caller_id.to_string())
+    .bind(other_caller_id.to_string())
+    .execute(transaction.connection())
+    .await
+    .expect("Caller-scoped RLS rows should be inserted before switching to runtime");
+
     sqlx::query("SET LOCAL ROLE qembed_runtime")
         .execute(transaction.connection())
         .await
@@ -359,6 +370,12 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         visible_rows, 1,
         "RLS must return only the signed tenant's row"
     );
+    let visible_caller_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM qembed_crypto.caller_rows")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("Caller-scoped RLS should use the signed Caller claim");
+    assert_eq!(visible_caller_rows, 1);
 
     sqlx::query("SAVEPOINT rt050_savepoint")
         .execute(transaction.connection())
@@ -435,6 +452,12 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
             .await
             .expect("Principal-only context should retain tenant-scoped RLS access");
     assert_eq!(principal_tenant_rows, 1);
+    let principal_caller_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM qembed_crypto.caller_rows")
+            .fetch_one(principal_transaction.connection())
+            .await
+            .expect("Principal-only context should safely deny Caller-scoped rows");
+    assert_eq!(principal_caller_rows, 0);
     principal_transaction
         .commit()
         .await
