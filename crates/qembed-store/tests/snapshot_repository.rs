@@ -8,13 +8,14 @@ use qembed_domain::scope::Scope;
 use qembed_domain::snapshot::{SnapshotBuilder, SnapshotError};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::object_repository::{DraftCreation, ObjectRepository};
-use qembed_store::run_migrations;
+use qembed_store::{PgContext, run_migrations};
 use qembed_store::snapshot_repository::{SnapshotRepository, SnapshotRepositoryError};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
 struct Fixture {
     pool: PgPool,
+    context: PgContext,
     scope: Scope,
     object_id: ObjectId,
 }
@@ -24,15 +25,17 @@ async fn setup() -> Fixture {
     run_migrations(&pool)
         .await
         .expect("migrations should be applied");
+    let context = common::signed_context(&pool).await;
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let object_id = ObjectId::new();
-    ObjectRepository::new(pool.clone())
+    ObjectRepository::new(context.clone())
         .create_object(&scope, &Object::new(object_id, tenant_id))
         .await
         .expect("object should be created");
     Fixture {
         pool,
+        context,
         scope,
         object_id,
     }
@@ -68,7 +71,7 @@ async fn persist_pair(
     )
     .expect("positive version number is valid");
     let snapshot = build_snapshot(fixture, version.id(), bytes);
-    let result = ObjectRepository::new(fixture.pool.clone())
+    let result = ObjectRepository::new(fixture.context.clone())
         .create_draft_version_with_snapshot(&fixture.scope, &version, &snapshot)
         .await
         .expect("version and snapshot should be atomically persisted");
@@ -85,7 +88,7 @@ async fn persist_pair(
 #[tokio::test]
 async fn snapshot_read_is_immutable_and_preserves_exact_bytes() {
     let fixture = setup().await;
-    let repository = SnapshotRepository::new(fixture.pool.clone());
+    let repository = SnapshotRepository::new(fixture.context.clone());
     let bytes = br#"{"config":{"enabled":true},"name":"demo"}"#;
     let snapshot = persist_pair(&fixture, 1, bytes).await;
     let loaded = repository
