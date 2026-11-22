@@ -70,7 +70,7 @@ async fn setup() -> (PgPool, String) {
           IF NOT FOUND THEN
             RAISE EXCEPTION 'no active delegation' USING ERRCODE='42501';
           END IF;
-        END $"#
+        END;\n        $resolve$"#
     );
     sqlx::query(&resolver)
         .execute(&pool)
