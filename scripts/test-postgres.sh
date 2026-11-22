@@ -21,6 +21,31 @@ psql_in_test_db() {
   "${compose[@]}" exec -T postgres psql -U qembed_test -d qembed_test -v ON_ERROR_STOP=1 "$@"
 }
 
+install_legacy_rt050_test_fixture() {
+  local sql_commit="c78348b29a3d78e1a7ac77be6986b447387d6bc7"
+  local sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rt050-${sql_commit}"
+
+  if [[ ! -d "$sql_repo_dir/.git" ]]; then
+    rm -rf "$sql_repo_dir"
+    git clone --no-checkout https://github.com/qembed/qembed-sql.git "$sql_repo_dir"
+    git -C "$sql_repo_dir" fetch --depth 1 origin "$sql_commit"
+    git -C "$sql_repo_dir" checkout --detach "$sql_commit"
+  fi
+
+  "${compose[@]}" exec -T --user root postgres bash -euxc '
+    apt-get update
+    apt-get install -y --no-install-recommends build-essential pkg-config libsodium-dev postgresql-server-dev-19
+  '
+
+  "${compose[@]}" cp "$sql_repo_dir/extensions/qembed_context_verify" postgres:/tmp/qembed_context_verify
+  "${compose[@]}" exec -T --user root postgres bash -euxc '
+    make -C /tmp/qembed_context_verify PG_CONFIG="$(command -v pg_config)"
+    make -C /tmp/qembed_context_verify PG_CONFIG="$(command -v pg_config)" install
+  '
+  "${compose[@]}" cp "$sql_repo_dir/tests/qembed_context_verify_transaction_setup.sql" postgres:/tmp/qembed_context_verify_transaction_setup.sql
+  psql_in_test_db -f /tmp/qembed_context_verify_transaction_setup.sql
+}
+
 write_concurrency_results() {
   local log_file=""
   if [[ -f "$evidence_dir/nextest.log" ]]; then
@@ -42,6 +67,9 @@ cleanup() {
 trap cleanup EXIT
 
 "${compose[@]}" up --detach --wait
+
+# The existing Rust SQLx integration suite still uses its isolated RT-050 verifier fixture.
+install_legacy_rt050_test_fixture
 
 # Run the normal Rust/PostgreSQL workspace suite against the Rust-owned test
 # schema first. The QSA-003 canonical-schema test is deliberately isolated
