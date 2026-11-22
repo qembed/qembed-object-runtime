@@ -99,7 +99,7 @@ impl ObjectRepository {
         let schema_version = i32::try_from(snapshot.schema_version())
             .map_err(|_| ObjectRepositoryError::InvalidSchemaVersion)?;
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
@@ -241,7 +241,7 @@ impl ObjectRepository {
         object_id: ObjectId,
         version_id: ObjectVersionId,
     ) -> Result<Option<PublicationCandidate>, ObjectRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
@@ -332,7 +332,7 @@ impl ObjectRepository {
         scope: &Scope,
         object_id: ObjectId,
     ) -> Result<(), ObjectRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
@@ -362,7 +362,7 @@ impl ObjectRepository {
         scope: &Scope,
         object_id: ObjectId,
     ) -> Result<(), ObjectRepositoryError> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
@@ -416,7 +416,7 @@ impl ObjectRepository {
             return Err(ObjectRepositoryError::ValidationEvidenceMismatch);
         }
 
-        let mut transaction = begin_tenant_transaction(&self.pool, scope)
+        let mut transaction = self.context.begin_principal(scope)
             .await
             .map_err(ObjectRepositoryError::Database)?;
 
