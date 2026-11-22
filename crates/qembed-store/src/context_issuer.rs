@@ -277,9 +277,9 @@ pub type ContextTransaction = TenantTransaction;
 /// Begins a transaction, resolves direct Caller delegation, signs its PostgreSQL
 /// binding and installs app.context_token transaction-locally.
 ///
-/// The existing tenant/principal GUCs are temporary bootstrap selectors for the
-/// current SQL delegation resolver only. They are not signed authorization
-/// evidence and must not be used by production RLS after the SQL companion work.
+/// Trusted tenant and Principal identifiers are passed explicitly to the
+/// pre-token delegation resolver. This signed transaction does not install
+/// legacy identity GUCs; only app.context_token carries effective SQL identity.
 pub async fn begin_context_transaction(
     pool: &sqlx::PgPool,
     scope: &Scope,
