@@ -7,7 +7,6 @@ use qembed_store::{PgPoolConfig, connect_pool, run_migrations};
 use sha2::{Digest, Sha256};
 use support::{owner_router, test};
 
-
 #[tokio::test]
 async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     let database_url = std::env::var("DATABASE_URL")
