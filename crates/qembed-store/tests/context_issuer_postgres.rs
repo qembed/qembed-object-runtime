@@ -94,14 +94,14 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     let audience = format!("urn:qembed:postgres:deployment:rt050-test:{}", Uuid::new_v4());
     let deployment_id = "rt050-test-deployment";
     let key_id = format!("rt050-test-{}", Uuid::new_v4());
-    let signing_key = RingEd25519SigningKey::from_seed(&key_id, &[42_u8; 32])
+    let signing_key = RingEd25519SigningKey::from_seed(key_id.clone(), &[42_u8; 32])
         .expect("the fixed test seed should create a valid Ed25519 signer");
     let public_key = signing_key.public_key();
     let config = ContextIssuerConfig::with_default_lifetime(
         issuer_name,
-        &audience,
+        audience.clone(),
         deployment_id,
-        &key_id,
+        key_id.clone(),
     )
     .expect("test issuer configuration should be valid");
 
