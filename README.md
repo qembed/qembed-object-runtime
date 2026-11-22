@@ -21,7 +21,7 @@ an architecture decision.
 - Rust stable toolchain with the `rustfmt` and `clippy` components
 - Rust 1.85.0 (the workspace MSRV; needed to reproduce the MSRV CI job)
 - Cargo dependency resolution configured to prefer packages compatible with the workspace MSRV
-- Docker Engine and Docker Compose v2 for PostgreSQL integration tests
+- Docker Engine and Docker Compose v2 for PostgreSQL, NATS, and Valkey integration tests
 - Python 3 for the crate-boundary check
 - SQLx CLI 0.8.6 for the SQLx metadata check (installation below)
 
@@ -74,7 +74,7 @@ script use Rust 1.85.0 as well.
 
 ## PostgreSQL integration tests
 
-The integration-test harness uses the pinned `postgres:16.4-alpine` image in
+The integration-test harness uses the pinned PostgreSQL/pgvector, NATS, and Valkey services in
 [`compose.test.yaml`](compose.test.yaml). The runner:
 
 1. Starts the PostgreSQL service and waits for its health check.
