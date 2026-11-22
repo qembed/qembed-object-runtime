@@ -209,6 +209,28 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("test transaction should assume the restricted runtime role");
 
+    let runtime_can_read_key_registry: bool = sqlx::query_scalar(
+        "SELECT has_table_privilege(current_user, 'qembed_crypto.verification_keys', 'SELECT')",
+    )
+    .fetch_one(transaction.connection())
+    .await
+    .expect("runtime key-registry privilege should be inspectable");
+    let runtime_can_retire_keys: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege(current_user, 'qembed_crypto.retire_verification_key(text,interval)', 'EXECUTE')",
+    )
+    .fetch_one(transaction.connection())
+    .await
+    .expect("runtime retirement privilege should be inspectable");
+    let runtime_can_revoke_keys: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege(current_user, 'qembed_crypto.revoke_verification_key(text)', 'EXECUTE')",
+    )
+    .fetch_one(transaction.connection())
+    .await
+    .expect("runtime revocation privilege should be inspectable");
+    assert!(!runtime_can_read_key_registry);
+    assert!(!runtime_can_retire_keys);
+    assert!(!runtime_can_revoke_keys);
+
     let tenant_claim: String = sqlx::query_scalar("SELECT qembed_crypto.current_tenant_id()::text")
         .fetch_one(transaction.connection())
         .await
@@ -432,5 +454,124 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     );
 
     other_pool.close().await;
+
+    // Graceful retirement accepts a token minted before the retirement
+    // timestamp, rejects any token minted afterwards, and revocation is
+    // immediate even while a pre-retirement transaction remains open.
+    let mut lifecycle_transaction =
+        begin_context_transaction(&pool, &scope, caller_id, &issuer)
+            .await
+            .expect("active key should issue a token before retirement");
+    let pre_retirement_token: String =
+        sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
+            .fetch_one(lifecycle_transaction.connection())
+            .await
+            .expect("pre-retirement token should be installed");
+    let admin_pool = connect_pool(
+        &database_url,
+        PgPoolConfig {
+            max_connections: 1,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("key lifecycle admin pool should open an independent backend");
+
+    let pre_retirement_valid: bool = sqlx::query_scalar(
+        "SELECT qembed_crypto.verified_context($1) IS NOT NULL",
+    )
+    .bind(&pre_retirement_token)
+    .fetch_one(lifecycle_transaction.connection())
+    .await
+    .expect("pre-retirement token should verify while the key is active");
+    assert!(pre_retirement_valid);
+
+    let verify_until: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.retire_verification_key($1)::text",
+    )
+    .bind(&key_id)
+    .fetch_one(&admin_pool)
+    .await
+    .expect("active key should transition to retired with a verification grace");
+    assert!(!verify_until.is_empty());
+
+    let retired_grace_valid: bool = sqlx::query_scalar(
+        "SELECT qembed_crypto.verified_context($1) IS NOT NULL",
+    )
+    .bind(&pre_retirement_token)
+    .fetch_one(lifecycle_transaction.connection())
+    .await
+    .expect("pre-retirement token should remain valid during the grace period");
+    assert!(retired_grace_valid);
+
+    let mut stale_signing_transaction =
+        begin_context_transaction(&admin_pool, &scope, caller_id, &issuer)
+            .await
+            .expect("Rust signer can still produce bytes during rollout overlap");
+    let post_retirement_token: String =
+        sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
+            .fetch_one(stale_signing_transaction.connection())
+            .await
+            .expect("post-retirement token should be installed for fail-closed verification");
+    let post_retirement_valid: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&post_retirement_token)
+            .fetch_one(stale_signing_transaction.connection())
+            .await
+            .expect("post-retirement verification should return a fail-closed NULL");
+    assert!(
+        post_retirement_valid.is_none(),
+        "a stale Rust instance must not obtain accepted tokens after key retirement"
+    );
+    stale_signing_transaction
+        .commit()
+        .await
+        .expect("transaction with rejected token should still be cleanly closable");
+
+    sqlx::query("SELECT qembed_crypto.revoke_verification_key($1)")
+        .bind(&key_id)
+        .execute(&admin_pool)
+        .await
+        .expect("retired key should be immediately revocable");
+
+    let revoked_pre_retirement_valid: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&pre_retirement_token)
+            .fetch_one(lifecycle_transaction.connection())
+            .await
+            .expect("revoked key verification should return NULL");
+    assert!(
+        revoked_pre_retirement_valid.is_none(),
+        "revocation must invalidate an otherwise-live pre-retirement token immediately"
+    );
+    lifecycle_transaction
+        .commit()
+        .await
+        .expect("lifecycle transaction should close after emergency revocation");
+
+    let emergency_key_id = format!("rt050-emergency-{}", Uuid::new_v4());
+    sqlx::query(
+        "INSERT INTO qembed_crypto.verification_keys \\
+         (key_id, public_key, issuer, audience, deployment_id) \\
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(&emergency_key_id)
+    .bind(public_key.to_vec())
+    .bind(issuer_name)
+    .bind(&audience)
+    .bind(deployment_id)
+    .execute(&admin_pool)
+    .await
+    .expect("emergency key fixture should start active");
+    let emergency_revoked_at: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.revoke_verification_key($1)::text",
+    )
+    .bind(&emergency_key_id)
+    .fetch_one(&admin_pool)
+    .await
+    .expect("active key should support direct emergency revocation");
+    assert!(!emergency_revoked_at.is_empty());
+
+    admin_pool.close().await;
     pool.close().await;
 }
