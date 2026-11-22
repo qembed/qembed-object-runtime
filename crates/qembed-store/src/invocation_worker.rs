@@ -7,24 +7,23 @@ use qembed_domain::ids::{CallerId, InvocationId, ObjectId, SnapshotId, TenantId}
 use qembed_domain::invocation::{FencingToken, Invocation, InvocationCheckpoint, InvocationStatus};
 use qembed_domain::ports::{ExecutionStore, InvocationWorkStore};
 use qembed_domain::scope::Scope;
-use sqlx::PgPool;
-
-use crate::{begin_tenant_transaction, execute, fetch_all, fetch_optional};
+use crate::{PgContext, execute, fetch_all, fetch_optional};
 
 #[derive(Clone)]
 pub struct PgExecutionStore {
-    pub(crate) pool: PgPool,
+    pub(crate) context: PgContext,
 }
 
 impl PgExecutionStore {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
     }
 }
 
 #[derive(Debug)]
 pub enum InvocationStoreError {
+    Context(crate::ContextTransactionError),
     Database(sqlx::Error),
     Settlement(crate::budget_settlement::UsageSettlementError),
     InvalidPersistedValue(&'static str),
@@ -35,6 +34,7 @@ pub enum InvocationStoreError {
 impl fmt::Display for InvocationStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Context(error) => write!(formatter, "invocation signed-context initialization failed: {error}"),
             Self::Database(error) => write!(formatter, "invocation persistence failed: {error}"),
             Self::Settlement(error) => {
                 write!(formatter, "invocation usage settlement failed: {error}")
@@ -55,10 +55,17 @@ impl fmt::Display for InvocationStoreError {
 impl std::error::Error for InvocationStoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Context(error) => Some(error),
             Self::Database(error) => Some(error),
             Self::Settlement(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+impl From<crate::ContextTransactionError> for InvocationStoreError {
+    fn from(error: crate::ContextTransactionError) -> Self {
+        Self::Context(error)
     }
 }
 
@@ -76,7 +83,7 @@ impl ExecutionStore for PgExecutionStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<Option<Invocation>, Self::Error> {
-        let mut transaction = begin_tenant_transaction(&self.pool, scope).await?;
+        let mut transaction = self.context.begin_principal(scope).await?;
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, (String, String, String, String, String, String, i64, i64)>(
@@ -140,7 +147,7 @@ impl InvocationWorkStore for PgExecutionStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<Option<String>, Self::Error> {
-        load_single_message(&self.pool, scope, invocation_id, "user").await
+        load_single_message(&self.context, scope, invocation_id, "user").await
     }
 
     async fn load_assistant_output(
@@ -148,17 +155,17 @@ impl InvocationWorkStore for PgExecutionStore {
         scope: &Scope,
         invocation_id: InvocationId,
     ) -> Result<Option<String>, Self::Error> {
-        load_single_message(&self.pool, scope, invocation_id, "assistant").await
+        load_single_message(&self.context, scope, invocation_id, "assistant").await
     }
 }
 
 async fn load_single_message(
-    pool: &PgPool,
+    context: &PgContext,
     scope: &Scope,
     invocation_id: InvocationId,
     role: &'static str,
 ) -> Result<Option<String>, InvocationStoreError> {
-    let mut transaction = begin_tenant_transaction(pool, scope).await?;
+    let mut transaction = context.begin_principal(scope).await?;
     let messages = fetch_all(
         &mut transaction,
         sqlx::query_as::<_, (String,)>(
