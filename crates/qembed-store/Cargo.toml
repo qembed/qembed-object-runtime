@@ -10,6 +10,9 @@ lints.workspace = true
 qembed-domain = { path = "../qembed-domain" }
 serde.workspace = true
 serde_json.workspace = true
+serde_jcs.workspace = true
+ring.workspace = true
+time.workspace = true
 sqlx.workspace = true
 sha2.workspace = true
 tokio.workspace = true
@@ -26,4 +29,3 @@ icu_provider.workspace = true
 
 [dev-dependencies]
 qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
-uuid.workspace = true
