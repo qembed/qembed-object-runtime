@@ -1,9 +1,9 @@
 //! PostgreSQL adapter for the atomic begin-invocation use case.
 
+use crate::PgContext;
 use crate::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
-use crate::PgContext;
 use qembed_domain::{
     ports::{InvocationStartCommand, InvocationStartOutcome, InvocationStartStore},
     scope::Scope,
