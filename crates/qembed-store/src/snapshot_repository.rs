@@ -61,7 +61,9 @@ impl SnapshotRepository {
         scope: &Scope,
         snapshot_id: SnapshotId,
     ) -> Result<Option<Snapshot>, SnapshotRepositoryError> {
-        let mut transaction = self.context.begin_principal(scope)
+        let mut transaction = self
+            .context
+            .begin_principal(scope)
             .await
             .map_err(SnapshotRepositoryError::Context)?;
 
