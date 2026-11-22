@@ -375,7 +375,7 @@ impl fmt::Display for ContextTransactionError {
             Self::Issuer(error) => write!(formatter, "ContextIssuer failed: {error}"),
             Self::Database(error) => {
                 write!(formatter, "context transaction database error: {error}")
-            },
+            }
         }
     }
 }
