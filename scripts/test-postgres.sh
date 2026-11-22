@@ -21,7 +21,7 @@ install_rt050_verifier() {
   local sql_commit="aa76baaf0b3e49080c19f9c98db98189a12dfb8b"
   local sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rt050-${sql_commit}"
 
-  if [[ ! "$postgres_version_num" =~ ^19[0-9]{3}$ ]]; then
+  if (( postgres_version_num < 190000 || postgres_version_num >= 200000 )); then
     echo "Skipping RT-050 C verifier fixture: PostgreSQL 19 is required (got $postgres_version_num)."
     return
   fi
