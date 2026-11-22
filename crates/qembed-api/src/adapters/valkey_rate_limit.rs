@@ -100,10 +100,7 @@ impl RateLimitStore for ValkeyRateLimitStore {
             ))
         })?;
         let retry_after_ms = u64::try_from(retry_after_ms).map_err(|_| {
-            redis::RedisError::from((
-                ErrorKind::TypeError,
-                "Valkey returned invalid retry-after",
-            ))
+            redis::RedisError::from((ErrorKind::TypeError, "Valkey returned invalid retry-after"))
         })?;
         let retry_after = (allowed == 0).then(|| Duration::from_millis(retry_after_ms));
         Ok(RateLimitDecision::new(allowed == 1, remaining, retry_after))
