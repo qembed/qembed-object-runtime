@@ -429,8 +429,8 @@ mod tests {
         let message = b"canonical transaction context";
         let signature = signer.sign(message).expect("signing must succeed");
         ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &signer.public_key())
-        .verify(message, &signature)
-        .expect("signature must verify");
+            .verify(message, &signature)
+            .expect("signature must verify");
         assert_ne!(signature, [0_u8; 64]);
         assert!(!format!("{signer:?}").contains("070707"));
     }
