@@ -20,7 +20,6 @@ use qembed_store::{
 use sha2::{Digest, Sha256};
 use support::{owner_router, test};
 
-
 const OWNER_TOKEN_PREFIX: &str = "SECRET_SENTINEL_DO_NOT_LOG_";
 const MOCK_MODEL: &str = "test-chat";
 const USER_INPUT: &str = r#"{"question":"hello from the walking skeleton","sequence":1}"#;
