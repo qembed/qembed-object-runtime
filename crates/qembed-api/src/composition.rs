@@ -213,7 +213,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
         Box::pin(async move {
             let scope = self.authenticate(tenant_id, owner_token).await?;
             let service =
-                InvocationStartService::new(PgInvocationStartStore::new(self.pool.clone()));
+                InvocationStartService::new(PgInvocationStartStore::new(self.context.clone()));
             match service
                 .start(
                     &scope,
