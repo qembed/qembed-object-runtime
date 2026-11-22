@@ -17,7 +17,8 @@ async fn same_tenant_objects_cannot_cross_reference_versions_or_snapshots() {
 
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
-    let repository = ObjectRepository::new(pool.clone());
+    let context = common::signed_context(&pool).await;
+    let repository = ObjectRepository::new(context);
     let object_a = ObjectId::new();
     let object_b = ObjectId::new();
 
