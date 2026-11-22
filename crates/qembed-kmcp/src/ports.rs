@@ -105,9 +105,13 @@ pub struct ProvisionedKey {
 
 /// Administrative custody port; per-token signing remains ContextSigner.
 pub trait KeyProvider: Send + Sync {
+    /// `request_id` is a provider-side idempotency key. Repeated calls with the
+    /// same deployment/request/key tuple must return the same key identity and
+    /// produce a fresh proof signature over the supplied challenge.
     fn provision_ed25519(
         &self,
         deployment_id: &str,
+        request_id: &str,
         key_id: &str,
         challenge: &[u8],
     ) -> Result<ProvisionedKey, ProviderError>;
@@ -139,6 +143,13 @@ pub struct RegistryKey {
     pub verify_until_unix_seconds: Option<i64>,
 }
 
+/// Public key custody facts needed only for the initial staged registration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagedKeyMaterial {
+    pub public_key: [u8; 32],
+    pub provider_reference: String,
+}
+
 /// Operation facts bound to both idempotency and immutable audit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OperationRecord {
@@ -150,6 +161,8 @@ pub struct OperationRecord {
     pub approver_subject: Option<String>,
     pub reason: String,
     pub incident_reference: Option<String>,
+    pub staged_material: Option<StagedKeyMaterial>,
+    pub retirement_grace_seconds: Option<u32>,
     pub decision: LifecycleDecision,
 }
 
@@ -169,6 +182,12 @@ pub enum RegistryError {
     ConstraintViolation,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredOperation {
+    pub record: OperationRecord,
+    pub outcome: ApplyOutcome,
+}
+
 /// PostgreSQL adapter must use narrowly scoped SECURITY DEFINER functions, not direct table DML.
 pub trait KeyRegistry: Send + Sync {
     fn get_key(
@@ -176,6 +195,13 @@ pub trait KeyRegistry: Send + Sync {
         deployment_id: &str,
         key_id: &str,
     ) -> Result<Option<RegistryKey>, RegistryError>;
+
+    /// Look up a durable idempotency result before recomputing a transition.
+    fn get_operation(
+        &self,
+        deployment_id: &str,
+        request_id: &str,
+    ) -> Result<Option<StoredOperation>, RegistryError>;
 
     /// Atomically apply state, idempotency, append-only audit and outbox.
     /// expected_version=None is valid only for first-time staging.

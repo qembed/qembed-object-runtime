@@ -7,3 +7,4 @@ license.workspace = true
 lints.workspace = true
 
 [dependencies]
+ring.workspace = true

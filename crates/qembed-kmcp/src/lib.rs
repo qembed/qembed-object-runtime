@@ -5,15 +5,19 @@
 #![forbid(unsafe_code)]
 
 pub mod lifecycle;
+pub mod orchestration;
 pub mod ports;
 
 pub use lifecycle::{
     LifecycleAction, LifecycleDecision, LifecycleError, LifecycleRequest, LifecycleState,
     plan_transition,
 };
+pub use orchestration::{
+    Clock, KmcpError, KmcpService, LifecycleCommand, StageKeyCommand, SystemClock,
+};
 pub use ports::{
     AdminAuthorizer, AdminCredential, AdminOperation, AdminPermission, ApplyOutcome, AuditEvent,
     AuditExportError, AuditLease, AuditOutboxExporter, AuthorizationError, AuthorizedAdmin,
     KeyProvider, KeyRegistry, OperationRecord, ProviderError, ProvisionedKey, RegistryError,
-    RegistryKey,
+    RegistryKey, StagedKeyMaterial, StoredOperation,
 };
