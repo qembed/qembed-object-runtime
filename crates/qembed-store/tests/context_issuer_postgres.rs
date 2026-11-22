@@ -248,8 +248,13 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .bind(stage_request_id)
     .fetch_one(&mut *admin_connection)
     .await
-    .expect("control plane should read audit evidence and export status through its definer function");
-    assert_eq!(stage_audit_state, ("staged".to_owned(), "pending".to_owned()));
+    .expect(
+        "control plane should read audit evidence and export status through its definer function",
+    );
+    assert_eq!(
+        stage_audit_state,
+        ("staged".to_owned(), "pending".to_owned())
+    );
 
     let issuer = ContextIssuer::new(config, signing_key)
         .expect("issuer configuration and signing key IDs should match");
