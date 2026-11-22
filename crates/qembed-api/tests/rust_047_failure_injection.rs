@@ -4,7 +4,6 @@ mod support;
 use std::time::{Duration, SystemTime};
 
 use axum::http::StatusCode;
-use qembed_api::composition::configure_owner_routes;
 use qembed_domain::{
     auth::authenticate_owner,
     caller::InvocationPool,
@@ -28,7 +27,7 @@ use qembed_store::{
     run_migrations,
 };
 use sha2::{Digest, Sha256};
-use support::test;
+use support::{owner_router, test};
 
 const MODEL: &str = "test-chat";
 const INPUT: &str = "RUST-047 durable failure injection input";
@@ -122,7 +121,7 @@ async fn fixture() -> Fixture {
     .await
     .expect("explicit Principal-to-Caller delegation should be inserted");
 
-    let app = test::init_service(configure_owner_routes(pool.clone())).await;
+    let app = test::init_service(owner_router(pool.clone())).await;
     let object_response = test::call_service(
         &app,
         owner_request("/owner/objects", tenant_id, &owner_token).to_request(),
