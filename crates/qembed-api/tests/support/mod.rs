@@ -105,8 +105,7 @@ pub fn owner_router(pool: sqlx::PgPool) -> axum::Router {
     use std::time::Duration;
 
     use qembed_api::{
-        adapters::valkey_rate_limit::ValkeyRateLimitStore,
-        composition::configure_owner_routes,
+        adapters::valkey_rate_limit::ValkeyRateLimitStore, composition::configure_owner_routes,
     };
     use qembed_domain::rate_limit::{RateLimitPolicies, RateLimitPolicy};
 
