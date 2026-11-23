@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use qembed_domain::caller::CallerKind;
 use qembed_domain::ids::{CallerId, ObjectId, TenantId};
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -17,7 +18,10 @@ use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
-use crate::{TenantTransaction, begin_context_tenant_transaction};
+use crate::{
+    TenantTransaction, begin_anonymous_context_tenant_transaction,
+    begin_context_tenant_transaction,
+};
 
 const TOKEN_PREFIX: &str = "qctx1";
 const TOKEN_PREFIX_V2: &str = "qctx2";
@@ -442,6 +446,88 @@ pub async fn begin_principal_context_transaction(
     begin_context_transaction_inner(pool, scope, None, issuer)
         .await
         .map(|(transaction, _)| transaction)
+}
+
+/// Begins a signed qctx2 Anonymous context and resolves the Object's server-owned Caller.
+pub async fn begin_anonymous_context_transaction(
+    pool: &sqlx::PgPool,
+    context: AnonymousContext,
+    issuer: &ContextIssuer,
+) -> Result<(ContextTransaction, ResolvedCaller), ContextTransactionError> {
+    let mut transaction = begin_anonymous_context_tenant_transaction(pool, context.tenant_id())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+    let binding = PgContextBinding::read(&mut transaction).await?;
+
+    let bootstrap_token = issuer
+        .issue_anonymous(context, None, &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(bootstrap_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+
+    let caller_id_text: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.get_or_create_anonymous_caller($1::uuid, $2::uuid)::text",
+    )
+    .bind(context.tenant_id().to_string())
+    .bind(context.object_id().to_string())
+    .fetch_one(transaction.connection())
+    .await
+    .map_err(map_anonymous_resolution_error)?;
+    let caller_id = caller_id_text
+        .parse::<CallerId>()
+        .map_err(|_| ContextTransactionError::CallerResolution(CallerResolutionError::InvalidCallerId))?;
+
+    let resolved_token = issuer
+        .issue_anonymous(context, Some(caller_id), &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(resolved_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+
+    let resolved: Option<(String, String)> = sqlx::query_as(
+        "SELECT caller_id::text, caller_kind FROM qembed_crypto.resolve_anonymous_caller($1::uuid, $2::uuid, $3::uuid)",
+    )
+    .bind(context.tenant_id().to_string())
+    .bind(context.object_id().to_string())
+    .bind(caller_id.to_string())
+    .fetch_optional(transaction.connection())
+    .await
+    .map_err(map_anonymous_resolution_error)?;
+    let (resolved_id, kind) = resolved.ok_or(ContextTransactionError::CallerResolution(
+        CallerResolutionError::AnonymousNotAllowed,
+    ))?;
+    let resolved_id = resolved_id
+        .parse::<CallerId>()
+        .map_err(|_| ContextTransactionError::CallerResolution(CallerResolutionError::InvalidCallerId))?;
+    let kind = CallerKind::parse(&kind)
+        .ok_or(ContextTransactionError::CallerResolution(CallerResolutionError::UnknownCallerKind))?;
+    if resolved_id != caller_id || kind != CallerKind::Anonymous {
+        return Err(ContextTransactionError::CallerResolution(
+            CallerResolutionError::AnonymousNotAllowed,
+        ));
+    }
+
+    let caller = ResolvedCaller::anonymous(caller_id, &transaction);
+    if !caller.is_bound_to_transaction(&transaction) {
+        return Err(ContextTransactionError::CallerTransactionMismatch);
+    }
+    Ok((transaction, caller))
+}
+
+fn map_anonymous_resolution_error(error: sqlx::Error) -> ContextTransactionError {
+    match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("42501") =>
+        {
+            ContextTransactionError::CallerResolution(CallerResolutionError::AnonymousNotAllowed)
+        }
+        _ => ContextTransactionError::Database(error),
+    }
 }
 
 async fn begin_context_transaction_inner(
