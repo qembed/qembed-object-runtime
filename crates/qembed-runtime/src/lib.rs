@@ -9,3 +9,4 @@ pub mod object_creation;
 pub mod object_publication;
 pub mod object_version_creation;
 pub mod outbox_relay;
+pub mod rate_limit;
