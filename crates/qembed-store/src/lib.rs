@@ -191,6 +191,23 @@ pub(crate) async fn begin_context_tenant_transaction(
     })
 }
 
+/// Begins a tenant transaction without an authenticated Principal for a public invocation.
+pub(crate) async fn begin_anonymous_context_tenant_transaction(
+    pool: &PgPool,
+    tenant_id: TenantId,
+) -> Result<TenantTransaction, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        .execute(&mut *transaction)
+        .await?;
+    Ok(TenantTransaction {
+        transaction,
+        tenant_id,
+        principal_id: None,
+        transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
+    })
+}
+
 /// Executes a typed row query inside a tenant-scoped transaction.
 ///
 /// Repository methods should accept `&Scope`, begin their work with
