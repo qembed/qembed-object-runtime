@@ -136,17 +136,39 @@ async fn idempotent_replay_does_not_consume_a_second_token() {
     assert!(!first.is_deduplicated());
     assert_eq!(first.remaining(), 0);
 
+    // The marker is independent of bucket subject/class. A replay through
+    // another bucket identity must not charge that bucket either.
+    let other_bucket = RateLimitKey::for_anonymous(tenant, object, [10_u8; 32]).unwrap();
     let replay = store
-        .consume_once(&key, policy, 1, &request_id, Duration::from_secs(86_400))
+        .consume_once(
+            &other_bucket,
+            policy,
+            1,
+            &request_id,
+            Duration::from_secs(86_400),
+        )
         .await
         .unwrap();
     assert!(replay.allowed());
     assert!(replay.is_deduplicated());
-    assert_eq!(replay.remaining(), 0);
+    assert_eq!(replay.remaining(), 1);
 
     let another_request =
         RateLimitRequestId::for_invocation(tenant, object, caller, "different-request-key")
             .unwrap();
+    let fresh_on_other_bucket = store
+        .consume_once(
+            &other_bucket,
+            policy,
+            1,
+            &another_request,
+            Duration::from_secs(86_400),
+        )
+        .await
+        .unwrap();
+    assert!(fresh_on_other_bucket.allowed());
+    assert!(!fresh_on_other_bucket.is_deduplicated());
+
     let denied = store
         .consume_once(
             &key,
