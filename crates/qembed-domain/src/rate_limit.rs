@@ -34,7 +34,10 @@ impl RateLimitClass {
 /// Caller ID are never written to Valkey; only this digest is used for the
 /// short-lived "token already charged" marker.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RateLimitRequestId {\n    digest: String,\n    valkey_key: String,\n}
+pub struct RateLimitRequestId {
+    digest: String,
+    valkey_key: String,
+}
 
 impl RateLimitRequestId {
     pub fn for_invocation(
