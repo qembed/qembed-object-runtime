@@ -4,12 +4,12 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use axum::{
+    Json, Router,
     body::Bytes,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
-    Json, Router,
 };
 use qembed_domain::{
     ids::{CallerId, InvocationId, ObjectId},
@@ -45,9 +45,7 @@ impl PrincipalInvocationState {
     }
 }
 
-pub fn principal_invocation_router(
-    backend: impl PrincipalInvocationBackend + 'static,
-) -> Router {
+pub fn principal_invocation_router(backend: impl PrincipalInvocationBackend + 'static) -> Router {
     Router::new()
         .route("/v1/objects/{object_id}/invocations", post(invoke_object))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -92,18 +90,40 @@ async fn invoke_object(
 ) -> Response {
     let object_id = match object_id.parse::<ObjectId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The object ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The object ID is invalid.",
+            );
+        }
     };
     let token = match bearer_token(&headers) {
         Ok(token) => token,
-        Err(()) => return api_error(StatusCode::UNAUTHORIZED, "unauthorized", "Authentication is required."),
+        Err(()) => {
+            return api_error(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "Authentication is required.",
+            );
+        }
     };
     let (caller_id, idempotency_key, input) = match parse_invoke_body(&body) {
         Ok(request) => request,
-        Err(()) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The invocation request body is invalid."),
+        Err(()) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The invocation request body is invalid.",
+            );
+        }
     };
 
-    match state.backend.invoke(token, object_id, caller_id, idempotency_key, input).await {
+    match state
+        .backend
+        .invoke(token, object_id, caller_id, idempotency_key, input)
+        .await
+    {
         Ok(invocation_id) => (
             StatusCode::ACCEPTED,
             Json(InvocationStartResponse {
@@ -160,9 +180,5 @@ fn backend_error(error: OwnerApiBackendError) -> Response {
 }
 
 fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
-    (
-        status,
-        Json(crate::errors::ApiErrorBody { code, message }),
-    )
-        .into_response()
+    (status, Json(crate::errors::ApiErrorBody { code, message })).into_response()
 }
