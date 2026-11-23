@@ -148,33 +148,31 @@ impl PrincipalInvocationBackend for PgPrincipalApiBackend {
             let policy = self.rate_limit_policies.for_class(rate_limit_class);
             let service =
                 InvocationStartService::new(PgInvocationStartStore::new(self.context.clone()));
-            let request = InvocationStartRequest {
-                object_id,
-                caller_id,
-                idempotency_key,
-                input,
-            };
-            let result = if let (Some(rate_limit), Some(rate_limit_policies)) =
-                (&self.rate_limit, self.rate_limit_policies)
+            match service
+                .start_rate_limited(
+                    &scope,
+                    InvocationStartRequest {
+                        object_id,
+                        caller_id,
+                        idempotency_key,
+                        input,
+                    },
+                    &self.rate_limit,
+                    &rate_limit_key,
+                    policy,
+                    1,
+                )
+                .await
             {
-                let rate_limit_key = RateLimitKey::for_owner(&scope, object_id)
-                    .map_err(|_| OwnerApiBackendError::Internal)?;
-                let policy = rate_limit_policies.for_class(RateLimitClass::Owner);
-                service
-                    .start_rate_limited(&scope, request, rate_limit, &rate_limit_key, policy, 1)
-                    .await
-            } else {
-                // Test-only route composition. The production api_router always
-                // supplies Valkey and uses the distributed admission path.
-                service.start(&scope, request).await
-            };
-            match result {
                 Ok(qembed_runtime::invocation_start::InvocationStartResult::Accepted {
                     invocation_id,
                     rate_limit_degraded,
                 }) => {
                     if rate_limit_degraded {
-                        eprintln!("event=rate_limit_fail_open class=owner object_id={object_id}");
+                        eprintln!(
+                            "event=rate_limit_fail_open class={} object_id={object_id}",
+                            rate_limit_class.as_str()
+                        );
                     }
                     Ok(invocation_id)
                 }
@@ -342,32 +340,32 @@ impl OwnerApiBackend for PgOwnerApiBackend {
             let scope = self.authenticate(tenant_id, owner_token).await?;
             let service =
                 InvocationStartService::new(PgInvocationStartStore::new(self.context.clone()));
-            let rate_limit_key = RateLimitKey::for_owner(&scope, object_id)
-                .map_err(|_| OwnerApiBackendError::Internal)?;
-            let policy = self.rate_limit_policies.for_class(RateLimitClass::Owner);
-            match service
-                .start_rate_limited(
-                    &scope,
-                    InvocationStartRequest {
-                        object_id,
-                        caller_id,
-                        idempotency_key,
-                        input,
-                    },
-                    &self.rate_limit,
-                    &rate_limit_key,
-                    policy,
-                    1,
-                )
-                .await
+            let request = InvocationStartRequest {
+                object_id,
+                caller_id,
+                idempotency_key,
+                input,
+            };
+            let result = if let (Some(rate_limit), Some(rate_limit_policies)) =
+                (&self.rate_limit, self.rate_limit_policies)
             {
+                let rate_limit_key = RateLimitKey::for_owner(&scope, object_id)
+                    .map_err(|_| OwnerApiBackendError::Internal)?;
+                let policy = rate_limit_policies.for_class(RateLimitClass::Owner);
+                service
+                    .start_rate_limited(&scope, request, rate_limit, &rate_limit_key, policy, 1)
+                    .await
+            } else {
+                // Test-only route composition. The production api_router always
+                // supplies Valkey and uses the distributed admission path.
+                service.start(&scope, request).await
+            };
+            match result {
                 Ok(qembed_runtime::invocation_start::InvocationStartResult::Accepted {
                     invocation_id,
                     rate_limit_degraded,
                 }) => {
                     if rate_limit_degraded {
-                        // Structured fallback signal: Valkey is admission-only;
-                        // durable invocation and budget accounting remain in PostgreSQL.
                         eprintln!("event=rate_limit_fail_open class=owner object_id={object_id}");
                     }
                     Ok(invocation_id)
@@ -384,6 +382,11 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                 Err(InvocationStartError::InvalidIdempotencyKey(_)) => {
                     Err(OwnerApiBackendError::InvalidRequest)
                 }
+                Err(InvocationStartError::ObjectNotFound) => Err(OwnerApiBackendError::NotFound),
+                Err(
+                    InvocationStartError::ObjectNotActive
+                    | InvocationStartError::NoPublishedVersion,
+                ) => Err(OwnerApiBackendError::Conflict),
                 Err(InvocationStartError::Store(
                     qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
                         qembed_store::caller::CallerResolutionError::NotDelegated,
