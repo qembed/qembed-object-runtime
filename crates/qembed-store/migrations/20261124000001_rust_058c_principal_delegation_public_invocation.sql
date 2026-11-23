@@ -177,6 +177,24 @@ BEGIN
 END
 $grant_caller_delegation$;
 
+-- Compatibility overload: preserve Owner self-delegation callers while
+-- making the target Principal explicit in all new code.
+CREATE FUNCTION grant_caller_delegation(p_caller_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $grant_caller_delegation_legacy$
+DECLARE
+    v_principal_id UUID := qembed_crypto.current_principal_id();
+BEGIN
+    IF v_principal_id IS NULL THEN
+        RAISE EXCEPTION 'authenticated Owner context is required'
+            USING ERRCODE = '42501';
+    END IF;
+    RETURN grant_caller_delegation(v_principal_id, p_caller_id);
+END
+$grant_caller_delegation_legacy$;
+
 CREATE OR REPLACE FUNCTION revoke_caller_delegation(p_delegation_id UUID)
 RETURNS BOOLEAN
 LANGUAGE plpgsql SECURITY DEFINER
@@ -251,16 +269,19 @@ $resolve_delegated_caller$;
 
 ALTER FUNCTION sync_legacy_owner_principal() OWNER TO qembed_definer;
 ALTER FUNCTION grant_caller_delegation(UUID, UUID) OWNER TO qembed_definer;
+ALTER FUNCTION grant_caller_delegation(UUID) OWNER TO qembed_definer;
 ALTER FUNCTION revoke_caller_delegation(UUID) OWNER TO qembed_definer;
 ALTER FUNCTION resolve_delegated_caller(UUID, UUID, UUID) OWNER TO qembed_definer;
 
 REVOKE ALL ON FUNCTION grant_caller_delegation(UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION grant_caller_delegation(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION revoke_caller_delegation(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION resolve_delegated_caller(UUID, UUID, UUID) FROM PUBLIC;
 
 GRANT SELECT ON principals TO qembed_runtime, qembed_definer;
 GRANT INSERT, UPDATE ON principals TO qembed_definer;
 GRANT EXECUTE ON FUNCTION grant_caller_delegation(UUID, UUID) TO qembed_runtime;
+GRANT EXECUTE ON FUNCTION grant_caller_delegation(UUID) TO qembed_runtime;
 GRANT EXECUTE ON FUNCTION revoke_caller_delegation(UUID) TO qembed_runtime;
 GRANT EXECUTE ON FUNCTION resolve_delegated_caller(UUID, UUID, UUID) TO qembed_runtime;
 GRANT UPDATE (revoked_at) ON principals TO qembed_definer;
