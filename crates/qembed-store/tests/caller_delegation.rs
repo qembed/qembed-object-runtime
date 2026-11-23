@@ -125,10 +125,7 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         .await
         .expect("Owner should revoke the active delegation");
     assert!(
-        context
-            .begin_caller(&admin_scope, caller_id)
-            .await
-            .is_err(),
+        context.begin_caller(&admin_scope, caller_id).await.is_err(),
         "revoked delegation must no longer resolve"
     );
     assert!(matches!(
