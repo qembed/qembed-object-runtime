@@ -78,8 +78,8 @@ pub fn configure_health_routes(probe: PgReadinessProbe) -> Router {
 struct PgOwnerApiBackend {
     pool: PgPool,
     context: PgContext,
-    rate_limit: RateLimitService<ValkeyRateLimitStore>,
-    rate_limit_policies: RateLimitPolicies,
+    rate_limit: Option<RateLimitService<ValkeyRateLimitStore>>,
+    rate_limit_policies: Option<RateLimitPolicies>,
 }
 
 impl PgOwnerApiBackend {
@@ -148,31 +148,40 @@ impl PrincipalInvocationBackend for PgPrincipalApiBackend {
             let policy = self.rate_limit_policies.for_class(rate_limit_class);
             let service =
                 InvocationStartService::new(PgInvocationStartStore::new(self.context.clone()));
-            match service
-                .start_rate_limited(
-                    &scope,
-                    InvocationStartRequest {
-                        object_id,
-                        caller_id,
-                        idempotency_key,
-                        input,
-                    },
-                    &self.rate_limit,
-                    &rate_limit_key,
-                    policy,
-                    1,
-                )
-                .await
+            let request = InvocationStartRequest {
+                object_id,
+                caller_id,
+                idempotency_key,
+                input,
+            };
+            let result = if let (Some(rate_limit), Some(rate_limit_policies)) =
+                (&self.rate_limit, self.rate_limit_policies)
             {
+                let rate_limit_key = RateLimitKey::for_owner(&scope, object_id)
+                    .map_err(|_| OwnerApiBackendError::Internal)?;
+                let policy = rate_limit_policies.for_class(RateLimitClass::Owner);
+                service
+                    .start_rate_limited(
+                        &scope,
+                        request,
+                        rate_limit,
+                        &rate_limit_key,
+                        policy,
+                        1,
+                    )
+                    .await
+            } else {
+                // Test-only route composition. The production api_router always
+                // supplies Valkey and uses the distributed admission path.
+                service.start(&scope, request).await
+            };
+            match result {
                 Ok(qembed_runtime::invocation_start::InvocationStartResult::Accepted {
                     invocation_id,
                     rate_limit_degraded,
                 }) => {
                     if rate_limit_degraded {
-                        eprintln!(
-                            "event=rate_limit_fail_open class={} object_id={object_id}",
-                            rate_limit_class.as_str()
-                        );
+                        eprintln!("event=rate_limit_fail_open class=owner object_id={object_id}");
                     }
                     Ok(invocation_id)
                 }
@@ -429,7 +438,18 @@ impl OwnerApiBackend for PgOwnerApiBackend {
 
 /// Installs PostgreSQL-backed Owner routes. Authentication and SQL adapters are
 /// wired here, keeping concrete infrastructure out of HTTP handlers.
-pub fn configure_owner_routes(
+/// Builds an unmetered Owner router for isolated handler tests only.
+/// Production applications must use api_router, which requires Valkey admission.
+pub fn configure_owner_routes(pool: PgPool, context: PgContext) -> Router {
+    configure_owner(PgOwnerApiBackend {
+        pool,
+        context,
+        rate_limit: None,
+        rate_limit_policies: None,
+    })
+}
+
+pub fn configure_owner_routes_with_rate_limit(
     pool: PgPool,
     context: PgContext,
     rate_limit_store: ValkeyRateLimitStore,
@@ -438,8 +458,8 @@ pub fn configure_owner_routes(
     configure_owner(PgOwnerApiBackend {
         pool,
         context,
-        rate_limit: RateLimitService::new(rate_limit_store),
-        rate_limit_policies,
+        rate_limit: Some(RateLimitService::new(rate_limit_store)),
+        rate_limit_policies: Some(rate_limit_policies),
     })
 }
 
@@ -458,7 +478,7 @@ pub fn api_router(
         rate_limit_policies,
     };
     configure_health_routes(probe)
-        .merge(configure_owner_routes(
+        .merge(configure_owner_routes_with_rate_limit(
             pool,
             context,
             rate_limit_store,
