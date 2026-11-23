@@ -13,7 +13,8 @@ use sqlx::PgPool;
 
 use crate::caller::ResolvedCaller;
 use crate::{
-    ContextIssuer, ContextTransaction, ContextTransactionError, begin_caller_context_transaction,
+    AnonymousContext, ContextIssuer, ContextTransaction, ContextTransactionError,
+    begin_anonymous_context_transaction, begin_caller_context_transaction,
     begin_principal_context_transaction,
 };
 
@@ -43,6 +44,17 @@ impl PgContext {
         scope: &Scope,
     ) -> Result<ContextTransaction, ContextTransactionError> {
         begin_principal_context_transaction(&self.pool, scope, &self.issuer).await
+    }
+
+    /// Begins a signed qctx2 transaction for a public Anonymous invocation.
+    ///
+    /// The Object must be enabled for Anonymous invocation. The effective Caller
+    /// is created/resolved by PostgreSQL and is never accepted from the request.
+    pub async fn begin_anonymous(
+        &self,
+        context: AnonymousContext,
+    ) -> Result<(ContextTransaction, ResolvedCaller), ContextTransactionError> {
+        begin_anonymous_context_transaction(&self.pool, context, &self.issuer).await
     }
 
     /// Begins a signed Caller-scoped transaction for an explicitly selected Caller.
