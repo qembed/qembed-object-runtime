@@ -131,7 +131,6 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn legacy_owner_sync_rejects_collision_with_unrelated_principal() {
     let pool = common::connect().await;
