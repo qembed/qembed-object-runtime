@@ -5,9 +5,12 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- The Rust-owned integration schema does not own the tenants registry. The
+-- canonical qembed-sql schema retains the FK to tenants(id); this fixture
+-- keeps tenant identity constrained by composite tenant-scoped relationships.
 CREATE TABLE IF NOT EXISTS principals (
     id UUID PRIMARY KEY,
-    tenant_id UUID REFERENCES tenants(id),
+    tenant_id UUID,
     kind TEXT NOT NULL CHECK (kind IN ('TenantOwner', 'TenantAdmin', 'Service', 'PlatformAdmin')),
     key_hash BYTEA NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -15,6 +18,9 @@ CREATE TABLE IF NOT EXISTS principals (
     CHECK ((kind = 'PlatformAdmin') = (tenant_id IS NULL)),
     UNIQUE (tenant_id, id)
 );
+
+ALTER TABLE principals
+    DROP CONSTRAINT IF EXISTS principals_tenant_id_fkey;
 
 INSERT INTO principals (id, tenant_id, kind, key_hash, revoked_at)
 SELECT owner.caller_id,
