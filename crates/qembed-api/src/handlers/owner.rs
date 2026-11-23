@@ -3,14 +3,14 @@
 //! Transport parsing lives here. Authentication and persistence are delegated
 //! to a composition-provided backend; this module knows no SQLx or Store types.
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use crate::handlers::invocation::InvocationResponse;
 use axum::{
     Json, Router,
     body::Bytes,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -27,6 +27,8 @@ pub enum OwnerApiBackendError {
     NotFound,
     ValidationRejected,
     Conflict,
+    InvalidRequest,
+    RateLimited { retry_after: Option<Duration> },
     Internal,
 }
 
@@ -462,6 +464,25 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
             "conflict",
             "The object changed or is not in a publishable state.",
         ),
+        (_, OwnerApiBackendError::InvalidRequest) => api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "The invocation request is invalid.",
+        ),
+        (_, OwnerApiBackendError::RateLimited { retry_after }) => {
+            let mut response = api_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "The request rate limit has been reached.",
+            );
+            if let Some(delay) = retry_after {
+                let seconds = delay.as_secs().max(1).to_string();
+                if let Ok(value) = HeaderValue::from_str(&seconds) {
+                    response.headers_mut().insert(header::RETRY_AFTER, value);
+                }
+            }
+            response
+        },
         (_, OwnerApiBackendError::Conflict) => api_error(
             StatusCode::CONFLICT,
             "conflict",
