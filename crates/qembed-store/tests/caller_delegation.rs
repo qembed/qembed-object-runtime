@@ -79,6 +79,11 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         .expect("Owner should grant a Caller to another same-tenant Principal");
 
     assert!(matches!(
+        repository.grant(&owner_scope, admin_id, caller_id).await,
+        Err(CallerDelegationError::AlreadyActive)
+    ));
+
+    assert!(matches!(
         repository.grant(&admin_scope, admin_id, caller_id).await,
         Err(CallerDelegationError::NotOwner)
     ));
