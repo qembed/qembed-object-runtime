@@ -100,6 +100,21 @@ ALTER TABLE principal_caller_delegations
         FOREIGN KEY (tenant_id, revoked_by_principal_id)
         REFERENCES principals (tenant_id, id) ON DELETE RESTRICT;
 
+CREATE OR REPLACE FUNCTION authenticate_principal(p_key_hash BYTEA)
+RETURNS TABLE (principal_id UUID, tenant_id UUID, kind TEXT)
+LANGUAGE sql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $authenticate_principal$
+    SELECT id, tenant_id, kind
+      FROM principals
+     WHERE key_hash = p_key_hash
+       AND revoked_at IS NULL
+$authenticate_principal$;
+
+ALTER FUNCTION authenticate_principal(BYTEA) OWNER TO qembed_definer;
+REVOKE ALL ON FUNCTION authenticate_principal(BYTEA) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION authenticate_principal(BYTEA) TO qembed_runtime;
+
 -- Replace the self-delegation function with an Owner-controlled grant to any
 -- active Principal in the same tenant.
 DROP FUNCTION IF EXISTS grant_caller_delegation(UUID);
