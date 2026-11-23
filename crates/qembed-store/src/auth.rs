@@ -144,7 +144,7 @@ pub struct PrincipalCredentials {
 impl PrincipalCredentials {
     #[must_use]
     pub fn new(token: impl Into<String>) -> Self {
-        Self { token: token.into() }
+        Self {\n            token: token.into(),\n        }
     }
 }
 
@@ -180,7 +180,10 @@ impl fmt::Display for PrincipalAuthenticationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidCredentials => formatter.write_str("invalid credentials"),
-            Self::Database(error) => write!(formatter, "Principal authentication database error: {error}"),
+            Self::Database(error) => write!(
+                formatter,
+                "Principal authentication database error: {error}"
+            ),
         }
     }
 }
@@ -233,7 +236,11 @@ impl AuthenticationPort for PrincipalAuthenticator {
             .parse::<PrincipalId>()
             .map_err(|_| PrincipalAuthenticationError::InvalidCredentials)?;
 
-        Ok(AuthenticatedIdentity::new(tenant_id, principal_id, principal_kind))
+        Ok(AuthenticatedIdentity::new(
+            tenant_id,
+            principal_id,
+            principal_kind,
+        ))
     }
 }
 
