@@ -82,42 +82,6 @@ END
 $identity_check$;
 
 -- Keep legacy Owner lifecycle changes reflected in the canonical identity row.
-CREATE OR REPLACE FUNCTION sync_legacy_owner_principal()
-RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = pg_catalog, public, pg_temp
-AS $sync_legacy_owner_principal$
-BEGIN
-    IF TG_OP = 'INSERT' THEN
-        INSERT INTO principals (id, tenant_id, kind, key_hash, revoked_at)
-        VALUES (
-            NEW.caller_id,
-            NEW.tenant_id,
-            'TenantOwner',
-            digest('legacy-owner-principal:' || NEW.tenant_id::text || ':' || NEW.caller_id::text, 'sha256'),
-            NEW.disabled_at
-        )
-        ON CONFLICT (id) DO NOTHING;
-        RETURN NEW;
-    END IF;
-
-    IF NEW.disabled_at IS DISTINCT FROM OLD.disabled_at THEN
-        UPDATE principals
-           SET revoked_at = NEW.disabled_at
-         WHERE id = NEW.caller_id
-           AND tenant_id = NEW.tenant_id
-           AND kind = 'TenantOwner'
-           AND (revoked_at IS NULL OR NEW.disabled_at IS NOT NULL);
-    END IF;
-    RETURN NEW;
-END
-$sync_legacy_owner_principal$;
-
-DROP TRIGGER IF EXISTS trg_sync_legacy_owner_principal ON owner_principals;
-CREATE TRIGGER trg_sync_legacy_owner_principal
-    AFTER INSERT OR UPDATE OF disabled_at ON owner_principals
-    FOR EACH ROW EXECUTE FUNCTION sync_legacy_owner_principal();
-
 ALTER TABLE objects
     ADD COLUMN IF NOT EXISTS anonymous_invocation_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 
