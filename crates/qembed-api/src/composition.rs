@@ -432,7 +432,6 @@ impl OwnerApiBackend for PgOwnerApiBackend {
         })
     }
 
-
     fn grant_caller_delegation(
         &self,
         tenant_id: TenantId,
