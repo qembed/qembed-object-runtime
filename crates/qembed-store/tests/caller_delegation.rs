@@ -38,7 +38,19 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
     let caller_id = CallerId::new();
     let caller_hash = Sha256::digest(format!("caller-{caller_id}").as_bytes()).to_vec();
 
-    seed_principal(&pool, tenant, owner_id, &owner_token, "TenantOwner").await;
+    sqlx::query("INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')")
+        .bind(tenant.to_string())
+        .bind(owner_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("legacy Owner fixture should be inserted and mirrored to principals");
+    sqlx::query("UPDATE principals SET key_hash = $1 WHERE tenant_id = $2::uuid AND id = $3::uuid")
+        .bind(Sha256::digest(owner_token.as_bytes()).to_vec())
+        .bind(tenant.to_string())
+        .bind(owner_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("Owner Principal token hash should be configured");
     seed_principal(&pool, tenant, admin_id, &admin_token, "TenantAdmin").await;
     seed_principal(&pool, other_tenant, other_admin_id, &other_token, "TenantAdmin").await;
     sqlx::query("INSERT INTO callers (id, tenant_id, token_hash, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')")
