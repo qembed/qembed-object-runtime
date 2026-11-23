@@ -135,9 +135,119 @@ impl AuthenticationPort for OwnerAuthenticator {
     }
 }
 
+/// Credentials for any tenant Principal. The token is a high-entropy API
+/// credential; only its SHA-256 digest is sent to PostgreSQL.
+pub struct PrincipalCredentials {
+    token: String,
+}
+
+impl PrincipalCredentials {
+    #[must_use]
+    pub fn new(token: impl Into<String>) -> Self {
+        Self { token: token.into() }
+    }
+}
+
+impl fmt::Debug for PrincipalCredentials {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PrincipalCredentials")
+            .field("token", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Authenticates against the canonical Principal registry.
+#[derive(Clone, Debug)]
+pub struct PrincipalAuthenticator {
+    pool: PgPool,
+}
+
+impl PrincipalAuthenticator {
+    #[must_use]
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[derive(Debug)]
+pub enum PrincipalAuthenticationError {
+    InvalidCredentials,
+    Database(sqlx::Error),
+}
+
+impl fmt::Display for PrincipalAuthenticationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidCredentials => formatter.write_str("invalid credentials"),
+            Self::Database(error) => write!(formatter, "Principal authentication database error: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for PrincipalAuthenticationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidCredentials => None,
+            Self::Database(error) => Some(error),
+        }
+    }
+}
+
+impl AuthenticationPort for PrincipalAuthenticator {
+    type Credentials = PrincipalCredentials;
+    type Error = PrincipalAuthenticationError;
+
+    async fn authenticate(
+        &self,
+        credentials: Self::Credentials,
+    ) -> Result<AuthenticatedIdentity, Self::Error> {
+        let token_hash = Sha256::digest(credentials.token.as_bytes()).to_vec();
+        let row = sqlx::query_as::<_, (String, Option<String>, String)>(
+            "SELECT principal_id::text, tenant_id::text, kind FROM authenticate_principal($1)",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(PrincipalAuthenticationError::Database)?;
+
+        let Some((principal_id, tenant_id, kind)) = row else {
+            return Err(PrincipalAuthenticationError::InvalidCredentials);
+        };
+        let Some(tenant_id) = tenant_id else {
+            // PlatformAdmin is intentionally global and cannot establish a
+            // tenant invocation Scope.
+            return Err(PrincipalAuthenticationError::InvalidCredentials);
+        };
+
+        let principal_kind = match kind.as_str() {
+            "TenantOwner" => PrincipalKind::TenantOwner,
+            "TenantAdmin" | "Service" => PrincipalKind::Authenticated,
+            "PlatformAdmin" => return Err(PrincipalAuthenticationError::InvalidCredentials),
+            _ => return Err(PrincipalAuthenticationError::InvalidCredentials),
+        };
+        let tenant_id = tenant_id
+            .parse::<TenantId>()
+            .map_err(|_| PrincipalAuthenticationError::InvalidCredentials)?;
+        let principal_id = principal_id
+            .parse::<PrincipalId>()
+            .map_err(|_| PrincipalAuthenticationError::InvalidCredentials)?;
+
+        Ok(AuthenticatedIdentity::new(tenant_id, principal_id, principal_kind))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn principal_credentials_debug_redacts_token() {
+        let credentials = PrincipalCredentials::new("secret-principal-token");
+        let debug = format!("{credentials:?}");
+        assert!(!debug.contains("secret-principal-token"));
+        assert!(debug.contains("[REDACTED]"));
+    }
 
     #[test]
     fn owner_credentials_debug_redacts_token() {
