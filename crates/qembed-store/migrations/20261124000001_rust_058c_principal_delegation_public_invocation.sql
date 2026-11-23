@@ -23,6 +23,49 @@ SELECT owner.caller_id,
   FROM owner_principals AS owner
 ON CONFLICT (id) DO NOTHING;
 
+CREATE OR REPLACE FUNCTION sync_legacy_owner_principal()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp
+AS $sync_legacy_owner_principal$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO principals (id, tenant_id, kind, key_hash, revoked_at)
+        VALUES (
+            NEW.caller_id, NEW.tenant_id, 'TenantOwner',
+            digest('legacy-owner-principal:' || NEW.tenant_id::text || ':' || NEW.caller_id::text, 'sha256'),
+            NEW.disabled_at
+        )
+        ON CONFLICT (id) DO NOTHING;
+        RETURN NEW;
+    END IF;
+
+    IF NEW.disabled_at IS DISTINCT FROM OLD.disabled_at THEN
+        UPDATE principals
+           SET revoked_at = NEW.disabled_at
+         WHERE id = NEW.caller_id AND tenant_id = NEW.tenant_id
+           AND kind = 'TenantOwner'
+           AND (revoked_at IS NULL OR NEW.disabled_at IS NOT NULL);
+    END IF;
+    RETURN NEW;
+END
+$sync_legacy_owner_principal$;
+
+ALTER TABLE principals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE principals FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS principals_runtime_scope ON principals;
+CREATE POLICY principals_runtime_scope ON principals
+    FOR SELECT TO qembed_runtime
+    USING (tenant_id = qembed_crypto.current_tenant_id());
+DROP POLICY IF EXISTS principals_definer_scope ON principals;
+CREATE POLICY principals_definer_scope ON principals
+    FOR ALL TO qembed_definer USING (true) WITH CHECK (true);
+
+DROP TRIGGER IF EXISTS trg_sync_legacy_owner_principal ON owner_principals;
+CREATE TRIGGER trg_sync_legacy_owner_principal
+    AFTER INSERT OR UPDATE OF disabled_at ON owner_principals
+    FOR EACH ROW EXECUTE FUNCTION sync_legacy_owner_principal();
+
 DO $identity_check$
 BEGIN
     IF EXISTS (
@@ -80,6 +123,8 @@ ALTER TABLE objects
 
 ALTER TABLE principal_caller_delegations
     DROP CONSTRAINT IF EXISTS principal_caller_delegations_check1,
+    DROP CONSTRAINT IF EXISTS principal_caller_delegations_principal_fk,
+    DROP CONSTRAINT IF EXISTS principal_caller_delegations_revoker_fk,
     DROP CONSTRAINT IF EXISTS principal_caller_delegations_tenant_id_principal_id_fkey,
     DROP CONSTRAINT IF EXISTS principal_caller_delegations_tenant_id_revoked_by_principal_id_fkey;
 
@@ -235,6 +280,7 @@ REVOKE ALL ON FUNCTION revoke_caller_delegation(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION resolve_delegated_caller(UUID, UUID, UUID) FROM PUBLIC;
 
 GRANT SELECT ON principals TO qembed_runtime, qembed_definer;
+GRANT INSERT, UPDATE ON principals TO qembed_definer;
 GRANT EXECUTE ON FUNCTION grant_caller_delegation(UUID, UUID) TO qembed_runtime;
 GRANT EXECUTE ON FUNCTION revoke_caller_delegation(UUID) TO qembed_runtime;
 GRANT EXECUTE ON FUNCTION resolve_delegated_caller(UUID, UUID, UUID) TO qembed_runtime;
