@@ -229,6 +229,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                 Ok(result) => match result {
                     qembed_runtime::invocation_start::InvocationStartResult::Accepted {
                         invocation_id,
+                        ..
                     }
                     | qembed_runtime::invocation_start::InvocationStartResult::Replayed {
                         invocation_id,
