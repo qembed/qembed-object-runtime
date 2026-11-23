@@ -52,6 +52,9 @@ pub enum InvocationStartError<E> {
     RetentionTimeOutOfRange,
     InvalidIdempotencyKey(RateLimitRequestIdError),
     IdempotencyConflict,
+    ObjectNotFound,
+    ObjectNotActive,
+    NoPublishedVersion,
     RateLimited { retry_after: Option<Duration> },
     RateLimitConfiguration,
     Store(E),
@@ -115,6 +118,15 @@ impl<S: InvocationStartStore> InvocationStartService<S> {
         match preflight {
             InvocationIdempotencyPreflight::PayloadMismatch => {
                 return Err(InvocationStartError::IdempotencyConflict);
+            }
+            InvocationIdempotencyPreflight::ObjectNotFound => {
+                return Err(InvocationStartError::ObjectNotFound);
+            }
+            InvocationIdempotencyPreflight::ObjectNotActive => {
+                return Err(InvocationStartError::ObjectNotActive);
+            }
+            InvocationIdempotencyPreflight::NoPublishedVersion => {
+                return Err(InvocationStartError::NoPublishedVersion);
             }
             InvocationIdempotencyPreflight::Replay { .. } => {
                 // Still call begin_invocation below: it revalidates Caller
