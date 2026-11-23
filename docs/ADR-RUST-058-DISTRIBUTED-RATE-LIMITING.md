@@ -55,7 +55,7 @@ The first stage does not claim that invocation routes are rate-limited. Each lat
 - The canonical Object setting is `anonymous_invocation_enabled BOOLEAN NOT NULL DEFAULT TRUE`.
 - A newly created Object, and an existing Object when this column is introduced, allows Anonymous invocation by default.
 - Setting the flag to `false` makes invocation private: an authenticated Principal is required; Anonymous requests are rejected before rate admission.
-- Disabling Anonymous invocation is a paid Corporate-tier capability. The API must derive this entitlement from a trusted server-side entitlement source; request DTOs and client-supplied plan labels are never authoritative.
-- The current canonical SQL schema contains no subscription, billing, plan-tier, or entitlement relation. The Corporate entitlement source and its adapter therefore must be identified before implementing the mutation path that disables public invocation. Do not invent a local plan table or accept an unverified plan claim as a substitute.
+- Tariffs, subscriptions, Billing integration, and plan-based entitlement checks are explicitly out of scope for RUST-058c. The current system has no authoritative Billing/entitlement source, and this stage must not invent one or accept client-supplied plan labels.
+- The setting and access-policy boundary should remain separable so a future change can add an authoritative entitlement check to the operation that disables Anonymous invocation, without changing the invocation-time meaning of the flag or the public-by-default default.
+- Until that future policy is designed, this implementation does not enforce a Corporate-tier restriction on changing the flag. Authorization to change Object settings continues to follow the existing trusted Object-owner authorization model.
 - The default is intentionally public-by-default, not opt-in. Documentation and API names must describe that behavior accurately.
-
