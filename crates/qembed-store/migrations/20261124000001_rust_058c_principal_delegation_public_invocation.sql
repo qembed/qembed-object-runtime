@@ -57,6 +57,16 @@ BEGIN
             NEW.disabled_at
         )
         ON CONFLICT (id) DO NOTHING;
+
+        IF NOT EXISTS (
+            SELECT 1 FROM principals
+             WHERE id = NEW.caller_id
+               AND tenant_id = NEW.tenant_id
+               AND kind = 'TenantOwner'
+        ) THEN
+            RAISE EXCEPTION 'legacy Owner identity conflicts with canonical Principal identity'
+                USING ERRCODE = '23505';
+        END IF;
         RETURN NEW;
     END IF;
 
