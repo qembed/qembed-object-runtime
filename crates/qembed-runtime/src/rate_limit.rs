@@ -111,11 +111,10 @@ mod tests {
     #[tokio::test]
     async fn invalid_cost_is_rejected_before_touching_store() {
         let service = RateLimitService::new(MemoryStore::default());
-        let key = RateLimitKey::new(
+        let key = RateLimitKey::for_anonymous(
             TenantId::new(),
             ObjectId::new(),
-            RateLimitClass::Owner,
-            "owner",
+            [3_u8; 32],
         )
         .unwrap();
         let policy =
