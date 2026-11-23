@@ -179,10 +179,7 @@ impl ValkeyRateLimitStore {
                 if ttl_ms == 0 || u128::from(ttl_ms) > MAX_SAFE_LUA_INTEGER {
                     return Err(ValkeyRateLimitError::InvalidPolicy);
                 }
-                (
-                    request_id.valkey_key().to_owned(),
-                    ttl_ms,
-                )
+                (request_id.valkey_key().to_owned(), ttl_ms)
             }
             None => (format!("{}:request:disabled", key.as_str()), 0),
         };
