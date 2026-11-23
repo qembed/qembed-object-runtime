@@ -63,7 +63,27 @@ impl InvocationStartStore for PgInvocationStartStore {
                         )
                     })?,
             },
-            None => InvocationIdempotencyPreflight::New,
+            None => {
+                let object = fetch_optional(
+                    &mut transaction,
+                    sqlx::query_as::<_, (String, Option<String>)>(
+                        "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
+                    )
+                    .bind(scope.tenant_id().to_string())
+                    .bind(object_id.to_string()),
+                )
+                .await
+                .map_err(BeginInvocationError::Database)?;
+
+                match object {
+                    None => InvocationIdempotencyPreflight::ObjectNotFound,
+                    Some((state, _)) if state != "active" => {
+                        InvocationIdempotencyPreflight::ObjectNotActive
+                    }
+                    Some((_, None)) => InvocationIdempotencyPreflight::NoPublishedVersion,
+                    Some((_, Some(_))) => InvocationIdempotencyPreflight::New,
+                }
+            }
         };
 
         transaction
