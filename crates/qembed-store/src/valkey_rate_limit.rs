@@ -7,10 +7,8 @@
 
 use std::{error::Error, fmt, time::Duration};
 
-use qembed_domain::rate_limit::{
-    RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitStore,
-};
-use redis::{aio::ConnectionManager, Script};
+use qembed_domain::rate_limit::{RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitStore};
+use redis::{Script, aio::ConnectionManager};
 
 const TOKEN_BUCKET_SCRIPT: &str = r#"
 local capacity = tonumber(ARGV[1])
@@ -185,9 +183,11 @@ impl RateLimitStore for ValkeyRateLimitStore {
                 )
             })?;
             let retry_after = if retry_after_ms > 0 {
-                Some(Duration::from_millis(u64::try_from(retry_after_ms).map_err(
-                    |_| ValkeyRateLimitError::InvalidResponse("retry delay is out of range"),
-                )?))
+                Some(Duration::from_millis(
+                    u64::try_from(retry_after_ms).map_err(|_| {
+                        ValkeyRateLimitError::InvalidResponse("retry delay is out of range")
+                    })?,
+                ))
             } else if retry_after_ms == 0 {
                 None
             } else {
