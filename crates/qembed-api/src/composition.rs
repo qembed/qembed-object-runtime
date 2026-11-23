@@ -12,7 +12,7 @@ use qembed_domain::{
         OwnerAuthenticationError, PrincipalAuthenticationError as DomainPrincipalAuthError,
         authenticate_owner, authenticate_principal,
     },
-    ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
+    ids::{CallerId, DelegationId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId},
     ports::DraftVersionCreation,
     principal::PrincipalKind,
     rate_limit::{RateLimitClass, RateLimitKey, RateLimitPolicies},
@@ -34,6 +34,7 @@ use qembed_store::{
         PrincipalCredentials,
     },
     invocation_query::PgInvocationQueryStore,
+    caller_delegation::{CallerDelegationError, PgCallerDelegationRepository},
     invocation_start::PgInvocationStartStore,
     object_repository::ObjectRepository,
     outbox_dispatcher::PgOutboxDispatcher,
@@ -429,6 +430,48 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                 .await
                 .map_err(|_| OwnerApiBackendError::Internal)
         })
+    }
+
+
+    fn grant_caller_delegation(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        target_principal_id: PrincipalId,
+        caller_id: CallerId,
+    ) -> Pin<Box<dyn Future<Output = Result<DelegationId, OwnerApiBackendError>> + Send + '_>> {
+        Box::pin(async move {
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            PgCallerDelegationRepository::new(self.context.clone())
+                .grant(&scope, target_principal_id, caller_id)
+                .await
+                .map_err(map_caller_delegation_error)
+        })
+    }
+
+    fn revoke_caller_delegation(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        delegation_id: DelegationId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), OwnerApiBackendError>> + Send + '_>> {
+        Box::pin(async move {
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            PgCallerDelegationRepository::new(self.context.clone())
+                .revoke(&scope, delegation_id)
+                .await
+                .map_err(map_caller_delegation_error)
+        })
+    }
+}
+
+fn map_caller_delegation_error(error: CallerDelegationError) -> OwnerApiBackendError {
+    match error {
+        CallerDelegationError::NotOwner => OwnerApiBackendError::Unauthorized,
+        CallerDelegationError::NotFound => OwnerApiBackendError::NotFound,
+        CallerDelegationError::InvalidDelegationId
+        | CallerDelegationError::Context(_)
+        | CallerDelegationError::Database(_) => OwnerApiBackendError::Internal,
     }
 }
 
