@@ -245,10 +245,7 @@ async fn revoked_principal_and_caller_cannot_resolve_delegations() {
         .await
         .expect("Caller revocation should be persisted");
     assert!(
-        context
-            .begin_caller(&admin_scope, caller_revoked_id)
-            .await
-            .is_err(),
+        context.begin_caller(&admin_scope, caller_revoked_id).await.is_err(),
         "revoked Caller must not resolve"
     );
 
