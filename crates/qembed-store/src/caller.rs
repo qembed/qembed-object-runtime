@@ -17,7 +17,7 @@ pub struct ResolvedCaller {
     caller_id: CallerId,
     kind: CallerKind,
     tenant_id: TenantId,
-    principal_id: PrincipalId,
+    principal_id: Option<PrincipalId>,
     transaction_token: TransactionToken,
 }
 
@@ -40,9 +40,15 @@ impl ResolvedCaller {
         scope: &qembed_domain::scope::Scope,
     ) -> bool {
         self.tenant_id == scope.tenant_id()
-            && self.principal_id == scope.principal().principal_id()
+            && self.principal_id == Some(scope.principal().principal_id())
             && self.transaction_token == transaction.transaction_token()
             && transaction.matches_scope(scope)
+    }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        self.tenant_id == transaction.tenant_id()
+            && self.principal_id == transaction.principal_id()
+            && self.transaction_token == transaction.transaction_token()
     }
 }
 
@@ -57,6 +63,9 @@ pub async fn resolve_delegated_caller(
     transaction: &mut TenantTransaction,
     requested_caller_id: CallerId,
 ) -> Result<ResolvedCaller, CallerResolutionError> {
+    let principal_id = transaction
+        .principal_id()
+        .ok_or(CallerResolutionError::PrincipalContextRequired)?;
     let row = fetch_optional(
         transaction,
         sqlx::query_as::<_, (String, String)>(
@@ -64,7 +73,7 @@ pub async fn resolve_delegated_caller(
              FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)",
         )
         .bind(transaction.tenant_id().to_string())
-        .bind(transaction.principal_id().to_string())
+        .bind(principal_id.to_string())
         .bind(requested_caller_id.to_string()),
     )
     .await
@@ -88,7 +97,7 @@ pub async fn resolve_delegated_caller(
         caller_id,
         kind,
         tenant_id: transaction.tenant_id(),
-        principal_id: transaction.principal_id(),
+        principal_id: Some(principal_id),
         transaction_token: transaction.transaction_token(),
     })
 }
@@ -98,6 +107,8 @@ pub async fn resolve_delegated_caller(
 pub enum CallerResolutionError {
     /// The requested Caller is not actively delegated to this Principal.
     NotDelegated,
+    /// The transaction has no authenticated Principal context.
+    PrincipalContextRequired,
     /// The database returned a malformed Caller identifier.
     InvalidCallerId,
     /// The database returned a Caller kind unknown to this Rust version.
@@ -111,6 +122,9 @@ impl fmt::Display for CallerResolutionError {
         match self {
             Self::NotDelegated => {
                 formatter.write_str("Caller is not actively delegated to this Principal")
+            }
+            Self::PrincipalContextRequired => {
+                formatter.write_str("delegated Caller resolution requires a Principal context")
             }
             Self::InvalidCallerId => {
                 formatter.write_str("delegation resolver returned an invalid Caller ID")
