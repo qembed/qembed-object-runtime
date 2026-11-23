@@ -16,11 +16,11 @@ use qembed_domain::{
 use qembed_runtime::{
     invocation_query::InvocationQueryService,
     invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
-    rate_limit::RateLimitService,
     object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
     outbox_relay::{OutboxRelay, OutboxRelayConfig},
+    rate_limit::RateLimitService,
 };
 use qembed_store::{
     PgContext, PgReadinessFailure, PgReadinessProbe,
@@ -354,9 +354,7 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                     if rate_limit_degraded {
                         // Structured fallback signal: Valkey is admission-only;
                         // durable invocation and budget accounting remain in PostgreSQL.
-                        eprintln!(
-                            "event=rate_limit_fail_open class=owner object_id={object_id}"
-                        );
+                        eprintln!("event=rate_limit_fail_open class=owner object_id={object_id}");
                     }
                     Ok(invocation_id)
                 }
