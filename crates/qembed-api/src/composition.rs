@@ -8,9 +8,13 @@ use std::pin::Pin;
 
 use axum::Router;
 use qembed_domain::{
-    auth::{OwnerAuthenticationError, authenticate_owner},
+    auth::{
+        OwnerAuthenticationError, PrincipalAuthenticationError as DomainPrincipalAuthError,
+        authenticate_owner, authenticate_principal,
+    },
     ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
     ports::DraftVersionCreation,
+    principal::PrincipalKind,
     rate_limit::{RateLimitClass, RateLimitKey, RateLimitPolicies},
 };
 use qembed_runtime::{
@@ -24,7 +28,11 @@ use qembed_runtime::{
 };
 use qembed_store::{
     PgContext, PgReadinessFailure, PgReadinessProbe,
-    auth::{OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials},
+    auth::{
+        OwnerAuthenticationError as StoreAuthError,
+        PrincipalAuthenticationError as StorePrincipalAuthError, OwnerAuthenticator,
+        OwnerCredentials, PrincipalAuthenticator, PrincipalCredentials,
+    },
     invocation_query::PgInvocationQueryStore,
     invocation_start::PgInvocationStartStore,
     object_repository::ObjectRepository,
@@ -43,6 +51,7 @@ use crate::handlers::{
         ObjectVersionPublicationResponse, OwnerApiBackend, OwnerApiBackendError,
         owner_router as configure_owner,
     },
+    principal_invocation::{PrincipalInvocationBackend, principal_invocation_router},
 };
 
 struct StoreReadinessProbe(PgReadinessProbe);
