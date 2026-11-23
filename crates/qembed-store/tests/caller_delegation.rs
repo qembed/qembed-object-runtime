@@ -256,10 +256,7 @@ async fn revoked_principal_and_caller_cannot_resolve_delegations() {
         .await
         .expect("Principal revocation should be persisted");
     assert!(
-        context
-            .begin_caller(&admin_scope, principal_revoked_caller_id)
-            .await
-            .is_err(),
+        context.begin_caller(&admin_scope, principal_revoked_caller_id).await.is_err(),
         "revoked Principal must not resolve any delegation"
     );
 
