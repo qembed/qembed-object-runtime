@@ -297,7 +297,7 @@ pub async fn begin_invocation(
         sqlx::query_as::<_, (i64,)>(
             "SELECT current_revision FROM knowledge_revisions WHERE tenant_id = $1::uuid AND object_id = $2::uuid FOR SHARE",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string()),
     )
     .await
@@ -327,7 +327,7 @@ pub async fn begin_invocation(
         .map_err(|_| BeginInvocationError::SnapshotBudgetInvalid)?;
     reserve_invocation_budget(
         &mut transaction,
-        scope,
+        tenant_id,
         BudgetReservationRequest {
             object_id: command.object_id,
             caller_id: caller.caller_id(),
