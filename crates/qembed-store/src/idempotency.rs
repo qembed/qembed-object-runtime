@@ -11,8 +11,7 @@ use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::caller::ResolvedCaller;
-use qembed_domain::ids::{InvocationId, ObjectId};
-use qembed_domain::scope::Scope;
+use qembed_domain::ids::{InvocationId, ObjectId, TenantId};
 
 use crate::{TenantTransaction, fetch_optional};
 
@@ -143,11 +142,11 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// transaction reads and returns the winning invocation ID after it commits.
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
-    scope: &Scope,
+    tenant_id: TenantId,
     caller: &ResolvedCaller,
     claim: &IdempotencyClaim<'_>,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
-    if !caller.is_bound_to(transaction, scope) {
+    if !caller.is_bound_to_transaction(transaction) {
         return Err(IdempotencyReservationError::CallerContextMismatch);
     }
     let expiry_micros = expiry_unix_micros(claim.expires_at)?;
@@ -159,7 +158,7 @@ pub async fn reserve_invocation_idempotency(
             sqlx::query_as::<_, (String,)>(
                 "INSERT INTO invocation_idempotency (tenant_id, object_id, caller_id, idempotency_key, payload_hash, invocation_id, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, to_timestamp($7::double precision / 1000000.0)) ON CONFLICT (tenant_id, object_id, caller_id, idempotency_key) DO NOTHING RETURNING invocation_id::text",
             )
-            .bind(scope.tenant_id().to_string())
+            .bind(tenant_id.to_string())
             .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
             .bind(claim.idempotency_key)
