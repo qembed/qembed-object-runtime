@@ -121,7 +121,7 @@ impl From<redis::RedisError> for ValkeyRateLimitError {
 }
 
 /// A cloneable Valkey adapter using redis-rs automatic reconnect management.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ValkeyRateLimitStore {
     connection: ConnectionManager,
 }
