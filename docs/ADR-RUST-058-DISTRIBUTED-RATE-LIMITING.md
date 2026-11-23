@@ -39,7 +39,12 @@ Valkey outage uses fail-open for ordinary invocation admission, with structured 
 
 ## Idempotency ordering
 
-Authentication and authorization precede rate admission. An idempotent replay must not consume a new token. The implementation must preserve the atomic idempotency claim and must not move provider/network I/O into a database transaction. A preflight replay query alone is insufficient if it introduces a race; admission must be integrated with the authoritative idempotency outcome.
+Authentication and Caller authorization precede rate admission. The implementation uses two coordinated safeguards without holding a PostgreSQL transaction open during Valkey I/O:
+
+1. A short PostgreSQL preflight transaction resolves/locks the requested Caller and checks for an already-committed idempotency record. A known replay skips rate admission; a payload mismatch is rejected before touching Valkey.
+2. For a new key, one Valkey Lua script atomically checks a request marker and mutates the Token Bucket. The marker identity is a digest of tenant, Object, effective Caller and idempotency key; it is deliberately independent of rate class, so the same replay cannot consume a second Owner/Authenticated/Anonymous bucket token. Its TTL covers the PostgreSQL idempotency retention window.
+
+The normal PostgreSQL begin-invocation transaction still re-resolves authorization and performs the authoritative idempotency reservation. Concurrent first attempts may both pass the preflight, but the shared Valkey marker charges the key once and PostgreSQL still creates at most one invocation. The marker is not an idempotency authority: Valkey failover may lose it and cause a bounded extra rate charge, but cannot create duplicate durable invocations. Provider/network I/O remains outside PostgreSQL transactions.
 
 ## Staged implementation and validation
 
