@@ -15,6 +15,7 @@ ring.workspace = true
 time.workspace = true
 uuid.workspace = true
 sqlx.workspace = true
+redis.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 # Resolver pins for transitive SQLx dependencies; see workspace Cargo.toml.
