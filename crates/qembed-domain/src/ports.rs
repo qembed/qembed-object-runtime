@@ -282,9 +282,35 @@ pub enum InvocationStartOutcome {
     Replay { invocation_id: InvocationId },
 }
 
+/// Read-only result used before distributed rate admission. It is a hint
+/// about an already-committed idempotency record; begin_invocation remains
+/// authoritative and repeats the check in its write transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvocationIdempotencyPreflight {
+    New,
+    Replay { invocation_id: InvocationId },
+    PayloadMismatch,
+}
+
 /// Persistence boundary for the atomic begin-invocation transaction.
 pub trait InvocationStartStore: Send + Sync {
     type Error: Error + Send + Sync + 'static;
+
+    /// Resolves and authorizes the requested Caller, then checks for a
+    /// previously committed idempotency record in a short transaction.
+    /// Implementations must revalidate authorization and idempotency inside
+    /// begin_invocation; this preflight only prevents charging known replays.
+    fn inspect_invocation_idempotency(
+        &self,
+        _scope: &Scope,
+        _object_id: ObjectId,
+        _caller_id: CallerId,
+        _idempotency_key: String,
+        _payload_hash: Vec<u8>,
+    ) -> impl Future<Output = Result<InvocationIdempotencyPreflight, Self::Error>> + Send {
+        async { Ok(InvocationIdempotencyPreflight::New) }
+    }
+
     fn begin_invocation(
         &self,
         scope: &Scope,
