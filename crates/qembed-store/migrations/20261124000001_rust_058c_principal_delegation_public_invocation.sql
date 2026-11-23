@@ -116,6 +116,7 @@ ALTER TABLE objects
     ADD COLUMN IF NOT EXISTS anonymous_invocation_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 
 ALTER TABLE principal_caller_delegations
+    DROP CONSTRAINT IF EXISTS principal_caller_delegations_check,
     DROP CONSTRAINT IF EXISTS principal_caller_delegations_check1,
     DROP CONSTRAINT IF EXISTS principal_caller_delegations_principal_fk,
     DROP CONSTRAINT IF EXISTS principal_caller_delegations_revoker_fk,
@@ -128,7 +129,9 @@ ALTER TABLE principal_caller_delegations
         REFERENCES principals (tenant_id, id) ON DELETE RESTRICT,
     ADD CONSTRAINT principal_caller_delegations_revoker_fk
         FOREIGN KEY (tenant_id, revoked_by_principal_id)
-        REFERENCES principals (tenant_id, id) ON DELETE RESTRICT;
+        REFERENCES principals (tenant_id, id) ON DELETE RESTRICT,
+    ADD CONSTRAINT principal_caller_delegations_revocation_pair_check
+        CHECK ((revoked_at IS NULL) = (revoked_by_principal_id IS NULL));
 
 CREATE OR REPLACE FUNCTION authenticate_principal(p_key_hash BYTEA)
 RETURNS TABLE (principal_id UUID, tenant_id UUID, kind TEXT)
