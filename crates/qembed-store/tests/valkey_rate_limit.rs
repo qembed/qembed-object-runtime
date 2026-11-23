@@ -110,7 +110,9 @@ async fn independent_connections_never_over_admit_concurrent_requests() {
 
     let mut admitted = 0_u32;
     for request in requests {
-        admitted += u32::from(request.await.unwrap());
+        if request.await.unwrap() {
+            admitted += 1;
+        }
     }
     assert_eq!(admitted, CAPACITY);
 }
