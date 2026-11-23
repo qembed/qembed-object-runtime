@@ -179,6 +179,13 @@ impl PrincipalInvocationBackend for PgPrincipalApiBackend {
                 Err(InvocationStartError::InvalidIdempotencyKey(_)) => {
                     Err(OwnerApiBackendError::InvalidRequest)
                 }
+                Err(InvocationStartError::ObjectNotFound) => {
+                    Err(OwnerApiBackendError::NotFound)
+                }
+                Err(
+                    InvocationStartError::ObjectNotActive
+                    | InvocationStartError::NoPublishedVersion,
+                ) => Err(OwnerApiBackendError::Conflict),
                 Err(InvocationStartError::Store(
                     qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
                         qembed_store::caller::CallerResolutionError::NotDelegated,
