@@ -28,6 +28,7 @@ pub mod pg_context;
 pub mod readiness;
 pub mod snapshot_repository;
 pub mod tool_execution_store;
+pub mod valkey_rate_limit;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
     ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigner, ContextTransaction,

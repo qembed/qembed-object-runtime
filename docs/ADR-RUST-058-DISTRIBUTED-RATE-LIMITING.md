@@ -16,6 +16,8 @@ PostgreSQL `InvocationPool` and token-budget reservations remain the authoritati
 - Use a Token Bucket per rate-limit key.
 - Refill, decide, consume, and refresh TTL in one atomic server-side Lua script, using Valkey `TIME`.
 - Keep policy and request-class selection in Rust, behind a provider-neutral `RateLimitStore` port and runtime `RateLimitService`.
+- Place the Valkey infrastructure adapter in `qembed-store`; `qembed-runtime` remains backend-agnostic and depends only on the domain port.
+- Preserve fractional refill progress as an integer remainder and reject adapter policies whose refill products exceed Lua's exact IEEE-754 integer range.
 - Keep Anonymous, Authenticated, and Owner buckets isolated. No aggregate bucket is introduced in this change.
 - Add no PostgreSQL tables, migrations, or SQLx queries for rate limiting.
 - Initial adapter topology is one configured RESP endpoint using redis-rs `ConnectionManager`; native Sentinel/Cluster routing is deferred until deployment topology is selected.
@@ -42,7 +44,7 @@ Authentication and authorization precede rate admission. An idempotent replay mu
 ## Staged implementation and validation
 
 1. Domain/runtime contracts and trusted rate-limit key construction.
-2. Valkey adapter, atomic Lua Token Bucket, reconnecting connection manager, and independent-connection concurrency tests.
+2. Valkey adapter in `qembed-store`, atomic Lua Token Bucket, reconnecting connection manager, and independent-connection concurrency tests.
 3. SQL-backed Principal API-token/delegation and Anonymous public-object admission paths, followed by all three HTTP routes and replay-aware admission.
 4. Structured observability and full HTTP/PostgreSQL/Valkey acceptance coverage.
 
