@@ -51,12 +51,14 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
 
     let context = common::signed_context(&pool).await;
     let authenticator = PrincipalAuthenticator::new(pool.clone());
-    let owner_scope = authenticate_principal(&authenticator, PrincipalCredentials::new(owner_token))
-        .await
-        .expect("Owner token should authenticate");
-    let admin_scope = authenticate_principal(&authenticator, PrincipalCredentials::new(admin_token))
-        .await
-        .expect("TenantAdmin token should authenticate");
+    let owner_scope =
+        authenticate_principal(&authenticator, PrincipalCredentials::new(owner_token))
+            .await
+            .expect("Owner token should authenticate");
+    let admin_scope =
+        authenticate_principal(&authenticator, PrincipalCredentials::new(admin_token))
+            .await
+            .expect("TenantAdmin token should authenticate");
     let repository = PgCallerDelegationRepository::new(context);
 
     let delegation_id = repository
@@ -69,7 +71,9 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         Err(CallerDelegationError::NotOwner)
     ));
     assert!(matches!(
-        repository.grant(&owner_scope, other_admin_id, caller_id).await,
+        repository
+            .grant(&owner_scope, other_admin_id, caller_id)
+            .await,
         Err(CallerDelegationError::NotFound)
     ));
 
