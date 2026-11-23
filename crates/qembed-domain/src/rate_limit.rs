@@ -123,9 +123,9 @@ impl std::fmt::Display for RateLimitKeyError {
             Self::OwnerScopeRequired => {
                 formatter.write_str("Owner rate-limit keys require a TenantOwner scope")
             }
-            Self::AuthenticatedScopeRequired => {
-                formatter.write_str("Authenticated rate-limit keys require an Authenticated Principal scope")
-            }
+            Self::AuthenticatedScopeRequired => formatter.write_str(
+                "Authenticated rate-limit keys require an Authenticated Principal scope",
+            ),
         }
     }
 }
@@ -334,11 +334,9 @@ mod tests {
     #[test]
     fn owner_and_authenticated_keys_require_matching_trusted_principal_kind() {
         let tenant = TenantId::new();
-        let authenticated = Principal::from_verified_auth(
-            PrincipalId::new(),
-            PrincipalKind::Authenticated,
-        )
-        .unwrap();
+        let authenticated =
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::Authenticated)
+                .unwrap();
         let authenticated_scope = Scope::from_verified_auth(tenant, authenticated).unwrap();
         let object = ObjectId::new();
 
@@ -348,11 +346,8 @@ mod tests {
             Err(RateLimitKeyError::OwnerScopeRequired)
         );
 
-        let owner = Principal::from_verified_auth(
-            PrincipalId::new(),
-            PrincipalKind::TenantOwner,
-        )
-        .unwrap();
+        let owner =
+            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::TenantOwner).unwrap();
         let owner_scope = Scope::from_verified_auth(tenant, owner).unwrap();
         assert!(RateLimitKey::for_owner(&owner_scope, object).is_ok());
         assert_eq!(
@@ -367,9 +362,10 @@ mod tests {
         let object = ObjectId::new();
         let fingerprint = [7_u8; 32];
         let key = RateLimitKey::for_anonymous(tenant, object, fingerprint).unwrap();
-        assert!(key.as_str().starts_with(&format!(
-            "qembed:rl:{{{tenant}:{object}}}:anonymous:"
-        )));
+        assert!(
+            key.as_str()
+                .starts_with(&format!("qembed:rl:{{{tenant}:{object}}}:anonymous:"))
+        );
         let other = RateLimitKey::for_anonymous(tenant, object, [8_u8; 32]).unwrap();
         assert_ne!(key, other);
     }
