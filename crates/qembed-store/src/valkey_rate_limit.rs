@@ -180,7 +180,7 @@ impl ValkeyRateLimitStore {
                     return Err(ValkeyRateLimitError::InvalidPolicy);
                 }
                 (
-                    format!("{}:request:{}", key.as_str(), request_id.as_str()),
+                    request_id.valkey_key().to_owned(),
                     ttl_ms,
                 )
             }
