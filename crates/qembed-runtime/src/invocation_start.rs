@@ -10,7 +10,9 @@ use qembed_domain::{
         InvocationIdempotencyPreflight, InvocationStartCommand, InvocationStartOutcome,
         InvocationStartStore,
     },
-    rate_limit::{RateLimitKey, RateLimitPolicy, RateLimitRequestId, RateLimitRequestIdError, RateLimitStore},
+    rate_limit::{
+        RateLimitKey, RateLimitPolicy, RateLimitRequestId, RateLimitRequestIdError, RateLimitStore,
+    },
     scope::Scope,
 };
 use serde_json::Value;
@@ -38,7 +40,9 @@ pub enum InvocationStartResult {
         /// structured telemetry for this state.
         rate_limit_degraded: bool,
     },
-    Replayed { invocation_id: InvocationId },
+    Replayed {
+        invocation_id: InvocationId,
+    },
 }
 
 #[derive(Debug)]
