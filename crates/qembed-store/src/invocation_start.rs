@@ -1,9 +1,9 @@
 //! PostgreSQL adapter for the atomic begin-invocation use case.
 
-use crate::{PgContext, fetch_optional};
 use crate::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
+use crate::{PgContext, fetch_optional};
 use qembed_domain::{
     ids::{CallerId, InvocationId, ObjectId},
     ports::{
@@ -40,7 +40,7 @@ impl InvocationStartStore for PgInvocationStartStore {
         let existing = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, (Vec<u8>, String)>(
-                "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4 FOR SHARE",
+                "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4",
             )
             .bind(scope.tenant_id().to_string())
             .bind(object_id.to_string())
@@ -57,9 +57,11 @@ impl InvocationStartStore for PgInvocationStartStore {
             Some((_, invocation_id)) => InvocationIdempotencyPreflight::Replay {
                 invocation_id: invocation_id
                     .parse::<InvocationId>()
-                    .map_err(|_| BeginInvocationError::Idempotency(
-                        crate::idempotency::IdempotencyReservationError::InvalidPersistedInvocationId,
-                    ))?,
+                    .map_err(|_| {
+                        BeginInvocationError::Idempotency(
+                            crate::idempotency::IdempotencyReservationError::InvalidPersistedInvocationId,
+                        )
+                    })?,
             },
             None => InvocationIdempotencyPreflight::New,
         };
