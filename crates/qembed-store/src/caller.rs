@@ -22,6 +22,16 @@ pub struct ResolvedCaller {
 }
 
 impl ResolvedCaller {
+    pub(crate) fn anonymous(caller_id: CallerId, transaction: &TenantTransaction) -> Self {
+        Self {
+            caller_id,
+            kind: CallerKind::Anonymous,
+            tenant_id: transaction.tenant_id(),
+            principal_id: None,
+            transaction_token: transaction.transaction_token(),
+        }
+    }
+
     /// Returns the effective invocation identity.
     #[must_use]
     pub const fn caller_id(self) -> CallerId {
@@ -109,6 +119,8 @@ pub enum CallerResolutionError {
     NotDelegated,
     /// The transaction has no authenticated Principal context.
     PrincipalContextRequired,
+    /// The Object is not enabled for Anonymous invocation or its Caller is inactive.
+    AnonymousNotAllowed,
     /// The database returned a malformed Caller identifier.
     InvalidCallerId,
     /// The database returned a Caller kind unknown to this Rust version.
@@ -125,6 +137,9 @@ impl fmt::Display for CallerResolutionError {
             }
             Self::PrincipalContextRequired => {
                 formatter.write_str("delegated Caller resolution requires a Principal context")
+            }
+            Self::AnonymousNotAllowed => {
+                formatter.write_str("Anonymous invocation is not enabled for this Object")
             }
             Self::InvalidCallerId => {
                 formatter.write_str("delegation resolver returned an invalid Caller ID")
