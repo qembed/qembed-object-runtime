@@ -33,7 +33,7 @@ fn policy(capacity: u32, refill_tokens: u32, refill_ms: u64, ttl_ms: u64) -> Rat
 async fn token_bucket_refills_and_returns_retry_after() {
     let store = store().await;
     let key = key();
-    let policy = policy(2, 1, 100, 1_000);
+    let policy = policy(2, 1, 2_000, 10_000);
 
     let first = store.consume(&key, policy, 2).await.unwrap();
     assert!(first.allowed());
@@ -48,7 +48,7 @@ async fn token_bucket_refills_and_returns_retry_after() {
             .is_some_and(|delay| delay > Duration::ZERO)
     );
 
-    tokio::time::sleep(Duration::from_millis(125)).await;
+    tokio::time::sleep(Duration::from_millis(2_100)).await;
     let refilled = store.consume(&key, policy, 1).await.unwrap();
     assert!(refilled.allowed());
     assert_eq!(refilled.remaining(), 0);
@@ -58,12 +58,17 @@ async fn token_bucket_refills_and_returns_retry_after() {
 async fn denied_request_does_not_consume_tokens_and_refreshes_idle_ttl() {
     let store = store().await;
     let key = key();
-    let policy = policy(3, 1, 10_000, 30_000);
+    let policy = policy(2, 1, 10_000, 30_000);
 
-    assert!(store.consume(&key, policy, 3).await.unwrap().allowed());
+    assert!(store.consume(&key, policy, 1).await.unwrap().allowed());
     tokio::time::sleep(Duration::from_millis(150)).await;
-    let denied = store.consume(&key, policy, 1).await.unwrap();
+    let denied = store.consume(&key, policy, 2).await.unwrap();
     assert!(!denied.allowed());
+    assert_eq!(denied.remaining(), 1);
+
+    let remaining_token = store.consume(&key, policy, 1).await.unwrap();
+    assert!(remaining_token.allowed());
+    assert_eq!(remaining_token.remaining(), 0);
 
     let client = redis::Client::open(
         std::env::var("VALKEY_URL").unwrap_or_else(|_| "redis://127.0.0.1:56379/".to_owned()),
