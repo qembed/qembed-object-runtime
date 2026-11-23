@@ -162,7 +162,10 @@ pub fn owner_router(backend: impl OwnerApiBackend + 'static) -> Router {
             "/owner/principals/{principal_id}/callers/{caller_id}/delegations",
             post(grant_caller_delegation),
         )
-        .route("/owner/delegations/{delegation_id}", delete(revoke_caller_delegation))
+        .route(
+            "/owner/delegations/{delegation_id}",
+            delete(revoke_caller_delegation),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(OwnerApiState::new(backend))
 }
@@ -441,17 +444,37 @@ async fn grant_caller_delegation(
     };
     let target_principal_id = match principal_id.parse::<PrincipalId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The Principal ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The Principal ID is invalid.",
+            );
+        }
     };
     let caller_id = match caller_id.parse::<CallerId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The Caller ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The Caller ID is invalid.",
+            );
+        }
     };
-    match state.backend.grant_caller_delegation(tenant_id, token, target_principal_id, caller_id).await {
-        Ok(delegation_id) => (StatusCode::CREATED, Json(CallerDelegationResponse {
-            delegation_id: delegation_id.to_string(),
-            status: "active",
-        })).into_response(),
+    match state
+        .backend
+        .grant_caller_delegation(tenant_id, token, target_principal_id, caller_id)
+        .await
+    {
+        Ok(delegation_id) => (
+            StatusCode::CREATED,
+            Json(CallerDelegationResponse {
+                delegation_id: delegation_id.to_string(),
+                status: "active",
+            }),
+        )
+            .into_response(),
         Err(error) => backend_error(error, BackendErrorContext::Ordinary),
     }
 }
@@ -467,13 +490,27 @@ async fn revoke_caller_delegation(
     };
     let delegation_id = match delegation_id.parse::<DelegationId>() {
         Ok(id) => id,
-        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The delegation ID is invalid."),
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The delegation ID is invalid.",
+            );
+        }
     };
-    match state.backend.revoke_caller_delegation(tenant_id, token, delegation_id).await {
-        Ok(()) => (StatusCode::OK, Json(CallerDelegationResponse {
-            delegation_id: delegation_id.to_string(),
-            status: "revoked",
-        })).into_response(),
+    match state
+        .backend
+        .revoke_caller_delegation(tenant_id, token, delegation_id)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(CallerDelegationResponse {
+                delegation_id: delegation_id.to_string(),
+                status: "revoked",
+            }),
+        )
+            .into_response(),
         Err(error) => backend_error(error, BackendErrorContext::Ordinary),
     }
 }
