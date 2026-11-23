@@ -88,12 +88,13 @@ impl PgCallerDelegationRepository {
 }
 
 fn map_database_error(error: sqlx::Error) -> CallerDelegationError {
-    match &error {
-        sqlx::Error::Database(database_error) => match database_error.code().as_deref() {
-            Some("42501") => CallerDelegationError::NotFound,
-            Some("23505") => CallerDelegationError::AlreadyActive,
-            _ => CallerDelegationError::Database(error),
-        },
+    let code = error
+        .as_database_error()
+        .and_then(|database_error| database_error.code())
+        .map(|code| code.into_owned());
+    match code.as_deref() {
+        Some("42501") => CallerDelegationError::NotFound,
+        Some("23505") => CallerDelegationError::AlreadyActive,
         _ => CallerDelegationError::Database(error),
     }
 }
