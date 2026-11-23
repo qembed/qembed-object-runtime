@@ -8,8 +8,8 @@ use qembed_store::valkey_rate_limit::ValkeyRateLimitStore;
 use tokio::sync::Barrier;
 
 async fn store() -> ValkeyRateLimitStore {
-    let endpoint = std::env::var("VALKEY_URL")
-        .unwrap_or_else(|_| "redis://127.0.0.1:56379/".to_owned());
+    let endpoint =
+        std::env::var("VALKEY_URL").unwrap_or_else(|_| "redis://127.0.0.1:56379/".to_owned());
     ValkeyRateLimitStore::connect(&endpoint)
         .await
         .expect("Valkey test service must be available")
