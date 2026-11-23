@@ -166,4 +166,3 @@ fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> R
     )
         .into_response()
 }
-
