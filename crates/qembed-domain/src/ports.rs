@@ -290,6 +290,9 @@ pub enum InvocationIdempotencyPreflight {
     New,
     Replay { invocation_id: InvocationId },
     PayloadMismatch,
+    ObjectNotFound,
+    ObjectNotActive,
+    NoPublishedVersion,
 }
 
 /// Persistence boundary for the atomic begin-invocation transaction.
