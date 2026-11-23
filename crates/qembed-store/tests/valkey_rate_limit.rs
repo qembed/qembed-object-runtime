@@ -117,7 +117,6 @@ async fn independent_connections_never_over_admit_concurrent_requests() {
     assert_eq!(admitted, CAPACITY);
 }
 
-
 #[tokio::test]
 async fn idempotent_replay_does_not_consume_a_second_token() {
     let store = store().await;
@@ -191,13 +190,7 @@ async fn concurrent_same_idempotency_key_is_charged_once_across_connections() {
         requests.push(tokio::spawn(async move {
             barrier.wait().await;
             store
-                .consume_once(
-                    &key,
-                    policy,
-                    1,
-                    &request_id,
-                    Duration::from_secs(86_400),
-                )
+                .consume_once(&key, policy, 1, &request_id, Duration::from_secs(86_400))
                 .await
                 .unwrap()
         }));
