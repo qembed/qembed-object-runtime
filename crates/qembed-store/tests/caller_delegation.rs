@@ -2,6 +2,7 @@ mod common;
 
 use qembed_domain::{
     auth::authenticate_principal,
+    caller::CallerKind,
     ids::{CallerId, PrincipalId, TenantId},
 };
 use qembed_store::{
