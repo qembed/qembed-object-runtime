@@ -172,13 +172,7 @@ async fn idempotent_replay_does_not_consume_a_second_token() {
     let third_request =
         RateLimitRequestId::for_invocation(tenant, object, caller, "third-request-key").unwrap();
     let denied = store
-        .consume_once(
-            &key,
-            policy,
-            1,
-            &third_request,
-            Duration::from_secs(86_400),
-        )
+        .consume_once(&key, policy, 1, &third_request, Duration::from_secs(86_400))
         .await
         .unwrap();
     assert!(!denied.allowed());
