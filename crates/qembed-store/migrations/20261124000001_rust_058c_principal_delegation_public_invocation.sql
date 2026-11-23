@@ -268,6 +268,7 @@ END
 $resolve_delegated_caller$;
 
 ALTER FUNCTION sync_legacy_owner_principal() OWNER TO qembed_definer;
+REVOKE ALL ON FUNCTION sync_legacy_owner_principal() FROM PUBLIC;
 ALTER FUNCTION grant_caller_delegation(UUID, UUID) OWNER TO qembed_definer;
 ALTER FUNCTION grant_caller_delegation(UUID) OWNER TO qembed_definer;
 ALTER FUNCTION revoke_caller_delegation(UUID) OWNER TO qembed_definer;
