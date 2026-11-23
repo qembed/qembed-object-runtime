@@ -205,6 +205,7 @@ pub async fn begin_invocation(
     scope: &Scope,
     command: BeginInvocationCommand,
 ) -> Result<BeginInvocationOutcome, BeginInvocationError> {
+    let tenant_id = scope.tenant_id();
     let (mut transaction, caller) = context
         .begin_caller(scope, command.requested_caller_id)
         .await?;
