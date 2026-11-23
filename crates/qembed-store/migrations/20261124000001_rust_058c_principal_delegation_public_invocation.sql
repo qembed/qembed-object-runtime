@@ -105,10 +105,10 @@ RETURNS TABLE (principal_id UUID, tenant_id UUID, kind TEXT)
 LANGUAGE sql SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $authenticate_principal$
-    SELECT id, tenant_id, kind
-      FROM principals
-     WHERE key_hash = p_key_hash
-       AND revoked_at IS NULL
+    SELECT principal.id, principal.tenant_id, principal.kind
+      FROM public.principals AS principal
+     WHERE principal.key_hash = p_key_hash
+       AND principal.revoked_at IS NULL
 $authenticate_principal$;
 
 ALTER FUNCTION authenticate_principal(BYTEA) OWNER TO qembed_definer;
