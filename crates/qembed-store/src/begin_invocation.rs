@@ -252,7 +252,7 @@ pub async fn begin_invocation(
         sqlx::query_as::<_, (String, Option<String>)>(
             "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid FOR SHARE",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string()),
     )
     .await
@@ -374,7 +374,7 @@ pub async fn begin_invocation(
     append_invocation_received(
         &mut transaction,
         InvocationReceivedContext {
-            scope,
+            tenant_id,
             event_id: EventId::new(),
             invocation_id,
             command: &command,
@@ -402,7 +402,7 @@ pub async fn begin_invocation(
 }
 
 struct InvocationReceivedContext<'a> {
-    scope: &'a Scope,
+    tenant_id: TenantId,
     event_id: EventId,
     invocation_id: InvocationId,
     command: &'a BeginInvocationCommand,
@@ -416,7 +416,7 @@ async fn append_invocation_received(
     context: InvocationReceivedContext<'_>,
 ) -> Result<(), sqlx::Error> {
     let InvocationReceivedContext {
-        scope,
+        tenant_id,
         event_id,
         invocation_id,
         command,
