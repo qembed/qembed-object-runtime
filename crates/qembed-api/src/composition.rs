@@ -29,9 +29,9 @@ use qembed_runtime::{
 use qembed_store::{
     PgContext, PgReadinessFailure, PgReadinessProbe,
     auth::{
-        OwnerAuthenticationError as StoreAuthError,
-        PrincipalAuthenticationError as StorePrincipalAuthError, OwnerAuthenticator,
-        OwnerCredentials, PrincipalAuthenticator, PrincipalCredentials,
+        OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials,
+        PrincipalAuthenticationError as StorePrincipalAuthError, PrincipalAuthenticator,
+        PrincipalCredentials,
     },
     invocation_query::PgInvocationQueryStore,
     invocation_start::PgInvocationStartStore,
