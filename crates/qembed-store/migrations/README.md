@@ -70,3 +70,22 @@ Ambiguous provider outcomes fail closed and are left to reconciliation.
 
 
 Snapshot IDs and Event IDs are likewise tenant-scoped by their composite primary keys. Outbox references include tenant_id, so no global uniqueness on either UUID is required. Runtime lookups must always carry the authenticated tenant scope.
+
+
+The RUST-058c migration introduces the canonical tenant Principal registry into
+the Rust persistence slice and moves Caller-delegation foreign keys from the
+legacy Owner table to `principals(tenant_id, id)`. Existing Owner API tokens
+remain verified by `owner_credentials`; their stable identities are mirrored
+into `principals` with a synthetic, non-authenticating digest. New Principal
+credentials are verified through the SECURITY DEFINER
+`authenticate_principal(bytea)` function. SQL roles `TenantAdmin` and
+`Service` map to the runtime's `Authenticated` trust class; global
+`PlatformAdmin` identities cannot establish a tenant Scope.
+
+A TenantOwner grants or revokes a Caller for a target Principal within the
+same tenant. Invocation-time resolution locks the target Principal, Caller and
+delegation together. The migration also adds
+`objects.anonymous_invocation_enabled BOOLEAN NOT NULL DEFAULT TRUE`; the
+setting is per Object and does not grant access to an entire Tenant. HTTP
+admission and replay-aware Valkey integration are separate implementation
+steps and are not implied by this schema migration alone.
