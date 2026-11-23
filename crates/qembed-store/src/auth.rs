@@ -144,7 +144,9 @@ pub struct PrincipalCredentials {
 impl PrincipalCredentials {
     #[must_use]
     pub fn new(token: impl Into<String>) -> Self {
-        Self {\n            token: token.into(),\n        }
+        Self {
+            token: token.into(),
+        }
     }
 }
 
