@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use qembed_domain::ids::CallerId;
+use qembed_domain::ids::{CallerId, ObjectId, TenantId};
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::Serialize;
@@ -20,6 +20,7 @@ use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_cal
 use crate::{TenantTransaction, begin_context_tenant_transaction};
 
 const TOKEN_PREFIX: &str = "qctx1";
+const TOKEN_PREFIX_V2: &str = "qctx2";
 const MAX_PAYLOAD_BYTES: usize = 8 * 1024;
 const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(30);
 const MAX_TOKEN_LIFETIME: Duration = Duration::from_secs(60);
@@ -157,6 +158,52 @@ impl fmt::Debug for RingEd25519SigningKey {
     }
 }
 
+/// Server-derived identity binding for an unauthenticated public invocation.
+///
+/// This is not a Principal and cannot authorize Principal-only operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnonymousContext {
+    tenant_id: TenantId,
+    object_id: ObjectId,
+    subject_fingerprint: [u8; 32],
+}
+
+impl AnonymousContext {
+    /// Creates an Anonymous context from the server's keyed subject fingerprint.
+    pub fn new(
+        tenant_id: TenantId,
+        object_id: ObjectId,
+        subject_fingerprint: [u8; 32],
+    ) -> Result<Self, ContextIssuerError> {
+        if tenant_id.as_uuid().is_nil()
+            || object_id.as_uuid().is_nil()
+            || subject_fingerprint == [0_u8; 32]
+        {
+            return Err(ContextIssuerError::InvalidAnonymousContext);
+        }
+        Ok(Self {
+            tenant_id,
+            object_id,
+            subject_fingerprint,
+        })
+    }
+
+    #[must_use]
+    pub const fn tenant_id(self) -> TenantId {
+        self.tenant_id
+    }
+
+    #[must_use]
+    pub const fn object_id(self) -> ObjectId {
+        self.object_id
+    }
+
+    #[must_use]
+    pub const fn subject_fingerprint(self) -> [u8; 32] {
+        self.subject_fingerprint
+    }
+}
+
 /// Signs trusted transaction identity for PostgreSQL verification.
 #[derive(Clone)]
 pub struct ContextIssuer {
@@ -180,6 +227,54 @@ impl ContextIssuer {
             config,
             signing_key: Arc::new(signing_key),
         })
+    }
+
+    pub(crate) fn issue_anonymous(
+        &self,
+        context: AnonymousContext,
+        caller_id: Option<CallerId>,
+        binding: &PgContextBinding,
+    ) -> Result<String, ContextIssuerError> {
+        let now = OffsetDateTime::now_utc();
+        let lifetime = time::Duration::try_from(self.config.token_lifetime)
+            .map_err(|_| ContextIssuerError::InvalidConfiguration)?;
+        let expires_at = now
+            .checked_add(lifetime)
+            .ok_or(ContextIssuerError::InvalidConfiguration)?;
+        let claims = AnonymousContextClaims {
+            version: "2".to_owned(),
+            tenant_id: context.tenant_id.to_string(),
+            principal_id: None,
+            caller_id: caller_id.map(|id| id.to_string()),
+            subject_kind: "anonymous".to_owned(),
+            object_id: context.object_id.to_string(),
+            subject_fingerprint: lowercase_hex(&context.subject_fingerprint),
+            backend_pid: binding.backend_pid.to_string(),
+            transaction_id: binding.transaction_id.clone(),
+            database_oid: binding.database_oid.clone(),
+            deployment_id: self.config.deployment_id.clone(),
+            issuer: self.config.issuer.clone(),
+            audience: self.config.audience.clone(),
+            key_id: self.config.key_id.clone(),
+            issued_at: now
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            expires_at: expires_at
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            nonce: Uuid::new_v4().to_string(),
+        };
+        let payload =
+            serde_jcs::to_vec(&claims).map_err(|_| ContextIssuerError::Canonicalization)?;
+        if payload.len() > MAX_PAYLOAD_BYTES {
+            return Err(ContextIssuerError::PayloadTooLarge);
+        }
+        let signature = self.signing_key.sign(&payload)?;
+        Ok(format!(
+            "{TOKEN_PREFIX_V2}:{}:{}",
+            lowercase_hex(&payload),
+            lowercase_hex(&signature)
+        ))
     }
 
     fn issue(
@@ -246,6 +341,27 @@ struct ContextClaims {
     tenant_id: String,
     principal_id: String,
     caller_id: Option<String>,
+    backend_pid: String,
+    transaction_id: String,
+    database_oid: String,
+    deployment_id: String,
+    issuer: String,
+    audience: String,
+    key_id: String,
+    issued_at: String,
+    expires_at: String,
+    nonce: String,
+}
+
+#[derive(Serialize)]
+struct AnonymousContextClaims {
+    version: String,
+    tenant_id: String,
+    principal_id: Option<String>,
+    caller_id: Option<String>,
+    subject_kind: String,
+    object_id: String,
+    subject_fingerprint: String,
     backend_pid: String,
     transaction_id: String,
     database_oid: String,
@@ -381,6 +497,7 @@ fn lowercase_hex(bytes: &[u8]) -> String {
 #[derive(Debug)]
 pub enum ContextIssuerError {
     InvalidConfiguration,
+    InvalidAnonymousContext,
     InvalidSigningKey,
     KeyIdMismatch,
     Canonicalization,
@@ -394,6 +511,9 @@ impl fmt::Display for ContextIssuerError {
         match self {
             Self::InvalidConfiguration => {
                 formatter.write_str("invalid ContextIssuer configuration")
+            }
+            Self::InvalidAnonymousContext => {
+                formatter.write_str("invalid server-derived Anonymous context")
             }
             Self::InvalidSigningKey => formatter.write_str("invalid Ed25519 signing seed"),
             Self::KeyIdMismatch => {
