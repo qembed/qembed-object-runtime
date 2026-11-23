@@ -32,7 +32,7 @@ pub mod tool_execution_store;
 pub mod valkey_rate_limit;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
-    ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigner, ContextTransaction,
+    AnonymousContext, ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigner, ContextTransaction,
     ContextTransactionError, RingEd25519SigningKey, begin_caller_context_transaction,
     begin_context_transaction, begin_principal_context_transaction,
 };
@@ -97,7 +97,7 @@ static NEXT_TRANSACTION_TOKEN: AtomicU64 = AtomicU64::new(1);
 pub struct TenantTransaction {
     transaction: Transaction<'static, Postgres>,
     tenant_id: TenantId,
-    principal_id: PrincipalId,
+    principal_id: Option<PrincipalId>,
     transaction_token: TransactionToken,
 }
 
@@ -106,7 +106,7 @@ impl TenantTransaction {
         self.tenant_id
     }
 
-    pub(crate) const fn principal_id(&self) -> PrincipalId {
+    pub(crate) const fn principal_id(&self) -> Option<PrincipalId> {
         self.principal_id
     }
 
@@ -115,7 +115,8 @@ impl TenantTransaction {
     }
 
     pub(crate) fn matches_scope(&self, scope: &Scope) -> bool {
-        self.tenant_id == scope.tenant_id() && self.principal_id == scope.principal().principal_id()
+        self.tenant_id == scope.tenant_id()
+            && self.principal_id == Some(scope.principal().principal_id())
     }
 
     /// Returns the PostgreSQL connection carrying this transaction's tenant context.
@@ -164,7 +165,7 @@ pub async fn begin_tenant_transaction(
     Ok(TenantTransaction {
         transaction,
         tenant_id: scope.tenant_id(),
-        principal_id: scope.principal().principal_id(),
+        principal_id: Some(scope.principal().principal_id()),
         transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
     })
 }
@@ -186,6 +187,26 @@ pub(crate) async fn begin_context_tenant_transaction(
         transaction,
         tenant_id: scope.tenant_id(),
         principal_id: scope.principal().principal_id(),
+        transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
+    })
+}
+
+/// Begins a signed-context transaction for an Anonymous public invocation.
+///
+/// No Principal identity is present. The v2 context is bound to the tenant,
+/// public Object, server-derived subject fingerprint, backend PID and transaction.
+pub(crate) async fn begin_anonymous_context_tenant_transaction(
+    pool: &PgPool,
+    tenant_id: TenantId,
+) -> Result<TenantTransaction, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        .execute(&mut *transaction)
+        .await?;
+    Ok(TenantTransaction {
+        transaction,
+        tenant_id,
+        principal_id: None,
         transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
     })
 }
