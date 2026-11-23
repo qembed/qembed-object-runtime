@@ -482,7 +482,7 @@ fn backend_error(error: OwnerApiBackendError, context: BackendErrorContext) -> R
                 }
             }
             response
-        },
+        }
         (_, OwnerApiBackendError::Conflict) => api_error(
             StatusCode::CONFLICT,
             "conflict",
