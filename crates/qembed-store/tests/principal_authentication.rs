@@ -70,12 +70,12 @@ async fn canonical_principal_authentication_maps_tenant_roles_and_rejects_platfo
     .await
     .expect("legacy Owner identity should be inserted");
     sqlx::query("UPDATE principals SET key_hash = $1 WHERE tenant_id = $2::uuid AND id = $3::uuid")
-    .bind(Sha256::digest(owner_token.as_bytes()).to_vec())
-    .bind(tenant_id.to_string())
-    .bind(owner_id.to_string())
-    .execute(&pool)
-    .await
-    .expect("canonical Owner credential hash should be updated");
+        .bind(Sha256::digest(owner_token.as_bytes()).to_vec())
+        .bind(tenant_id.to_string())
+        .bind(owner_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("canonical Owner credential hash should be updated");
 
     let authenticator = PrincipalAuthenticator::new(pool.clone());
 
@@ -87,8 +87,8 @@ async fn canonical_principal_authentication_maps_tenant_roles_and_rejects_platfo
     assert_eq!(admin.principal().kind(), PrincipalKind::Authenticated);
 
     let service = authenticate_principal(&authenticator, PrincipalCredentials::new(service_token))
-    .await
-    .expect("Service token should authenticate");
+        .await
+        .expect("Service token should authenticate");
     assert_eq!(service.principal().principal_id(), service_id);
     assert_eq!(service.principal().kind(), PrincipalKind::Authenticated);
 
