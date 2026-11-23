@@ -95,6 +95,115 @@ impl PgOwnerApiBackend {
     }
 }
 
+#[derive(Clone)]
+struct PgPrincipalApiBackend {
+    pool: PgPool,
+    context: PgContext,
+    rate_limit: RateLimitService<ValkeyRateLimitStore>,
+    rate_limit_policies: RateLimitPolicies,
+}
+
+impl PrincipalInvocationBackend for PgPrincipalApiBackend {
+    fn invoke(
+        &self,
+        principal_token: String,
+        object_id: ObjectId,
+        caller_id: CallerId,
+        idempotency_key: String,
+        input: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>> {
+        Box::pin(async move {
+            let authenticator = PrincipalAuthenticator::new(self.pool.clone());
+            let scope = authenticate_principal(
+                &authenticator,
+                PrincipalCredentials::new(principal_token),
+            )
+            .await
+            .map_err(|error| match error {
+                DomainPrincipalAuthError::Rejected(StorePrincipalAuthError::InvalidCredentials) => {
+                    OwnerApiBackendError::Unauthorized
+                }
+                _ => OwnerApiBackendError::Internal,
+            })?;
+
+            let (rate_limit_key, rate_limit_class) = match scope.principal().kind() {
+                PrincipalKind::TenantOwner => (
+                    RateLimitKey::for_owner(&scope, object_id)
+                        .map_err(|_| OwnerApiBackendError::Internal)?,
+                    RateLimitClass::Owner,
+                ),
+                PrincipalKind::Authenticated => (
+                    RateLimitKey::for_authenticated(&scope, object_id)
+                        .map_err(|_| OwnerApiBackendError::Internal)?,
+                    RateLimitClass::Authenticated,
+                ),
+            };
+            let policy = self.rate_limit_policies.for_class(rate_limit_class);
+            let service =
+                InvocationStartService::new(PgInvocationStartStore::new(self.context.clone()));
+            match service
+                .start_rate_limited(
+                    &scope,
+                    InvocationStartRequest {
+                        object_id,
+                        caller_id,
+                        idempotency_key,
+                        input,
+                    },
+                    &self.rate_limit,
+                    &rate_limit_key,
+                    policy,
+                    1,
+                )
+                .await
+            {
+                Ok(qembed_runtime::invocation_start::InvocationStartResult::Accepted {
+                    invocation_id,
+                    rate_limit_degraded,
+                }) => {
+                    if rate_limit_degraded {
+                        eprintln!(
+                            "event=rate_limit_fail_open class={} object_id={object_id}",
+                            rate_limit_class.as_str()
+                        );
+                    }
+                    Ok(invocation_id)
+                }
+                Ok(qembed_runtime::invocation_start::InvocationStartResult::Replayed {
+                    invocation_id,
+                }) => Ok(invocation_id),
+                Err(InvocationStartError::RateLimited { retry_after }) => {
+                    Err(OwnerApiBackendError::RateLimited { retry_after })
+                }
+                Err(InvocationStartError::IdempotencyConflict) => {
+                    Err(OwnerApiBackendError::Conflict)
+                }
+                Err(InvocationStartError::InvalidIdempotencyKey(_)) => {
+                    Err(OwnerApiBackendError::InvalidRequest)
+                }
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
+                        qembed_store::caller::CallerResolutionError::NotDelegated,
+                    ),
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::Idempotency(
+                        qembed_store::idempotency::IdempotencyReservationError::PayloadMismatch,
+                    ),
+                )) => Err(OwnerApiBackendError::Conflict),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::NoPublishedVersion
+                    | qembed_store::begin_invocation::BeginInvocationError::ObjectNotActive,
+                )) => Err(OwnerApiBackendError::Conflict),
+                Err(InvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::ObjectNotFound,
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(_) => Err(OwnerApiBackendError::Internal),
+            }
+        })
+    }
+}
+
 impl OwnerApiBackend for PgOwnerApiBackend {
     fn create_object(
         &self,
@@ -332,12 +441,20 @@ pub fn api_router(
     rate_limit_store: ValkeyRateLimitStore,
     rate_limit_policies: RateLimitPolicies,
 ) -> Router {
-    configure_health_routes(probe).merge(configure_owner_routes(
-        pool,
-        context,
-        rate_limit_store,
+    let principal_backend = PgPrincipalApiBackend {
+        pool: pool.clone(),
+        context: context.clone(),
+        rate_limit: RateLimitService::new(rate_limit_store.clone()),
         rate_limit_policies,
-    ))
+    };
+    configure_health_routes(probe)
+        .merge(configure_owner_routes(
+            pool,
+            context,
+            rate_limit_store,
+            rate_limit_policies,
+        ))
+        .merge(principal_invocation_router(principal_backend))
 }
 
 /// Composes the PostgreSQL Outbox Relay with its JetStream publisher.
