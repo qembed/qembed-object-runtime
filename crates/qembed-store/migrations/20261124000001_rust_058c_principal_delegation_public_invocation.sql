@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- fixture may not install the tenant registry, so add the FK only when present.
 CREATE TABLE IF NOT EXISTS principals (
     id UUID PRIMARY KEY,
-    tenant_id UUID REFERENCES tenants(id),
+    tenant_id UUID,
     kind TEXT NOT NULL CHECK (kind IN ('TenantOwner', 'TenantAdmin', 'Service', 'PlatformAdmin')),
     key_hash BYTEA NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
