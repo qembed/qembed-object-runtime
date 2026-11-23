@@ -1,0 +1,97 @@
+mod common;
+
+use qembed_domain::{
+    auth::authenticate_principal,
+    ids::{CallerId, PrincipalId, TenantId},
+    ports::AuthenticationPort,
+    rate_limit::RateLimitClass,
+};
+use qembed_store::{
+    auth::{PrincipalAuthenticator, PrincipalCredentials},
+    caller_delegation::{CallerDelegationError, PgCallerDelegationRepository},
+    run_migrations,
+};
+use sha2::{Digest, Sha256};
+
+async fn seed_principal(pool: &sqlx::PgPool, tenant: TenantId, id: PrincipalId, token: &str, kind: &str) {
+    sqlx::query("INSERT INTO principals (id, tenant_id, kind, key_hash) VALUES ($1::uuid, $2::uuid, $3, $4)")
+        .bind(id.to_string())
+        .bind(tenant.to_string())
+        .bind(kind)
+        .bind(Sha256::digest(token.as_bytes()).to_vec())
+        .execute(pool)
+        .await
+        .expect("Principal fixture should be inserted");
+}
+
+#[tokio::test]
+async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
+    let pool = common::connect().await;
+    run_migrations(&pool).await.expect("migrations should apply");
+
+    let tenant = TenantId::new();
+    let other_tenant = TenantId::new();
+    let owner_id = PrincipalId::new();
+    let admin_id = PrincipalId::new();
+    let other_admin_id = PrincipalId::new();
+    let owner_token = format!("owner-{}", PrincipalId::new());
+    let admin_token = format!("admin-{}", PrincipalId::new());
+    let other_token = format!("other-{}", PrincipalId::new());
+    let caller_id = CallerId::new();
+    let caller_hash = Sha256::digest(format!("caller-{caller_id}").as_bytes()).to_vec();
+
+    seed_principal(&pool, tenant, owner_id, &owner_token, "TenantOwner").await;
+    seed_principal(&pool, tenant, admin_id, &admin_token, "TenantAdmin").await;
+    seed_principal(&pool, other_tenant, other_admin_id, &other_token, "TenantAdmin").await;
+    sqlx::query("INSERT INTO callers (id, tenant_id, token_hash, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')")
+        .bind(caller_id.to_string())
+        .bind(tenant.to_string())
+        .bind(caller_hash)
+        .execute(&pool)
+        .await
+        .expect("Caller fixture should be inserted");
+
+    let context = common::signed_context(&pool).await;
+    let authenticator = PrincipalAuthenticator::new(pool.clone());
+    let owner_scope = authenticate_principal(&authenticator, PrincipalCredentials::new(owner_token))
+        .await
+        .expect("Owner token should authenticate");
+    let admin_scope = authenticate_principal(&authenticator, PrincipalCredentials::new(admin_token))
+        .await
+        .expect("TenantAdmin token should authenticate");
+    let repository = PgCallerDelegationRepository::new(context);
+
+    let delegation_id = repository
+        .grant(&owner_scope, admin_id, caller_id)
+        .await
+        .expect("Owner should grant a Caller to another same-tenant Principal");
+
+    assert!(matches!(
+        repository.grant(&admin_scope, admin_id, caller_id).await,
+        Err(CallerDelegationError::NotOwner)
+    ));
+    assert!(matches!(
+        repository.grant(&owner_scope, other_admin_id, caller_id).await,
+        Err(CallerDelegationError::Database(_))
+    ));
+
+    repository
+        .revoke(&owner_scope, delegation_id)
+        .await
+        .expect("Owner should revoke the active delegation");
+    assert!(matches!(
+        repository.revoke(&owner_scope, delegation_id).await,
+        Err(CallerDelegationError::NotFound)
+    ));
+
+    let history: (Option<time::OffsetDateTime>, Option<String>) =
+        sqlx::query_as("SELECT revoked_at, revoked_by_principal_id::text FROM principal_caller_delegations WHERE delegation_id = $1::uuid")
+            .bind(delegation_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .expect("revoked delegation history should remain");
+    assert!(history.0.is_some());
+    assert_eq!(history.1.as_deref(), Some(&owner_id.to_string()));
+
+    pool.close().await;
+}
