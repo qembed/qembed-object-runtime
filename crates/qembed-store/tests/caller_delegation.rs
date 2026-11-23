@@ -179,3 +179,96 @@ async fn legacy_owner_sync_rejects_collision_with_unrelated_principal() {
     );
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn revoked_principal_and_caller_cannot_resolve_delegations() {
+    let pool = common::connect().await;
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
+
+    let tenant = TenantId::new();
+    let owner_id = PrincipalId::new();
+    let admin_id = PrincipalId::new();
+    let owner_token = format!("owner-{}", PrincipalId::new());
+    let admin_token = format!("admin-{}", PrincipalId::new());
+    let caller_revoked_id = CallerId::new();
+    let principal_revoked_caller_id = CallerId::new();
+
+    sqlx::query("INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')")
+        .bind(tenant.to_string())
+        .bind(owner_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("legacy Owner should be mirrored into Principals");
+    sqlx::query("UPDATE principals SET key_hash = $1 WHERE tenant_id = $2::uuid AND id = $3::uuid")
+        .bind(Sha256::digest(owner_token.as_bytes()).to_vec())
+        .bind(tenant.to_string())
+        .bind(owner_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("Owner token hash should be configured");
+    seed_principal(&pool, tenant, admin_id, &admin_token, "TenantAdmin").await;
+
+    for caller_id in [caller_revoked_id, principal_revoked_caller_id] {
+        sqlx::query("INSERT INTO callers (id, tenant_id, token_hash, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')")
+            .bind(caller_id.to_string())
+            .bind(tenant.to_string())
+            .bind(Sha256::digest(format!("caller-{caller_id}").as_bytes()).to_vec())
+            .execute(&pool)
+            .await
+            .expect("Caller fixture should be inserted");
+    }
+
+    let context = common::signed_context(&pool).await;
+    let authenticator = PrincipalAuthenticator::new(pool.clone());
+    let owner_scope =
+        authenticate_principal(&authenticator, PrincipalCredentials::new(owner_token))
+            .await
+            .expect("Owner token should authenticate");
+    let admin_scope =
+        authenticate_principal(&authenticator, PrincipalCredentials::new(admin_token))
+            .await
+            .expect("TenantAdmin token should authenticate");
+    let repository = PgCallerDelegationRepository::new(context.clone());
+
+    repository
+        .grant(&owner_scope, admin_id, caller_revoked_id)
+        .await
+        .expect("Owner should delegate the first Caller");
+    repository
+        .grant(&owner_scope, admin_id, principal_revoked_caller_id)
+        .await
+        .expect("Owner should delegate the second Caller");
+
+    sqlx::query("UPDATE callers SET revoked_at = clock_timestamp() WHERE tenant_id = $1::uuid AND id = $2::uuid")
+        .bind(tenant.to_string())
+        .bind(caller_revoked_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("Caller revocation should be persisted");
+    assert!(
+        context
+            .begin_caller(&admin_scope, caller_revoked_id)
+            .await
+            .is_err(),
+        "revoked Caller must not resolve"
+    );
+
+    sqlx::query("UPDATE principals SET revoked_at = clock_timestamp() WHERE tenant_id = $1::uuid AND id = $2::uuid")
+        .bind(tenant.to_string())
+        .bind(admin_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("Principal revocation should be persisted");
+    assert!(
+        context
+            .begin_caller(&admin_scope, principal_revoked_caller_id)
+            .await
+            .is_err(),
+        "revoked Principal must not resolve any delegation"
+    );
+
+    pool.close().await;
+}
