@@ -180,7 +180,6 @@ async fn legacy_owner_sync_rejects_collision_with_unrelated_principal() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn revoked_principal_and_caller_cannot_resolve_delegations() {
     let pool = common::connect().await;
