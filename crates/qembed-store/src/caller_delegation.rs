@@ -37,14 +37,13 @@ impl PgCallerDelegationRepository {
             .begin_principal(scope)
             .await
             .map_err(CallerDelegationError::Context)?;
-        let delegation_id: String = sqlx::query_scalar(
-            "SELECT grant_caller_delegation($1::uuid, $2::uuid)::text",
-        )
-        .bind(target_principal_id.to_string())
-        .bind(caller_id.to_string())
-        .fetch_one(transaction.connection())
-        .await
-        .map_err(map_database_error)?;
+        let delegation_id: String =
+            sqlx::query_scalar("SELECT grant_caller_delegation($1::uuid, $2::uuid)::text")
+                .bind(target_principal_id.to_string())
+                .bind(caller_id.to_string())
+                .fetch_one(transaction.connection())
+                .await
+                .map_err(map_database_error)?;
 
         transaction
             .commit()
@@ -70,13 +69,11 @@ impl PgCallerDelegationRepository {
             .begin_principal(scope)
             .await
             .map_err(CallerDelegationError::Context)?;
-        let revoked: bool = sqlx::query_scalar(
-            "SELECT revoke_caller_delegation($1::uuid)",
-        )
-        .bind(delegation_id.to_string())
-        .fetch_one(transaction.connection())
-        .await
-        .map_err(CallerDelegationError::Database)?;
+        let revoked: bool = sqlx::query_scalar("SELECT revoke_caller_delegation($1::uuid)")
+            .bind(delegation_id.to_string())
+            .fetch_one(transaction.connection())
+            .await
+            .map_err(CallerDelegationError::Database)?;
 
         transaction
             .commit()
