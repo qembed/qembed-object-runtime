@@ -3,6 +3,8 @@
 -- rows are mirrored into principals so they participate in the common delegation graph.
 BEGIN;
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS principals (
     id UUID PRIMARY KEY,
     tenant_id UUID REFERENCES tenants(id),
