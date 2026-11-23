@@ -34,7 +34,7 @@ impl RateLimitClass {
 /// Caller ID are never written to Valkey; only this digest is used for the
 /// short-lived "token already charged" marker.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RateLimitRequestId(String);
+pub struct RateLimitRequestId {\n    digest: String,\n    valkey_key: String,\n}
 
 impl RateLimitRequestId {
     pub fn for_invocation(
@@ -53,12 +53,22 @@ impl RateLimitRequestId {
             format!("qembed:invocation-idempotency:{tenant_id}:{object_id}:{caller_id}:{idempotency_key}")
                 .as_bytes(),
         );
-        Ok(Self(format!("{digest:x}")))
+        let digest = format!("{digest:x}");
+        let valkey_key = format!("qembed:rl:{{{tenant_id}:{object_id}}}:request:{digest}");
+        Ok(Self { digest, valkey_key })
     }
 
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.digest
+    }
+
+    /// Returns the stable marker key. Its tenant/object hash tag is identical
+    /// across Anonymous, Authenticated and Owner buckets, so a replay through a
+    /// different admission class is still charged only once.
+    #[must_use]
+    pub fn valkey_key(&self) -> &str {
+        &self.valkey_key
     }
 }
 
