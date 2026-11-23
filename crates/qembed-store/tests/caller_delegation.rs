@@ -11,7 +11,13 @@ use qembed_store::{
 };
 use sha2::{Digest, Sha256};
 
-async fn seed_principal(pool: &sqlx::PgPool, tenant: TenantId, id: PrincipalId, token: &str, kind: &str) {
+async fn seed_principal(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    id: PrincipalId,
+    token: &str,
+    kind: &str,
+) {
     sqlx::query("INSERT INTO principals (id, tenant_id, kind, key_hash) VALUES ($1::uuid, $2::uuid, $3, $4)")
         .bind(id.to_string())
         .bind(tenant.to_string())
@@ -25,7 +31,9 @@ async fn seed_principal(pool: &sqlx::PgPool, tenant: TenantId, id: PrincipalId, 
 #[tokio::test]
 async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
     let pool = common::connect().await;
-    run_migrations(&pool).await.expect("migrations should apply");
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
 
     let tenant = TenantId::new();
     let other_tenant = TenantId::new();
@@ -52,7 +60,14 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         .await
         .expect("Owner Principal token hash should be configured");
     seed_principal(&pool, tenant, admin_id, &admin_token, "TenantAdmin").await;
-    seed_principal(&pool, other_tenant, other_admin_id, &other_token, "TenantAdmin").await;
+    seed_principal(
+        &pool,
+        other_tenant,
+        other_admin_id,
+        &other_token,
+        "TenantAdmin",
+    )
+    .await;
     sqlx::query("INSERT INTO callers (id, tenant_id, token_hash, caller_kind) VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')")
         .bind(caller_id.to_string())
         .bind(tenant.to_string())
