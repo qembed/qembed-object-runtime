@@ -9,6 +9,11 @@ use qembed_api::composition::configure_owner_routes;
 
 async fn insert_owner(pool: &sqlx::PgPool, tenant_id: TenantId, token: &str) {
     let principal_id = PrincipalId::new();
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid) ON CONFLICT (id) DO NOTHING")
+        .bind(tenant_id.to_string())
+        .execute(pool)
+        .await
+        .expect("tenant fixture should be inserted");
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )
