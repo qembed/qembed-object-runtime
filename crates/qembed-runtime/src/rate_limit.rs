@@ -2,7 +2,9 @@
 
 use std::error::Error;
 
-use qembed_domain::rate_limit::{RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitRequestId, RateLimitStore};
+use qembed_domain::rate_limit::{
+    RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitRequestId, RateLimitStore,
+};
 
 #[derive(Debug)]
 pub enum RateLimitServiceError<E> {
@@ -17,7 +19,9 @@ impl<E: Error + 'static> std::fmt::Display for RateLimitServiceError<E> {
             Self::InvalidCost => {
                 formatter.write_str("rate-limit cost must be non-zero and fit the bucket")
             }
-            Self::InvalidMarkerTtl => formatter.write_str("idempotency marker TTL must be non-zero"),
+            Self::InvalidMarkerTtl => {
+                formatter.write_str("idempotency marker TTL must be non-zero")
+            }
             Self::Store(error) => write!(formatter, "rate-limit store failed: {error}"),
         }
     }
