@@ -33,6 +33,7 @@ pub mod valkey_rate_limit;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
     AnonymousContext, ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigner, ContextTransaction,
+    begin_anonymous_context_transaction,
     ContextTransactionError, RingEd25519SigningKey, begin_caller_context_transaction,
     begin_context_transaction, begin_principal_context_transaction,
 };
