@@ -469,6 +469,7 @@ fn map_caller_delegation_error(error: CallerDelegationError) -> OwnerApiBackendE
     match error {
         CallerDelegationError::NotOwner => OwnerApiBackendError::Unauthorized,
         CallerDelegationError::NotFound => OwnerApiBackendError::NotFound,
+        CallerDelegationError::AlreadyActive => OwnerApiBackendError::Conflict,
         CallerDelegationError::InvalidDelegationId
         | CallerDelegationError::Context(_)
         | CallerDelegationError::Database(_) => OwnerApiBackendError::Internal,
