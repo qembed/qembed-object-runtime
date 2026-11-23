@@ -44,7 +44,7 @@ impl PgCallerDelegationRepository {
         .bind(caller_id.to_string())
         .fetch_one(transaction.connection())
         .await
-        .map_err(CallerDelegationError::Database)?;
+        .map_err(map_database_error)?;
 
         transaction
             .commit()
@@ -90,11 +90,23 @@ impl PgCallerDelegationRepository {
     }
 }
 
+fn map_database_error(error: sqlx::Error) -> CallerDelegationError {
+    match &error {
+        sqlx::Error::Database(database_error) => match database_error.code().as_deref() {
+            Some("42501") => CallerDelegationError::NotFound,
+            Some("23505") => CallerDelegationError::AlreadyActive,
+            _ => CallerDelegationError::Database(error),
+        },
+        _ => CallerDelegationError::Database(error),
+    }
+}
+
 /// Failure while changing a Caller delegation.
 #[derive(Debug)]
 pub enum CallerDelegationError {
     NotOwner,
     NotFound,
+    AlreadyActive,
     InvalidDelegationId,
     Context(crate::ContextTransactionError),
     Database(sqlx::Error),
@@ -105,6 +117,7 @@ impl std::fmt::Display for CallerDelegationError {
         match self {
             Self::NotOwner => formatter.write_str("only a TenantOwner may manage Caller delegations"),
             Self::NotFound => formatter.write_str("active Caller delegation was not found"),
+            Self::AlreadyActive => formatter.write_str("Caller is already delegated to this Principal"),
             Self::InvalidDelegationId => formatter.write_str("database returned an invalid delegation ID"),
             Self::Context(error) => write!(formatter, "delegation context error: {error}"),
             Self::Database(error) => write!(formatter, "Caller delegation database error: {error}"),
