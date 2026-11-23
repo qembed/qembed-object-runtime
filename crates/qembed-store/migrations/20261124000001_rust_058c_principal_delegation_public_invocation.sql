@@ -151,6 +151,12 @@ BEGIN
        AND actor.id = v_actor_principal_id
        AND actor.kind = 'TenantOwner'
        AND actor.revoked_at IS NULL
+       AND EXISTS (
+           SELECT 1 FROM owner_principals legacy
+            WHERE legacy.tenant_id = actor.tenant_id
+              AND legacy.caller_id = actor.id
+              AND legacy.disabled_at IS NULL
+       )
      FOR SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'only an active TenantOwner may grant Caller delegation'
@@ -161,6 +167,15 @@ BEGIN
      WHERE target.tenant_id = v_tenant_id
        AND target.id = p_target_principal_id
        AND target.revoked_at IS NULL
+       AND (
+           target.kind <> 'TenantOwner'
+           OR EXISTS (
+               SELECT 1 FROM owner_principals legacy
+                WHERE legacy.tenant_id = target.tenant_id
+                  AND legacy.caller_id = target.id
+                  AND legacy.disabled_at IS NULL
+           )
+       )
      FOR SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'target Principal is not active in this tenant'
@@ -222,6 +237,12 @@ BEGIN
        AND actor.id = v_actor_principal_id
        AND actor.kind = 'TenantOwner'
        AND actor.revoked_at IS NULL
+       AND EXISTS (
+           SELECT 1 FROM owner_principals legacy
+            WHERE legacy.tenant_id = actor.tenant_id
+              AND legacy.caller_id = actor.id
+              AND legacy.disabled_at IS NULL
+       )
      FOR SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'only an active TenantOwner may revoke Caller delegation'
@@ -265,6 +286,15 @@ BEGIN
        AND d.caller_id = p_caller_id
        AND d.revoked_at IS NULL
        AND p.revoked_at IS NULL
+       AND (
+           p.kind <> 'TenantOwner'
+           OR EXISTS (
+               SELECT 1 FROM owner_principals legacy
+                WHERE legacy.tenant_id = p.tenant_id
+                  AND legacy.caller_id = p.id
+                  AND legacy.disabled_at IS NULL
+           )
+       )
        AND c.revoked_at IS NULL
      FOR SHARE OF d, p, c;
 
