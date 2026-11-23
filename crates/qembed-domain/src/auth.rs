@@ -54,11 +54,9 @@ where
         .await
         .map_err(PrincipalAuthenticationError::Rejected)?;
 
-    let principal = Principal::from_verified_auth(
-        identity.principal_id(),
-        identity.principal_kind(),
-    )
-    .map_err(PrincipalAuthenticationError::InvalidPrincipal)?;
+    let principal =
+        Principal::from_verified_auth(identity.principal_id(), identity.principal_kind())
+            .map_err(PrincipalAuthenticationError::InvalidPrincipal)?;
 
     Scope::from_verified_auth(identity.tenant_id(), principal)
         .map_err(PrincipalAuthenticationError::InvalidScope)
@@ -75,9 +73,15 @@ pub enum PrincipalAuthenticationError<E> {
 impl<E: fmt::Display> fmt::Display for PrincipalAuthenticationError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Rejected(error) => write!(formatter, "Principal authentication rejected: {error}"),
-            Self::InvalidPrincipal(error) => write!(formatter, "invalid authenticated Principal: {error}"),
-            Self::InvalidScope(error) => write!(formatter, "invalid authenticated tenant Scope: {error}"),
+            Self::Rejected(error) => {
+                write!(formatter, "Principal authentication rejected: {error}")
+            }
+            Self::InvalidPrincipal(error) => {
+                write!(formatter, "invalid authenticated Principal: {error}")
+            }
+            Self::InvalidScope(error) => {
+                write!(formatter, "invalid authenticated tenant Scope: {error}")
+            }
         }
     }
 }
