@@ -1,7 +1,7 @@
 //! Tenant-Principal invocation endpoint. Authentication is token-based and
 //! tenant identity is resolved from the canonical Principal registry.
 
-use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use axum::{
     body::Bytes,
