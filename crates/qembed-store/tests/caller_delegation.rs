@@ -3,8 +3,6 @@ mod common;
 use qembed_domain::{
     auth::authenticate_principal,
     ids::{CallerId, PrincipalId, TenantId},
-    ports::AuthenticationPort,
-    rate_limit::RateLimitClass,
 };
 use qembed_store::{
     auth::{PrincipalAuthenticator, PrincipalCredentials},
@@ -91,7 +89,8 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
             .await
             .expect("revoked delegation history should remain");
     assert!(history.0.is_some());
-    assert_eq!(history.1.as_deref(), Some(&owner_id.to_string()));
+    let owner_id_string = owner_id.to_string();
+    assert_eq!(history.1.as_deref(), Some(owner_id_string.as_str()));
 
     pool.close().await;
 }
