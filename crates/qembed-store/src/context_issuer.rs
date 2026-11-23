@@ -596,6 +596,85 @@ mod tests {
     }
 
     #[test]
+    fn anonymous_context_rejects_nil_ids_and_empty_fingerprint() {
+        assert!(AnonymousContext::new(
+            TenantId::from_uuid(Uuid::nil()),
+            ObjectId::new(),
+            [1_u8; 32],
+        )
+        .is_err());
+        assert!(AnonymousContext::new(
+            TenantId::new(),
+            ObjectId::from_uuid(Uuid::nil()),
+            [1_u8; 32],
+        )
+        .is_err());
+        assert!(AnonymousContext::new(TenantId::new(), ObjectId::new(), [0_u8; 32]).is_err());
+    }
+
+    #[test]
+    fn issuer_emits_qctx2_with_null_principal_and_server_fingerprint() {
+        let signer = RingEd25519SigningKey::from_seed("key-1", &[7_u8; 32])
+            .expect("32-byte Ed25519 seed must be accepted");
+        let public_key = signer.public_key();
+        let config = ContextIssuerConfig::with_default_lifetime(
+            "qembed-runtime",
+            "postgres://deployment/db",
+            "deployment-a",
+            "key-1",
+        )
+        .expect("config must be valid");
+        let issuer = ContextIssuer::new(config, signer).expect("issuer must be valid");
+        let context = AnonymousContext::new(TenantId::new(), ObjectId::new(), [0xabu8; 32])
+            .expect("server-derived Anonymous context must be valid");
+        let binding = PgContextBinding {
+            backend_pid: 123,
+            transaction_id: "456".to_owned(),
+            database_oid: "789".to_owned(),
+        };
+
+        let token = issuer
+            .issue_anonymous(context, None, &binding)
+            .expect("qctx2 token should be issued");
+        let mut parts = token.split(':');
+        assert_eq!(parts.next(), Some(TOKEN_PREFIX_V2));
+        let payload = decode_hex(parts.next().expect("payload must exist"));
+        let signature = decode_hex(parts.next().expect("signature must exist"));
+        assert!(parts.next().is_none());
+
+        let claims: serde_json::Value =
+            serde_json::from_slice(&payload).expect("claims must be valid JSON");
+        assert_eq!(claims["version"], "2");
+        assert_eq!(claims["principal_id"], serde_json::Value::Null);
+        assert_eq!(claims["caller_id"], serde_json::Value::Null);
+        assert_eq!(claims["subject_kind"], "anonymous");
+        assert_eq!(claims["tenant_id"], context.tenant_id().to_string());
+        assert_eq!(claims["object_id"], context.object_id().to_string());
+        assert_eq!(
+            claims["subject_fingerprint"],
+            lowercase_hex(&context.subject_fingerprint())
+        );
+        assert_eq!(claims["backend_pid"], "123");
+        assert_eq!(claims["transaction_id"], "456");
+        assert_eq!(claims["database_oid"], "789");
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &public_key)
+            .verify(&payload, &signature)
+            .expect("qctx2 signature must verify");
+    }
+
+    fn decode_hex(value: &str) -> Vec<u8> {
+        value
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let high = (pair[0] as char).to_digit(16).expect("hex digit") as u8;
+                let low = (pair[1] as char).to_digit(16).expect("hex digit") as u8;
+                (high << 4) | low
+            })
+            .collect()
+    }
+
+    #[test]
     fn ring_signer_produces_a_verifiable_ed25519_signature() {
         let signer = RingEd25519SigningKey::from_seed("key-1", &[7_u8; 32])
             .expect("32-byte Ed25519 seed must be accepted");
