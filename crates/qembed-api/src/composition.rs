@@ -179,9 +179,7 @@ impl PrincipalInvocationBackend for PgPrincipalApiBackend {
                 Err(InvocationStartError::InvalidIdempotencyKey(_)) => {
                     Err(OwnerApiBackendError::InvalidRequest)
                 }
-                Err(InvocationStartError::ObjectNotFound) => {
-                    Err(OwnerApiBackendError::NotFound)
-                }
+                Err(InvocationStartError::ObjectNotFound) => Err(OwnerApiBackendError::NotFound),
                 Err(
                     InvocationStartError::ObjectNotActive
                     | InvocationStartError::NoPublishedVersion,
