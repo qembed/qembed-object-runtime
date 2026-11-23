@@ -86,12 +86,22 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         authenticate_principal(&authenticator, PrincipalCredentials::new(admin_token))
             .await
             .expect("TenantAdmin token should authenticate");
-    let repository = PgCallerDelegationRepository::new(context);
+    let repository = PgCallerDelegationRepository::new(context.clone());
 
     let delegation_id = repository
         .grant(&owner_scope, admin_id, caller_id)
         .await
         .expect("Owner should grant a Caller to another same-tenant Principal");
+
+    let (resolved_transaction, resolved_caller) = context
+        .begin_caller(&admin_scope, caller_id)
+        .await
+        .expect("delegated TenantAdmin should resolve its Caller");
+    assert_eq!(resolved_caller.kind(), CallerKind::Authenticated);
+    resolved_transaction
+        .commit()
+        .await
+        .expect("Caller resolution transaction should commit");
 
     assert!(matches!(
         repository.grant(&owner_scope, admin_id, caller_id).await,
@@ -113,6 +123,13 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         .revoke(&owner_scope, delegation_id)
         .await
         .expect("Owner should revoke the active delegation");
+    assert!(
+        context
+            .begin_caller(&admin_scope, caller_id)
+            .await
+            .is_err(),
+        "revoked delegation must no longer resolve"
+    );
     assert!(matches!(
         repository.revoke(&owner_scope, delegation_id).await,
         Err(CallerDelegationError::NotFound)
