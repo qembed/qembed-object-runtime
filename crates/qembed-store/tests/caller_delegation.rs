@@ -12,6 +12,14 @@ use qembed_store::{
 };
 use sha2::{Digest, Sha256};
 
+async fn seed_tenant(pool: &sqlx::PgPool, tenant: TenantId) {
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid) ON CONFLICT (id) DO NOTHING")
+        .bind(tenant.to_string())
+        .execute(pool)
+        .await
+        .expect("Tenant fixture should be inserted");
+}
+
 async fn seed_principal(
     pool: &sqlx::PgPool,
     tenant: TenantId,
@@ -19,6 +27,7 @@ async fn seed_principal(
     token: &str,
     kind: &str,
 ) {
+    seed_tenant(pool, tenant).await;
     sqlx::query("INSERT INTO principals (id, tenant_id, kind, key_hash) VALUES ($1::uuid, $2::uuid, $3, $4)")
         .bind(id.to_string())
         .bind(tenant.to_string())
@@ -47,6 +56,8 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
     let caller_id = CallerId::new();
     let caller_hash = Sha256::digest(format!("caller-{caller_id}").as_bytes()).to_vec();
 
+    seed_tenant(&pool, tenant).await;
+    seed_tenant(&pool, other_tenant).await;
     sqlx::query("INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')")
         .bind(tenant.to_string())
         .bind(owner_id.to_string())
@@ -192,6 +203,7 @@ async fn revoked_principal_and_caller_cannot_resolve_delegations() {
     let caller_revoked_id = CallerId::new();
     let principal_revoked_caller_id = CallerId::new();
 
+    seed_tenant(&pool, tenant).await;
     sqlx::query("INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')")
         .bind(tenant.to_string())
         .bind(owner_id.to_string())
