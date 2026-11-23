@@ -114,17 +114,15 @@ impl PrincipalInvocationBackend for PgPrincipalApiBackend {
     ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>> {
         Box::pin(async move {
             let authenticator = PrincipalAuthenticator::new(self.pool.clone());
-            let scope = authenticate_principal(
-                &authenticator,
-                PrincipalCredentials::new(principal_token),
-            )
-            .await
-            .map_err(|error| match error {
-                DomainPrincipalAuthError::Rejected(StorePrincipalAuthError::InvalidCredentials) => {
-                    OwnerApiBackendError::Unauthorized
-                }
-                _ => OwnerApiBackendError::Internal,
-            })?;
+            let scope =
+                authenticate_principal(&authenticator, PrincipalCredentials::new(principal_token))
+                    .await
+                    .map_err(|error| match error {
+                        DomainPrincipalAuthError::Rejected(
+                            StorePrincipalAuthError::InvalidCredentials,
+                        ) => OwnerApiBackendError::Unauthorized,
+                        _ => OwnerApiBackendError::Internal,
+                    })?;
 
             let (rate_limit_key, rate_limit_class) = match scope.principal().kind() {
                 PrincipalKind::TenantOwner => (
