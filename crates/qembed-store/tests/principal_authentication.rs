@@ -69,9 +69,7 @@ async fn canonical_principal_authentication_maps_tenant_roles_and_rejects_platfo
     .execute(&pool)
     .await
     .expect("legacy Owner identity should be inserted");
-    sqlx::query(
-        "UPDATE principals SET key_hash = $1 WHERE tenant_id = $2::uuid AND id = $3::uuid",
-    )
+    sqlx::query("UPDATE principals SET key_hash = $1 WHERE tenant_id = $2::uuid AND id = $3::uuid")
     .bind(Sha256::digest(owner_token.as_bytes()).to_vec())
     .bind(tenant_id.to_string())
     .bind(owner_id.to_string())
@@ -81,29 +79,20 @@ async fn canonical_principal_authentication_maps_tenant_roles_and_rejects_platfo
 
     let authenticator = PrincipalAuthenticator::new(pool.clone());
 
-    let admin = authenticate_principal(
-        &authenticator,
-        PrincipalCredentials::new(admin_token),
-    )
+    let admin = authenticate_principal(&authenticator, PrincipalCredentials::new(admin_token))
     .await
     .expect("TenantAdmin token should authenticate");
     assert_eq!(admin.tenant_id(), tenant_id);
     assert_eq!(admin.principal().principal_id(), tenant_admin_id);
     assert_eq!(admin.principal().kind(), PrincipalKind::Authenticated);
 
-    let service = authenticate_principal(
-        &authenticator,
-        PrincipalCredentials::new(service_token),
-    )
+    let service = authenticate_principal(&authenticator, PrincipalCredentials::new(service_token))
     .await
     .expect("Service token should authenticate");
     assert_eq!(service.principal().principal_id(), service_id);
     assert_eq!(service.principal().kind(), PrincipalKind::Authenticated);
 
-    let owner = authenticate_principal(
-        &authenticator,
-        PrincipalCredentials::new(owner_token),
-    )
+    let owner = authenticate_principal(&authenticator, PrincipalCredentials::new(owner_token))
     .await
     .expect("TenantOwner token should authenticate");
     assert_eq!(owner.principal().principal_id(), owner_id);
@@ -119,10 +108,8 @@ async fn canonical_principal_authentication_maps_tenant_roles_and_rejects_platfo
     .execute(&pool)
     .await
     .expect("PlatformAdmin fixture should be inserted");
-    let platform = authenticate_principal(
-        &authenticator,
-        PrincipalCredentials::new(platform_token),
-    )
+    let platform =
+        authenticate_principal(&authenticator, PrincipalCredentials::new(platform_token))
     .await
     .expect_err("PlatformAdmin must not establish tenant invocation Scope");
     assert!(matches!(
