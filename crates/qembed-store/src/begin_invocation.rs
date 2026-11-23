@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use qembed_domain::budget::estimate_input_tokens;
 use qembed_domain::caller::{CallerKind, InvocationPool};
 use qembed_domain::ids::{
-    CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TraceId,
+    CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId, TraceId,
 };
 use qembed_domain::scope::Scope;
 use serde::Serialize;
@@ -218,7 +218,7 @@ pub async fn begin_invocation(
         command.idempotency_expires_at,
     );
     let reservation =
-        reserve_invocation_idempotency(&mut transaction, scope.tenant_id(), &caller, &claim).await?;
+        reserve_invocation_idempotency(&mut transaction, tenant_id, &caller, &claim).await?;
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
@@ -273,7 +273,7 @@ pub async fn begin_invocation(
         sqlx::query_as::<_, (String, String)>(
             "SELECT snapshot.snapshot_id::text, version.status FROM snapshots AS snapshot INNER JOIN object_versions AS version ON version.tenant_id = snapshot.tenant_id AND version.object_id = snapshot.object_id AND version.object_version_id = snapshot.object_version_id WHERE snapshot.tenant_id = $1::uuid AND snapshot.object_id = $2::uuid AND snapshot.object_version_id = $3::uuid",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string())
         .bind(published_version_id),
     )
