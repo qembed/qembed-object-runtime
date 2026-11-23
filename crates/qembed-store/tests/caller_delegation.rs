@@ -70,7 +70,7 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
     ));
     assert!(matches!(
         repository.grant(&owner_scope, other_admin_id, caller_id).await,
-        Err(CallerDelegationError::Database(_))
+        Err(CallerDelegationError::NotFound)
     ));
 
     repository
