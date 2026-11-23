@@ -123,6 +123,7 @@ pub mod policy;
 pub mod ports;
 pub mod principal;
 pub mod provider_call_attempt;
+pub mod rate_limit;
 pub mod scope;
 pub mod snapshot;
 pub mod tool_execution;
