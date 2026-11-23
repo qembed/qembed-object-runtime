@@ -130,3 +130,35 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
 
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn legacy_owner_sync_rejects_collision_with_unrelated_principal() {
+    let pool = common::connect().await;
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
+
+    let tenant = TenantId::new();
+    let collision_id = PrincipalId::new();
+    let token = format!("tenant-admin-{}", PrincipalId::new());
+    seed_principal(&pool, tenant, collision_id, &token, "TenantAdmin").await;
+
+    let error = sqlx::query(
+        "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
+    )
+    .bind(tenant.to_string())
+    .bind(collision_id.to_string())
+    .execute(&pool)
+    .await
+    .expect_err("legacy Owner ID must not alias a non-Owner Principal");
+
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|database_error| database_error.code())
+            .as_deref(),
+        Some("23505")
+    );
+    pool.close().await;
+}
