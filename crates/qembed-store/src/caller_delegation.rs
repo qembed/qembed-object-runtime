@@ -115,14 +115,14 @@ impl std::fmt::Display for CallerDelegationError {
         match self {
             Self::NotOwner => {
                 formatter.write_str("only a TenantOwner may manage Caller delegations")
-            },
+            }
             Self::NotFound => formatter.write_str("active Caller delegation was not found"),
             Self::AlreadyActive => {
                 formatter.write_str("Caller is already delegated to this Principal")
-            },
+            }
             Self::InvalidDelegationId => {
                 formatter.write_str("database returned an invalid delegation ID")
-            },
+            }
             Self::Context(error) => write!(formatter, "delegation context error: {error}"),
             Self::Database(error) => write!(formatter, "Caller delegation database error: {error}"),
         }
