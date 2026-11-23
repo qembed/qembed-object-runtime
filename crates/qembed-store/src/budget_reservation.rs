@@ -8,8 +8,7 @@
 use std::fmt;
 
 use qembed_domain::caller::InvocationPool;
-use qembed_domain::ids::{CallerId, InvocationId, ObjectId};
-use qembed_domain::scope::Scope;
+use qembed_domain::ids::{CallerId, InvocationId, ObjectId, TenantId};
 
 use crate::{TenantTransaction, execute, fetch_optional};
 
@@ -68,7 +67,7 @@ pub(crate) struct BudgetReservationRequest {
 /// object_invocations; both rows and counter changes commit or roll back together.
 pub(crate) async fn reserve_invocation_budget(
     transaction: &mut TenantTransaction,
-    scope: &Scope,
+    tenant_id: TenantId,
     request: BudgetReservationRequest,
 ) -> Result<(), BudgetReservationError> {
     let BudgetReservationRequest {
@@ -90,7 +89,7 @@ pub(crate) async fn reserve_invocation_budget(
         sqlx::query_as::<_, (i64, i64, i32, i64, i32)>(
             "SELECT daily_token_limit, per_caller_daily_token_limit, max_concurrent_invocations, max_tokens_per_invocation, max_duration_ms FROM object_budgets WHERE tenant_id=$1::uuid AND object_id=$2::uuid FOR UPDATE",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(object_id.to_string()),
     )
     .await
