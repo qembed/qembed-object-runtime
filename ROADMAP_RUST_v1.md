@@ -445,9 +445,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: совокупный consumed + reserved usage не превышает effective object/caller budget; replay не создаёт вторую reservation.
 
 - [ ] **RUST-058 (S)** Реализовать distributed rate limiting и pool isolation.
-  - Текущий PR #90 — Draft / needs rework, не готов к merge: в production composition подключён только Owner; Authenticated bucket использует Caller вместо Principal; replay расходует token из-за rate check до idempotency resolution; отказ Valkey логируется через `eprintln!`; exact-head CI падает на `cargo fmt --check`.
-  - Зависимости: не расширять Principal/Anonymous SQL identity в Rust в обход `qembed-sql`. Сначала завершить QSA-003 canonical signed-context migration и определить SQL-backed Principal API-token/delegation contract и public-object eligibility.
-  - DoD: все три класса подключены к invocation surface; Authenticated quota привязана к trusted Principal; completed/concurrent idempotent replay не списывает повторный token; structured observability; independent Valkey workers подтверждают общий bucket state; full HTTP/PostgreSQL/Valkey tests green.
+  - SQL dependency: QSA-003 canonical signed-context migration merged in `qembed-sql` PR #73 (merge `95ec64a7`). Это открывает работу с каноническим verified Principal context, но не означает, что SQL-backed Principal API-token/delegation и Anonymous public-object paths уже реализованы в Rust.
+  - Старый Rust PR #90 признан устаревшим: он расходился с актуальным `main`, подключал только Owner, строил Authenticated key по Caller и списывал token до разрешения idempotency. Не продолжать эту ветку; реализация начинается от актуального `main`.
+  - Разбиение: RUST-058a — domain/runtime contracts и trusted key provenance; RUST-058b — Valkey atomic Token Bucket adapter и independent-connection concurrency; RUST-058c — SQL-backed Principal/Anonymous invocation identity, все три HTTP admission classes и replay-aware idempotency ordering; RUST-058d — structured observability и acceptance suite.
+  - Архитектура и границы: `docs/ADR-RUST-058-DISTRIBUTED-RATE-LIMITING.md`. PostgreSQL `InvocationPool`/token-budget reservations остаются durable accounting и не меняются; Valkey хранит только ephemeral request-throttling state.
+  - DoD: все три класса подключены к invocation surface; Authenticated quota привязана к trusted Principal, не Caller; completed/concurrent idempotent replay не списывает повторный token; Valkey outage остаётся fail-open без локального fallback и наблюдаем через structured telemetry; independent Valkey workers подтверждают общий bucket state; PostgreSQL 19/HTTP/Valkey CI green.
 
 - [ ] **RUST-059 (M)** Реализовать hierarchical kill-switch evaluation.
   - Тесты: unit на precedence Platform/Tenant/Object/Tool; integration — disabled scope блокирует действие до side effect.
