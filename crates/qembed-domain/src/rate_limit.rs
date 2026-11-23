@@ -370,6 +370,7 @@ mod tests {
         assert!(key.as_str().starts_with(&format!(
             "qembed:rl:{{{tenant}:{object}}}:anonymous:"
         )));
-        assert!(!key.as_str().contains("7"));
+        let other = RateLimitKey::for_anonymous(tenant, object, [8_u8; 32]).unwrap();
+        assert_ne!(key, other);
     }
 }
