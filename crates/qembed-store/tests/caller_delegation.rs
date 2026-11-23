@@ -135,13 +135,13 @@ async fn owner_can_delegate_and_revoke_caller_for_same_tenant_principal() {
         Err(CallerDelegationError::NotFound)
     ));
 
-    let history: (Option<time::OffsetDateTime>, Option<String>) =
-        sqlx::query_as("SELECT revoked_at, revoked_by_principal_id::text FROM principal_caller_delegations WHERE delegation_id = $1::uuid")
+    let history: (bool, Option<String>) =
+        sqlx::query_as("SELECT revoked_at IS NOT NULL, revoked_by_principal_id::text FROM principal_caller_delegations WHERE delegation_id = $1::uuid")
             .bind(delegation_id.to_string())
             .fetch_one(&pool)
             .await
             .expect("revoked delegation history should remain");
-    assert!(history.0.is_some());
+    assert!(history.0);
     let owner_id_string = owner_id.to_string();
     assert_eq!(history.1.as_deref(), Some(owner_id_string.as_str()));
 
