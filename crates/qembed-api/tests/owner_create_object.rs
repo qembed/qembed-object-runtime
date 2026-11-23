@@ -23,6 +23,11 @@ async fn owner_create_object_authenticates_and_persists_a_server_generated_draft
     let token = format!("owner-create-{}", PrincipalId::new());
     let token_hash = Sha256::digest(token.as_bytes()).to_vec();
 
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid) ON CONFLICT (id) DO NOTHING")
+        .bind(tenant_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("tenant fixture should be inserted");
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )
