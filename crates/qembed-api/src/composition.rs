@@ -11,10 +11,12 @@ use qembed_domain::{
     auth::{OwnerAuthenticationError, authenticate_owner},
     ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
     ports::DraftVersionCreation,
+    rate_limit::{RateLimitClass, RateLimitKey, RateLimitPolicies},
 };
 use qembed_runtime::{
     invocation_query::InvocationQueryService,
     invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
+    rate_limit::RateLimitService,
     object_creation::ObjectCreationService,
     object_publication::{ObjectPublicationError, ObjectPublicationService},
     object_version_creation::ObjectVersionCreationService,
@@ -27,6 +29,7 @@ use qembed_store::{
     invocation_start::PgInvocationStartStore,
     object_repository::ObjectRepository,
     outbox_dispatcher::PgOutboxDispatcher,
+    valkey_rate_limit::ValkeyRateLimitStore,
 };
 use sqlx::PgPool;
 
@@ -66,6 +69,8 @@ pub fn configure_health_routes(probe: PgReadinessProbe) -> Router {
 struct PgOwnerApiBackend {
     pool: PgPool,
     context: PgContext,
+    rate_limit: RateLimitService<ValkeyRateLimitStore>,
+    rate_limit_policies: RateLimitPolicies,
 }
 
 impl PgOwnerApiBackend {
@@ -214,8 +219,11 @@ impl OwnerApiBackend for PgOwnerApiBackend {
             let scope = self.authenticate(tenant_id, owner_token).await?;
             let service =
                 InvocationStartService::new(PgInvocationStartStore::new(self.context.clone()));
+            let rate_limit_key = RateLimitKey::for_owner(&scope, object_id)
+                .map_err(|_| OwnerApiBackendError::Internal)?;
+            let policy = self.rate_limit_policies.for_class(RateLimitClass::Owner);
             match service
-                .start(
+                .start_rate_limited(
                     &scope,
                     InvocationStartRequest {
                         object_id,
@@ -223,18 +231,38 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                         idempotency_key,
                         input,
                     },
+                    &self.rate_limit,
+                    &rate_limit_key,
+                    policy,
+                    1,
                 )
                 .await
             {
-                Ok(result) => match result {
-                    qembed_runtime::invocation_start::InvocationStartResult::Accepted {
-                        invocation_id,
-                        ..
+                Ok(qembed_runtime::invocation_start::InvocationStartResult::Accepted {
+                    invocation_id,
+                    rate_limit_degraded,
+                }) => {
+                    if rate_limit_degraded {
+                        // Structured fallback signal: Valkey is admission-only;
+                        // durable invocation and budget accounting remain in PostgreSQL.
+                        eprintln!(
+                            "event=rate_limit_fail_open class=owner object_id={object_id}"
+                        );
                     }
-                    | qembed_runtime::invocation_start::InvocationStartResult::Replayed {
-                        invocation_id,
-                    } => Ok(invocation_id),
-                },
+                    Ok(invocation_id)
+                }
+                Ok(qembed_runtime::invocation_start::InvocationStartResult::Replayed {
+                    invocation_id,
+                }) => Ok(invocation_id),
+                Err(InvocationStartError::RateLimited { retry_after }) => {
+                    Err(OwnerApiBackendError::RateLimited { retry_after })
+                }
+                Err(InvocationStartError::IdempotencyConflict) => {
+                    Err(OwnerApiBackendError::Conflict)
+                }
+                Err(InvocationStartError::InvalidIdempotencyKey(_)) => {
+                    Err(OwnerApiBackendError::InvalidRequest)
+                }
                 Err(InvocationStartError::Store(
                     qembed_store::begin_invocation::BeginInvocationError::CallerResolution(
                         qembed_store::caller::CallerResolutionError::NotDelegated,
@@ -282,13 +310,34 @@ impl OwnerApiBackend for PgOwnerApiBackend {
 
 /// Installs PostgreSQL-backed Owner routes. Authentication and SQL adapters are
 /// wired here, keeping concrete infrastructure out of HTTP handlers.
-pub fn configure_owner_routes(pool: PgPool, context: PgContext) -> Router {
-    configure_owner(PgOwnerApiBackend { pool, context })
+pub fn configure_owner_routes(
+    pool: PgPool,
+    context: PgContext,
+    rate_limit_store: ValkeyRateLimitStore,
+    rate_limit_policies: RateLimitPolicies,
+) -> Router {
+    configure_owner(PgOwnerApiBackend {
+        pool,
+        context,
+        rate_limit: RateLimitService::new(rate_limit_store),
+        rate_limit_policies,
+    })
 }
 
-/// Composes the HTTP surface without creating a listener or changing runtime lifecycle.
-pub fn api_router(pool: PgPool, context: PgContext, probe: PgReadinessProbe) -> Router {
-    configure_health_routes(probe).merge(configure_owner_routes(pool, context))
+/// Composes the HTTP surface with mandatory distributed Owner invocation admission.
+pub fn api_router(
+    pool: PgPool,
+    context: PgContext,
+    probe: PgReadinessProbe,
+    rate_limit_store: ValkeyRateLimitStore,
+    rate_limit_policies: RateLimitPolicies,
+) -> Router {
+    configure_health_routes(probe).merge(configure_owner_routes(
+        pool,
+        context,
+        rate_limit_store,
+        rate_limit_policies,
+    ))
 }
 
 /// Composes the PostgreSQL Outbox Relay with its JetStream publisher.
