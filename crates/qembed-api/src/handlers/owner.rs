@@ -12,10 +12,10 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use qembed_domain::{
-    ids::{CallerId, InvocationId, ObjectId, ObjectVersionId, TenantId},
+    ids::{CallerId, DelegationId, InvocationId, ObjectId, ObjectVersionId, PrincipalId, TenantId},
     jcs::canonicalize_json,
 };
 
@@ -109,6 +109,19 @@ pub trait OwnerApiBackend: Send + Sync {
                 + '_,
         >,
     >;
+    fn grant_caller_delegation(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        target_principal_id: PrincipalId,
+        caller_id: CallerId,
+    ) -> Pin<Box<dyn Future<Output = Result<DelegationId, OwnerApiBackendError>> + Send + '_>>;
+    fn revoke_caller_delegation(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        delegation_id: DelegationId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), OwnerApiBackendError>> + Send + '_>>;
 }
 
 #[derive(Clone)]
@@ -145,6 +158,11 @@ pub fn owner_router(backend: impl OwnerApiBackend + 'static) -> Router {
             "/owner/invocations/{invocation_id}",
             get(inspect_invocation),
         )
+        .route(
+            "/owner/principals/{principal_id}/callers/{caller_id}/delegations",
+            post(grant_caller_delegation),
+        )
+        .route("/owner/delegations/{delegation_id}", delete(revoke_caller_delegation))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(OwnerApiState::new(backend))
 }
@@ -402,6 +420,60 @@ async fn invoke_object(
             }),
         )
             .into_response(),
+        Err(error) => backend_error(error, BackendErrorContext::Ordinary),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+struct CallerDelegationResponse {
+    delegation_id: String,
+    status: &'static str,
+}
+
+async fn grant_caller_delegation(
+    State(state): State<OwnerApiState>,
+    Path((principal_id, caller_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let (tenant_id, token) = match owner_credentials(&headers) {
+        Ok(v) => v,
+        Err(error) => return credential_error(error),
+    };
+    let target_principal_id = match principal_id.parse::<PrincipalId>() {
+        Ok(id) => id,
+        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The Principal ID is invalid."),
+    };
+    let caller_id = match caller_id.parse::<CallerId>() {
+        Ok(id) => id,
+        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The Caller ID is invalid."),
+    };
+    match state.backend.grant_caller_delegation(tenant_id, token, target_principal_id, caller_id).await {
+        Ok(delegation_id) => (StatusCode::CREATED, Json(CallerDelegationResponse {
+            delegation_id: delegation_id.to_string(),
+            status: "active",
+        })).into_response(),
+        Err(error) => backend_error(error, BackendErrorContext::Ordinary),
+    }
+}
+
+async fn revoke_caller_delegation(
+    State(state): State<OwnerApiState>,
+    Path(delegation_id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let (tenant_id, token) = match owner_credentials(&headers) {
+        Ok(v) => v,
+        Err(error) => return credential_error(error),
+    };
+    let delegation_id = match delegation_id.parse::<DelegationId>() {
+        Ok(id) => id,
+        Err(_) => return api_error(StatusCode::BAD_REQUEST, "invalid_request", "The delegation ID is invalid."),
+    };
+    match state.backend.revoke_caller_delegation(tenant_id, token, delegation_id).await {
+        Ok(()) => (StatusCode::OK, Json(CallerDelegationResponse {
+            delegation_id: delegation_id.to_string(),
+            status: "revoked",
+        })).into_response(),
         Err(error) => backend_error(error, BackendErrorContext::Ordinary),
     }
 }
