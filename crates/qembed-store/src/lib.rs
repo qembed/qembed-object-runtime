@@ -186,7 +186,7 @@ pub(crate) async fn begin_context_tenant_transaction(
     Ok(TenantTransaction {
         transaction,
         tenant_id: scope.tenant_id(),
-        principal_id: scope.principal().principal_id(),
+        principal_id: Some(scope.principal().principal_id()),
         transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
     })
 }
