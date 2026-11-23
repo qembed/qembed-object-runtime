@@ -161,14 +161,7 @@ impl PrincipalInvocationBackend for PgPrincipalApiBackend {
                     .map_err(|_| OwnerApiBackendError::Internal)?;
                 let policy = rate_limit_policies.for_class(RateLimitClass::Owner);
                 service
-                    .start_rate_limited(
-                        &scope,
-                        request,
-                        rate_limit,
-                        &rate_limit_key,
-                        policy,
-                        1,
-                    )
+                    .start_rate_limited(&scope, request, rate_limit, &rate_limit_key, policy, 1)
                     .await
             } else {
                 // Test-only route composition. The production api_router always
