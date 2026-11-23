@@ -21,6 +21,11 @@ async fn seed_principal(
     kind: &str,
     token: &str,
 ) {
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid) ON CONFLICT (id) DO NOTHING")
+        .bind(tenant_id.to_string())
+        .execute(pool)
+        .await
+        .expect("tenant fixture should be inserted");
     sqlx::query(
         "INSERT INTO principals (id, tenant_id, kind, key_hash) VALUES ($1::uuid, $2::uuid, $3, $4)",
     )
