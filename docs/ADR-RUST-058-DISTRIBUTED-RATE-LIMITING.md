@@ -1,0 +1,49 @@
+# RUST-058 — Distributed request rate limiting
+
+## Status
+
+Accepted implementation architecture. Implementation is delivered in staged pull requests; this document does not claim the feature is complete until all stages are merged.
+
+## Context
+
+Request limits must be consistent across runtime workers and isolated for the `Anonymous`, `Authenticated`, and `Owner` invocation classes. Rate-limit state is ephemeral and must not be stored in PostgreSQL.
+
+PostgreSQL `InvocationPool` and token-budget reservations remain the authoritative durable accounting system. Request throttling is a separate concern and must not alter those semantics or add an Owner token-budget pool.
+
+## Decision
+
+- Use Valkey as the first distributed rate-limit backend over Redis RESP via `redis-rs`.
+- Use a Token Bucket per rate-limit key.
+- Refill, decide, consume, and refresh TTL in one atomic server-side Lua script, using Valkey `TIME`.
+- Keep policy and request-class selection in Rust, behind a provider-neutral `RateLimitStore` port and runtime `RateLimitService`.
+- Keep Anonymous, Authenticated, and Owner buckets isolated. No aggregate bucket is introduced in this change.
+- Add no PostgreSQL tables, migrations, or SQLx queries for rate limiting.
+- Initial adapter topology is one configured RESP endpoint using redis-rs `ConnectionManager`; native Sentinel/Cluster routing is deferred until deployment topology is selected.
+- Keys include a tenant/object hash tag for future Redis Cluster slot compatibility.
+
+## Identity and key provenance
+
+- Owner bucket identity is the authenticated TenantOwner Principal.
+- Authenticated bucket identity is the authenticated Principal, never the selected Caller. Rotating among delegated Callers must not evade a Principal's quota.
+- Anonymous bucket identity is a server-derived subject fingerprint. Raw IP addresses and other raw network identifiers must not be written to Valkey keys or logs.
+- Request class, tenant, Principal, Caller, and public-object eligibility are established by trusted server/authentication and Store paths; client DTO fields are not authentication evidence.
+- The three classes have separate capacities/policies. This is logical quota isolation, not a claim of physical connection-pool isolation or weighted fairness.
+
+## Failure semantics
+
+The guarantee is practical distributed rate limiting, not strict quota enforcement. Normal concurrent operations against the same Valkey state are serialized by the atomic script. Asynchronous replication failover may lose recently acknowledged updates; bounded temporary overrun is accepted.
+
+Valkey outage uses fail-open for ordinary invocation admission, with structured observable logging/metrics. No per-process fallback counter is allowed. Any fail-closed exception requires an explicit policy decision.
+
+## Idempotency ordering
+
+Authentication and authorization precede rate admission. An idempotent replay must not consume a new token. The implementation must preserve the atomic idempotency claim and must not move provider/network I/O into a database transaction. A preflight replay query alone is insufficient if it introduces a race; admission must be integrated with the authoritative idempotency outcome.
+
+## Staged implementation and validation
+
+1. Domain/runtime contracts and trusted rate-limit key construction.
+2. Valkey adapter, atomic Lua Token Bucket, reconnecting connection manager, and independent-connection concurrency tests.
+3. SQL-backed Principal API-token/delegation and Anonymous public-object admission paths, followed by all three HTTP routes and replay-aware admission.
+4. Structured observability and full HTTP/PostgreSQL/Valkey acceptance coverage.
+
+The first stage does not claim that invocation routes are rate-limited. Each later stage must pass exact-head format, Clippy, workspace, PostgreSQL 19, and multi-worker Valkey tests before merge.
