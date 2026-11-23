@@ -218,7 +218,7 @@ pub async fn begin_invocation(
         command.idempotency_expires_at,
     );
     let reservation =
-        reserve_invocation_idempotency(&mut transaction, scope, &caller, &claim).await?;
+        reserve_invocation_idempotency(&mut transaction, scope.tenant_id(), &caller, &claim).await?;
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
