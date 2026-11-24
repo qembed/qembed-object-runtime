@@ -24,7 +24,7 @@ pub enum PgReadinessFailure {
 #[derive(Clone)]
 pub struct PgReadinessProbe {
     runtime_pool: PgPool,
-    control_plane_pool: PgPool,
+    ledger: ExternalCallerDeletionLedger,
     replay_complete: CallerDeletionReplayComplete,
 }
 
@@ -32,12 +32,12 @@ impl PgReadinessProbe {
     #[must_use]
     pub fn new(
         runtime_pool: PgPool,
-        control_plane_pool: PgPool,
+        ledger: ExternalCallerDeletionLedger,
         replay_complete: CallerDeletionReplayComplete,
     ) -> Self {
         Self {
             runtime_pool,
-            control_plane_pool,
+            ledger,
             replay_complete,
         }
     }
@@ -47,6 +47,12 @@ impl PgReadinessProbe {
     ///
     /// The probe does not run migrations, acquire tenant context, or expose
     /// connection details and SQL diagnostics in its result.
+    /// Returns the exact authoritative ledger used by restore and readiness.
+    #[must_use]
+    pub fn deletion_ledger(&self) -> ExternalCallerDeletionLedger {
+        self.ledger.clone()
+    }
+
     pub async fn check(&self) -> Result<(), PgReadinessFailure> {
         check_database_and_migrations(
             &self.runtime_pool,
@@ -59,7 +65,7 @@ impl PgReadinessProbe {
         })?;
 
         check_database_and_migrations(
-            &self.control_plane_pool,
+            self.ledger.pool(),
             Path::new(env!("CARGO_MANIFEST_DIR")).join("control_plane_migrations"),
         )
         .await
