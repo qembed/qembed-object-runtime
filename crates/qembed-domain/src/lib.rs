@@ -106,6 +106,7 @@
 //! require_default::<AllowedCommand>();
 //! ```
 
+pub mod anonymous;
 pub mod auth;
 pub mod budget;
 pub mod caller;
