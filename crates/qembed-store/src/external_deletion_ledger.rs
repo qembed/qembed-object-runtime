@@ -195,6 +195,10 @@ impl ExternalCallerDeletionLedger {
         }
     }
 
+    pub(crate) fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     /// Writes a durable tombstone before Runtime physical cleanup. Repeated
     /// writes return the original sequence and never modify deleted_at.
     pub async fn record(
