@@ -191,7 +191,7 @@ Before composing the API router on every start, run
 `PgCallerDeletionRestore::new(restore_pool, ledger).run()` using the
 `RESTORE_DATABASE_URL` pool and pass its returned
 `CallerDeletionReplayComplete` capability to
-`PgReadinessProbe::new(runtime_pool, control_plane_pool, replay_complete)`.
+`PgReadinessProbe::new(runtime_pool, ledger, replay_complete)`.
 The replay process holds a Control-plane advisory lock until the first
 successful readiness check, closing the race between the replay high-water
 check and traffic admission.
