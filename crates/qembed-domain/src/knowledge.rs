@@ -699,7 +699,10 @@ mod tests {
         doc.retire_at(RevisionNumber::new(4))
             .expect("retirement closes interval");
         assert_eq!(doc.status(), KnowledgeDocumentStatus::Retired);
-        assert!(doc.is_visible_at(pinned), "retirement must preserve historical visibility");
+        assert!(
+            doc.is_visible_at(pinned),
+            "retirement must preserve historical visibility"
+        );
         assert!(
             !doc.is_visible_at(PinnedKnowledgeRevision::new(
                 doc.tenant_id(),
