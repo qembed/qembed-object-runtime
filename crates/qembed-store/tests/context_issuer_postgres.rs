@@ -335,11 +335,11 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .expect("signed-context Store should read the matching canonical switches");
     let decision = evaluate_kill_switches(kill_switch_context, &switches);
     assert!(matches!(
-        decision,
+        &decision,
         KillSwitchDecision::Blocked {
             scope: KillSwitchScope::Tenant { tenant_id: blocked_tenant },
             ..
-        } if blocked_tenant == tenant_id
+        } if *blocked_tenant == tenant_id
     ));
 
     let side_effects = std::sync::atomic::AtomicUsize::new(0);
