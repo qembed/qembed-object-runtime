@@ -254,7 +254,7 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     let durable_name = format!("qembed-rust063-{suffix}");
     let stream = context
         .get_or_create_stream(StreamConfig {
-            name: stream_name,
+            name: stream_name.clone(),
             subjects: vec![subject.clone()],
             max_messages: 100,
             ..Default::default()
@@ -294,7 +294,7 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     publisher
         .publish(OutboundMessage::new(
             delivery_id.to_string(),
-            subject,
+            subject.clone(),
             serde_json::json!({
                 "type": "invocation_received",
                 "invocation_id": Uuid::new_v4()
