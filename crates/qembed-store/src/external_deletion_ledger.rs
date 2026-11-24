@@ -326,7 +326,11 @@ impl ExternalCallerDeletionLedger {
 
     /// Returns a serialized high-water mark suitable for the final catch-up check.
     pub async fn high_water_mark(&self) -> Result<i64, CallerDeletionLedgerError> {
-        let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(CallerDeletionLedgerError::Database)?;
         lock_ledger(&mut transaction).await?;
         let value = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
