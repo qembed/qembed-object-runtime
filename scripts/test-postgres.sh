@@ -123,8 +123,7 @@ for sql_file in \
   migrations/rt060_anonymous_object_caller.sql \
   migrations/rt061_runtime_caller_erasure.sql \
   migrations/rt061b_verified_caller_erasure.sql \
-  migrations/rt061c_cancelled_tool_execution_erasure.sql \
-  migrations/rt062_deterministic_reservation_sweeper.sql; do
+  migrations/rt061c_cancelled_tool_execution_erasure.sql; do
   "${compose[@]}" cp "$sql_repo_dir/$sql_file" "postgres:/tmp/$(basename "$sql_file")"
   psql_in_test_db -f "/tmp/$(basename "$sql_file")"
 done
