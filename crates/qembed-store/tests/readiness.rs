@@ -23,6 +23,19 @@ async fn install_replay_stub(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("restore role should receive replay execution");
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION qembed_crypto.caller_deletion_schema_version() \
+         RETURNS smallint LANGUAGE sql AS 'SELECT 3::smallint'",
+    )
+    .execute(pool)
+    .await
+    .expect("RT-061 schema version stub should be installed");
+    sqlx::query(
+        "GRANT EXECUTE ON FUNCTION qembed_crypto.caller_deletion_schema_version() TO qembed_restore",
+    )
+    .execute(pool)
+    .await
+    .expect("restore role should receive schema version execution");
 }
 
 async fn install_runtime_erasure_stubs(pool: &sqlx::PgPool) {
@@ -48,6 +61,12 @@ async fn install_runtime_erasure_stubs(pool: &sqlx::PgPool) {
     .execute(pool)
     .await
     .expect("Runtime role should receive erasure execution");
+    sqlx::query(
+        "GRANT EXECUTE ON FUNCTION qembed_crypto.caller_deletion_schema_version() TO qembed_runtime",
+    )
+    .execute(pool)
+    .await
+    .expect("Runtime role should receive schema version execution");
 }
 
 async fn prepare_replay(
