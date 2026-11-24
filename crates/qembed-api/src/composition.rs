@@ -78,6 +78,7 @@ impl ReadinessProbe for StoreReadinessProbe {
                     ReadinessStatus::DatabaseUnavailable
                 }
                 Err(PgReadinessFailure::MigrationMismatch)
+                | Err(PgReadinessFailure::RuntimeDeletionSchemaMismatch)
                 | Err(PgReadinessFailure::ControlPlaneMigrationMismatch) => {
                     ReadinessStatus::MigrationMismatch
                 }
