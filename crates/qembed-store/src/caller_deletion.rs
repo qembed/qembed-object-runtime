@@ -162,7 +162,7 @@ impl PgCallerDeletionRepository {
         transaction
             .commit()
             .await
-            .map_err(|error| CallerDeletionStoreError::Database(sqlx::Error::from(error)))?;
+            .map_err(CallerDeletionStoreError::Database)?;
         Ok(job)
     }
 
@@ -208,8 +208,8 @@ impl PgCallerDeletionRepository {
         let tenant_id = *scope.tenant_id().as_uuid();
         let caller_uuid = *caller_id.as_uuid();
 
-        let job_exists = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM deletion_jobs \
+        let existing_status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM deletion_jobs \
              WHERE tenant_id = $1 AND caller_id = $2 AND id = $3 FOR UPDATE",
         )
         .bind(tenant_id)
@@ -218,10 +218,21 @@ impl PgCallerDeletionRepository {
         .fetch_optional(transaction.connection())
         .await
         .map_err(CallerDeletionStoreError::Database)?
-        .is_some();
+        ;
 
-        if !job_exists {
+        let Some(existing_status) = existing_status else {
             return Err(CallerDeletionStoreError::NotFound);
+        };
+        let existing_status = CallerDeletionJobStatus::parse(&existing_status)?;
+        if existing_status == CallerDeletionJobStatus::Done {
+            transaction
+                .commit()
+                .await
+                .map_err(CallerDeletionStoreError::Database)?;
+            return Ok(CallerDeletionJob {
+                id: job_id,
+                status: CallerDeletionJobStatus::Done,
+            });
         }
 
         let complete = sqlx::query_scalar::<_, bool>(
