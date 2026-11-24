@@ -118,14 +118,13 @@ impl PgCallerDeletionRepository {
             return Err(CallerDeletionStoreError::NotFound);
         }
 
-        let revoked = sqlx::query_scalar::<_, bool>(
-            "SELECT qembed_crypto.request_caller_deletion($1, $2)",
-        )
-        .bind(tenant_id)
-        .bind(caller_uuid)
-        .fetch_one(transaction.connection())
-        .await
-        .map_err(CallerDeletionStoreError::Database)?;
+        let revoked =
+            sqlx::query_scalar::<_, bool>("SELECT qembed_crypto.request_caller_deletion($1, $2)")
+                .bind(tenant_id)
+                .bind(caller_uuid)
+                .fetch_one(transaction.connection())
+                .await
+                .map_err(CallerDeletionStoreError::Database)?;
 
         if !revoked {
             return Err(CallerDeletionStoreError::NotFound);
@@ -153,10 +152,14 @@ impl PgCallerDeletionRepository {
                 ) {
                     CallerDeletionJob { id, status }
                 } else {
-                    self.insert_job(&mut transaction, tenant_id, caller_uuid).await?
+                    self.insert_job(&mut transaction, tenant_id, caller_uuid)
+                        .await?
                 }
             }
-            None => self.insert_job(&mut transaction, tenant_id, caller_uuid).await?,
+            None => {
+                self.insert_job(&mut transaction, tenant_id, caller_uuid)
+                    .await?
+            },
         };
 
         transaction
@@ -217,8 +220,7 @@ impl PgCallerDeletionRepository {
         .bind(job_id)
         .fetch_optional(transaction.connection())
         .await
-        .map_err(CallerDeletionStoreError::Database)?
-        ;
+        .map_err(CallerDeletionStoreError::Database)?;
 
         let Some(existing_status) = existing_status else {
             return Err(CallerDeletionStoreError::NotFound);
@@ -235,14 +237,13 @@ impl PgCallerDeletionRepository {
             });
         }
 
-        let complete = sqlx::query_scalar::<_, bool>(
-            "SELECT qembed_crypto.erase_caller_data($1, $2)",
-        )
-        .bind(tenant_id)
-        .bind(caller_uuid)
-        .fetch_one(transaction.connection())
-        .await
-        .map_err(CallerDeletionStoreError::Database)?;
+        let complete =
+            sqlx::query_scalar::<_, bool>("SELECT qembed_crypto.erase_caller_data($1, $2)")
+                .bind(tenant_id)
+                .bind(caller_uuid)
+                .fetch_one(transaction.connection())
+                .await
+                .map_err(CallerDeletionStoreError::Database)?;
 
         let status = if complete {
             CallerDeletionJobStatus::Done
@@ -272,11 +273,8 @@ impl PgCallerDeletionRepository {
         transaction
             .commit()
             .await
-            .map_err(|error| CallerDeletionStoreError::Database(sqlx::Error::from(error)))?;
+            .map_err(CallerDeletionStoreError::Database)?;
 
-        Ok(CallerDeletionJob {
-            id: job_id,
-            status,
-        })
+        Ok(CallerDeletionJob { id: job_id, status })
     }
 }
