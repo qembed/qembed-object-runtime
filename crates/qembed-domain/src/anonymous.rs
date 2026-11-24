@@ -9,11 +9,22 @@ use crate::ids::{ObjectId, TenantId};
 /// The fingerprint must be produced by the HTTP edge from the direct peer
 /// address and a server-held keyed secret. It is intentionally opaque and is
 /// never deserialized from a request DTO.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnonymousContext {
     tenant_id: TenantId,
     object_id: ObjectId,
     subject_fingerprint: [u8; 32],
+}
+
+impl fmt::Debug for AnonymousContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AnonymousContext")
+            .field("tenant_id", &self.tenant_id)
+            .field("object_id", &self.object_id)
+            .field("subject_fingerprint", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl AnonymousContext {
