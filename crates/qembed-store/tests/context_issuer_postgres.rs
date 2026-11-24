@@ -4,14 +4,16 @@ use qembed_domain::test_support::scope_for_tenant;
 use qembed_domain::{
     anonymous::AnonymousContext,
     ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, ToolId, TraceId},
-    kill_switch::{KillSwitchContext, KillSwitchScope},
+    kill_switch::{
+        KillSwitchContext, KillSwitchDecision, KillSwitchScope, KillSwitchStore,
+        evaluate_kill_switches,
+    },
     ports::{
         AnonymousInvocationStartCommand, AnonymousInvocationStartStore,
         InvocationIdempotencyPreflight, InvocationStartOutcome,
     },
     rate_limit::RateLimitRequestId,
 };
-use qembed_runtime::kill_switch::{KillSwitchService, KillSwitchServiceError};
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     begin_context_transaction, begin_principal_context_transaction, connect_pool,
@@ -325,24 +327,28 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("enabled tenant Tool switch should be inserted");
 
-    let kill_switch_service = KillSwitchService::new(PgKillSwitchStore::new(PgContext::new(
+    let kill_switch_store = PgKillSwitchStore::new(PgContext::new(
         pool.clone(),
         issuer.clone(),
-    )));
+    ));
     let kill_switch_context = KillSwitchContext::new(tenant_id, object_id, tool_id);
-    let side_effects = std::sync::atomic::AtomicUsize::new(0);
-    let blocked = kill_switch_service
-        .run_if_enabled(&scope, kill_switch_context, || async {
-            side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        })
-        .await;
+    let switches = kill_switch_store
+        .load_matching_kill_switches(&scope, kill_switch_context)
+        .await
+        .expect("signed-context Store should read the matching canonical switches");
+    let decision = evaluate_kill_switches(kill_switch_context, &switches);
     assert!(matches!(
-        blocked,
-        Err(KillSwitchServiceError::Disabled {
+        decision,
+        KillSwitchDecision::Blocked {
             scope: KillSwitchScope::Tenant { tenant_id: blocked_tenant },
             ..
-        }) if blocked_tenant == tenant_id
+        } if blocked_tenant == tenant_id
     ));
+
+    let side_effects = std::sync::atomic::AtomicUsize::new(0);
+    if decision == KillSwitchDecision::Allowed {
+        side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     assert_eq!(
         side_effects.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -357,12 +363,15 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .execute(&pool)
     .await
     .expect("test should be able to re-enable its Tenant switch");
-    kill_switch_service
-        .run_if_enabled(&scope, kill_switch_context, || async {
-            side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        })
+    let switches = kill_switch_store
+        .load_matching_kill_switches(&scope, kill_switch_context)
         .await
-        .expect("enabled hierarchy should permit the side effect");
+        .expect("enabled switches should remain readable");
+    let decision = evaluate_kill_switches(kill_switch_context, &switches);
+    assert_eq!(decision, KillSwitchDecision::Allowed);
+    if decision == KillSwitchDecision::Allowed {
+        side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     assert_eq!(side_effects.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     let mut transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
