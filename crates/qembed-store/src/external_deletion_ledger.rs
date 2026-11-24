@@ -1,0 +1,309 @@
+//! Mandatory append-only Caller deletion ledger in the independent Control-plane PostgreSQL cluster.
+//!
+//! The Control-plane stores only tenant-scoped HMAC tombstones. It never stores
+//! raw Caller IDs, credentials, or Caller-derived content. This adapter has no
+//! Runtime-local implementation or fallback.
+
+use std::fmt;
+
+use qembed_domain::ids::{CallerId, TenantId};
+use ring::hmac;
+use sqlx::{Acquire, PgPool, migrate::MigrateError, migrate::Migrator};
+
+const HMAC_DOMAIN: &[u8] = b"qembed/caller-deletion/v1\\0";
+const KEY_VERSION: &str = "v1";
+const ADVISORY_LOCK_KEY: i64 = 61_061;
+
+/// Stable HMAC key used to recognize Caller identities after a Runtime restore.
+///
+/// The key must be supplied by deployment secret management and retained for as
+/// long as any tombstone using this version exists. Debug output never reveals it.
+pub struct CallerDeletionKey([u8; 32]);
+
+impl CallerDeletionKey {
+    /// Creates the v1 key from exactly 32 secret bytes.
+    pub fn new(bytes: &[u8]) -> Result<Self, CallerDeletionKeyError> {
+        let key: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| CallerDeletionKeyError::InvalidLength)?;
+        Ok(Self(key))
+    }
+
+    /// Parses a 64-character hexadecimal representation suitable for an
+    /// environment variable backed by a secret manager.
+    pub fn from_hex(value: &str) -> Result<Self, CallerDeletionKeyError> {
+        if value.len() != 64 {
+            return Err(CallerDeletionKeyError::InvalidEncoding);
+        }
+        let mut bytes = [0_u8; 32];
+        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+            let high = (pair[0] as char)
+                .to_digit(16)
+                .ok_or(CallerDeletionKeyError::InvalidEncoding)?;
+            let low = (pair[1] as char)
+                .to_digit(16)
+                .ok_or(CallerDeletionKeyError::InvalidEncoding)?;
+            bytes[index] = ((high << 4) | low) as u8;
+        }
+        Ok(Self(bytes))
+    }
+
+    /// Computes the tenant-bound, domain-separated digest for one Caller.
+    #[must_use]
+    pub fn caller_hash(&self, tenant_id: TenantId, caller_id: CallerId) -> [u8; 32] {
+        let key = hmac::Key::new(hmac::HMAC_SHA256, &self.0);
+        let mut input = Vec::with_capacity(HMAC_DOMAIN.len() + 32);
+        input.extend_from_slice(HMAC_DOMAIN);
+        input.extend_from_slice(tenant_id.as_uuid().as_bytes());
+        input.extend_from_slice(caller_id.as_uuid().as_bytes());
+        let tag = hmac::sign(&key, &input);
+        let mut digest = [0_u8; 32];
+        digest.copy_from_slice(tag.as_ref());
+        digest
+    }
+}
+
+impl fmt::Debug for CallerDeletionKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("CallerDeletionKey")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Invalid secret material for the v1 Caller deletion HMAC.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallerDeletionKeyError {
+    InvalidLength,
+    InvalidEncoding,
+}
+
+impl fmt::Display for CallerDeletionKeyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength => formatter.write_str("Caller deletion HMAC key must be 32 bytes"),
+            Self::InvalidEncoding => formatter.write_str("Caller deletion HMAC key must be 64 hexadecimal characters"),
+        }
+    }
+}
+
+impl std::error::Error for CallerDeletionKeyError {}
+
+/// One immutable external deletion tombstone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallerDeletionTombstone {
+    pub sequence_id: i64,
+    pub tenant_id: TenantId,
+    pub caller_hash: [u8; 32],
+    pub key_version: String,
+}
+
+/// Consistent append-only ledger snapshot and its replay cursor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallerDeletionLedgerSnapshot {
+    pub high_water_mark: i64,
+    pub tombstones: Vec<CallerDeletionTombstone>,
+}
+
+/// Result of an idempotent tombstone insert.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallerDeletionRecord {
+    pub sequence_id: i64,
+    pub inserted: bool,
+}
+
+/// Failures from the mandatory external ledger.
+#[derive(Debug)]
+pub enum CallerDeletionLedgerError {
+    Database(sqlx::Error),
+    InvalidRecord,
+    UnsupportedKeyVersion,
+}
+
+impl fmt::Display for CallerDeletionLedgerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Database(error) => write!(formatter, "Control-plane ledger database error: {error}"),
+            Self::InvalidRecord => formatter.write_str("Control-plane ledger returned an invalid tombstone"),
+            Self::UnsupportedKeyVersion => formatter.write_str("Control-plane ledger contains an unsupported HMAC key version"),
+        }
+    }
+}
+
+impl std::error::Error for CallerDeletionLedgerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// External-only PostgreSQL adapter. The pool must point at the dedicated
+/// Control-plane cluster and use a login that inherits only
+/// qembed_control_plane_runtime privileges.
+#[derive(Clone)]
+pub struct ExternalCallerDeletionLedger {
+    pool: PgPool,
+    key: std::sync::Arc<CallerDeletionKey>,
+}
+
+impl ExternalCallerDeletionLedger {
+    #[must_use]
+    pub fn new(pool: PgPool, key: CallerDeletionKey) -> Self {
+        Self {
+            pool,
+            key: std::sync::Arc::new(key),
+        }
+    }
+
+    /// Writes a durable tombstone before Runtime physical cleanup. Repeated
+    /// writes return the original sequence and never modify deleted_at.
+    pub async fn record(
+        &self,
+        tenant_id: TenantId,
+        caller_id: CallerId,
+    ) -> Result<CallerDeletionRecord, CallerDeletionLedgerError> {
+        let caller_hash = self.key.caller_hash(tenant_id, caller_id);
+        let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
+        lock_ledger(&mut transaction).await?;
+
+        let inserted = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO qembed_control_plane.caller_deletion_tombstones \\
+             (tenant_id, caller_hash, key_version) VALUES ($1, $2, $3) \\
+             ON CONFLICT (tenant_id, caller_hash) DO NOTHING RETURNING sequence_id",
+        )
+        .bind(tenant_id.into_uuid())
+        .bind(caller_hash.as_slice())
+        .bind(KEY_VERSION)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(CallerDeletionLedgerError::Database)?;
+
+        let (sequence_id, was_inserted) = match inserted {
+            Some(sequence_id) => (sequence_id, true),
+            None => {
+                let sequence_id = sqlx::query_scalar::<_, i64>(
+                    "SELECT sequence_id FROM qembed_control_plane.caller_deletion_tombstones \\
+                     WHERE tenant_id = $1 AND caller_hash = $2",
+                )
+                .bind(tenant_id.into_uuid())
+                .bind(caller_hash.as_slice())
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(CallerDeletionLedgerError::Database)?;
+                (sequence_id, false)
+            }
+        };
+
+        transaction.commit().await.map_err(CallerDeletionLedgerError::Database)?;
+        Ok(CallerDeletionRecord { sequence_id, inserted: was_inserted })
+    }
+
+    /// Reads a consistent immutable snapshot. Writers serialize on the same
+    /// transaction-scoped advisory lock, so no transaction can commit later with
+    /// a sequence ID at or below this snapshot's high-water mark.
+    pub async fn snapshot(&self) -> Result<CallerDeletionLedgerSnapshot, CallerDeletionLedgerError> {
+        let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
+        lock_ledger(&mut transaction).await?;
+        let high_water_mark = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(CallerDeletionLedgerError::Database)?;
+        let rows = sqlx::query_as::<_, (i64, uuid::Uuid, Vec<u8>, String)>(
+            "SELECT sequence_id, tenant_id, caller_hash, key_version \\
+             FROM qembed_control_plane.caller_deletion_tombstones \\
+             WHERE sequence_id <= $1 ORDER BY sequence_id",
+        )
+        .bind(high_water_mark)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(CallerDeletionLedgerError::Database)?;
+        transaction.commit().await.map_err(CallerDeletionLedgerError::Database)?;
+
+        let mut tombstones = Vec::with_capacity(rows.len());
+        for (sequence_id, tenant_uuid, hash, key_version) in rows {
+            let caller_hash: [u8; 32] = hash.try_into().map_err(|_| CallerDeletionLedgerError::InvalidRecord)?;
+            if key_version != KEY_VERSION {
+                return Err(CallerDeletionLedgerError::UnsupportedKeyVersion);
+            }
+            tombstones.push(CallerDeletionTombstone {
+                sequence_id,
+                tenant_id: TenantId::from_uuid(tenant_uuid),
+                caller_hash,
+                key_version,
+            });
+        }
+
+        Ok(CallerDeletionLedgerSnapshot { high_water_mark, tombstones })
+    }
+
+    /// Returns a serialized high-water mark suitable for the final catch-up check.
+    pub async fn high_water_mark(&self) -> Result<i64, CallerDeletionLedgerError> {
+        let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
+        lock_ledger(&mut transaction).await?;
+        let value = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(CallerDeletionLedgerError::Database)?;
+        transaction.commit().await.map_err(CallerDeletionLedgerError::Database)?;
+        Ok(value)
+    }
+}
+
+async fn lock_ledger(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(), CallerDeletionLedgerError> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(ADVISORY_LOCK_KEY)
+        .execute(&mut **transaction)
+        .await
+        .map_err(CallerDeletionLedgerError::Database)?;
+    Ok(())
+}
+
+/// Applies the standalone SQLx migration set to the Control-plane database.
+/// This is an explicit deployment operation and is never run by pool creation.
+pub async fn run_control_plane_migrations(pool: &PgPool) -> Result<(), MigrateError> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("control_plane_migrations");
+    let migrator = Migrator::new(path).await?;
+    migrator.run(pool).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn caller_hash_is_stable_and_tenant_scoped() {
+        let key = CallerDeletionKey::new(&[7_u8; 32]).unwrap();
+        let tenant = TenantId::new();
+        let caller = CallerId::new();
+        let hash = key.caller_hash(tenant, caller);
+
+        assert_eq!(hash, key.caller_hash(tenant, caller));
+        assert_ne!(hash, key.caller_hash(TenantId::new(), caller));
+        assert_ne!(hash, key.caller_hash(tenant, CallerId::new()));
+    }
+
+    #[test]
+    fn key_parser_requires_exact_32_byte_hex_secret() {
+        assert!(CallerDeletionKey::from_hex(&"ab".repeat(32)).is_ok());
+        assert_eq!(CallerDeletionKey::new(&[1_u8; 31]).unwrap_err(), CallerDeletionKeyError::InvalidLength);
+        assert_eq!(CallerDeletionKey::from_hex("not-hex"), Err(CallerDeletionKeyError::InvalidEncoding));
+        assert_eq!(CallerDeletionKey::from_hex(&"a".repeat(64)), Err(CallerDeletionKeyError::InvalidEncoding));
+    }
+
+    #[test]
+    fn key_debug_output_is_redacted() {
+        let key = CallerDeletionKey::new(&[0x5a; 32]).unwrap();
+        let debug = format!("{key:?}");
+        assert!(debug.contains("REDACTED"));
+        assert!(!debug.contains("5a5a5a"));
+    }
+}
