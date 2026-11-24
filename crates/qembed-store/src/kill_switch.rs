@@ -49,9 +49,9 @@ impl fmt::Display for KillSwitchStoreError {
                 "kill-switch context initialization failed: {error}"
             ),
             Self::Database(error) => write!(formatter, "kill-switch query failed: {error}"),
-            Self::TenantMismatch => {
-                formatter.write_str("kill-switch authority differs from the requested Tenant/Object binding")
-            }
+            Self::TenantMismatch => formatter.write_str(
+                "kill-switch authority differs from the requested Tenant/Object binding",
+            ),
             Self::InvalidPersistedValue(field) => {
                 write!(formatter, "persisted kill switch has invalid {field}")
             }
