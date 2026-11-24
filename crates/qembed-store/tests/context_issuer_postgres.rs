@@ -1,9 +1,12 @@
 use std::time::Duration;
 
-use qembed_domain::ids::{CallerId, TenantId};
+use qembed_domain::{
+    anonymous::AnonymousContext,
+    ids::{CallerId, ObjectId, ObjectVersionId, TenantId},
+};
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::{
-    ContextIssuer, ContextIssuerConfig, PgPoolConfig, RingEd25519SigningKey,
+    ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     begin_context_transaction, begin_principal_context_transaction, connect_pool,
 };
 use sqlx::PgPool;
@@ -790,6 +793,256 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .await
         .expect("control-plane session authorization should be reset before pool reuse");
     drop(admin_connection);
+    admin_pool.close().await;
+    pool.close().await;
+}
+
+
+async fn seed_public_object(pool: &PgPool, tenant_id: TenantId, object_id: ObjectId) {
+    let version_id = ObjectVersionId::new();
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
+        .bind(tenant_id.to_string())
+        .execute(pool)
+        .await
+        .expect("Anonymous tenant fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO objects (tenant_id, object_id, state, anonymous_invocation_enabled) \
+         VALUES ($1::uuid, $2::uuid, 'draft', TRUE)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(pool)
+    .await
+    .expect("public Object fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO object_versions \
+         (tenant_id, object_id, object_version_id, version_number, status) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 1, 'draft')",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .execute(pool)
+    .await
+    .expect("Draft ObjectVersion fixture should be inserted");
+
+    sqlx::query(
+        "UPDATE objects SET state = 'validating' \
+         WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(pool)
+    .await
+    .expect("Object should enter validation");
+
+    sqlx::query(
+        "UPDATE object_versions SET status = 'published', published_at = now() \
+         WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND object_version_id = $3::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .execute(pool)
+    .await
+    .expect("ObjectVersion should be published through its lifecycle");
+
+    sqlx::query(
+        "UPDATE objects SET state = 'active', published_version_id = $3::uuid \
+         WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .execute(pool)
+    .await
+    .expect("Object should become active with its published version");
+}
+
+async fn stage_anonymous_test_issuer(
+    pool: &PgPool,
+    admin_pool: &PgPool,
+    deployment_id: &str,
+) -> ContextIssuer {
+    let mut admin_connection = admin_pool
+        .acquire()
+        .await
+        .expect("key control-plane connection should be acquired");
+    sqlx::query("SET SESSION AUTHORIZATION qembed_key_control_plane")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("test harness should assume the dedicated key control-plane identity");
+
+    let database_oid: String =
+        sqlx::query_scalar("SELECT oid::text FROM pg_database WHERE datname = current_database()")
+            .fetch_one(pool)
+            .await
+            .expect("database OID should be readable");
+    let issuer_name = "qembed-runtime";
+    let audience =
+        format!("urn:qembed:postgres:deployment:{deployment_id}:database:{database_oid}");
+    let key_id = format!("rt059-anonymous-test-{}", Uuid::new_v4());
+    let signing_key = RingEd25519SigningKey::from_seed(key_id.clone(), &[73_u8; 32])
+        .expect("fixed test seed should create an Ed25519 signer");
+    let public_key = signing_key.public_key();
+
+    sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
+        .bind(&key_id)
+        .bind(public_key.to_vec())
+        .bind(issuer_name)
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rt059-anonymous-test")
+        .bind(Uuid::new_v4())
+        .bind("stage qctx2 Anonymous integration key")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("control plane should stage the public verification key");
+
+    let _: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
+    )
+    .bind(&key_id)
+    .bind("operator:rt059-anonymous-test")
+    .bind("approver:rt059-anonymous-test")
+    .bind(Uuid::new_v4())
+    .bind("activate qctx2 Anonymous integration key")
+    .fetch_one(&mut *admin_connection)
+    .await
+    .expect("a distinct approver should activate the verification key");
+
+    sqlx::query("RESET SESSION AUTHORIZATION")
+        .execute(&mut *admin_connection)
+        .await
+        .expect("control-plane authorization should be reset before pool reuse");
+    drop(admin_connection);
+
+    let config = ContextIssuerConfig::with_default_lifetime(
+        issuer_name,
+        audience,
+        deployment_id,
+        key_id,
+    )
+    .expect("Anonymous test issuer configuration should be valid");
+    ContextIssuer::new(config, signing_key).expect("Anonymous test issuer should be valid")
+}
+
+#[tokio::test]
+#[ignore = "requires canonical qembed-sql RT-050, RT-059 and RT-060; run from scripts/test-postgres.sh"]
+async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_principal() {
+    let pool = pool_with_one_connection().await;
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let admin_pool = connect_pool(
+        &database_url,
+        PgPoolConfig {
+            max_connections: 2,
+            acquire_timeout: Duration::from_secs(5),
+        },
+    )
+    .await
+    .expect("key control-plane pool should open independent backends");
+
+    let tenant_id = TenantId::new();
+    let object_id = ObjectId::new();
+    seed_public_object(&pool, tenant_id, object_id).await;
+
+    let deployment_id = format!("rt059-anonymous-deployment-{}", Uuid::new_v4());
+    let issuer = stage_anonymous_test_issuer(&pool, &admin_pool, &deployment_id).await;
+    let context = PgContext::new(pool.clone(), issuer);
+    let fingerprint = [0x5a; 32];
+    let anonymous = AnonymousContext::from_server_fingerprint(tenant_id, object_id, fingerprint)
+        .expect("server-derived Anonymous context should be valid");
+
+    let (mut transaction, caller) = context
+        .begin_anonymous(&anonymous)
+        .await
+        .expect("qctx2 should provision and resolve the Object-scoped Anonymous Caller");
+    assert_eq!(caller.kind(), qembed_domain::caller::CallerKind::Anonymous);
+
+    let token: String = sqlx::query_scalar("SELECT current_setting('app.context_token', true)")
+        .fetch_one(transaction.connection())
+        .await
+        .expect("qctx2 token should be installed");
+    assert!(token.starts_with("qctx2:"));
+
+    let claims: serde_json::Value =
+        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+            .bind(&token)
+            .fetch_one(transaction.connection())
+            .await
+            .expect("PostgreSQL should verify the Rust qctx2 token");
+    assert_eq!(claims.as_object().map(serde_json::Map::len), Some(17));
+    assert_eq!(claims["version"], "2");
+    assert_eq!(claims["subject_kind"], "anonymous");
+    assert_eq!(claims["principal_id"], serde_json::Value::Null);
+    assert_eq!(claims["tenant_id"], tenant_id.to_string());
+    assert_eq!(claims["object_id"], object_id.to_string());
+    assert_eq!(claims["caller_id"], caller.caller_id().to_string());
+
+    let current_principal: Option<String> =
+        sqlx::query_scalar("SELECT qembed_crypto.current_principal_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("qctx2 Principal accessor should return SQL NULL");
+    let current_caller: Option<String> =
+        sqlx::query_scalar("SELECT qembed_crypto.current_caller_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("qctx2 Caller accessor should return the resolved Caller");
+    let current_object: Option<String> =
+        sqlx::query_scalar("SELECT qembed_crypto.current_object_id()::text")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("qctx2 Object accessor should return the bound Object");
+    let current_fingerprint: Option<Vec<u8>> =
+        sqlx::query_scalar("SELECT qembed_crypto.current_anonymous_fingerprint()")
+            .fetch_one(transaction.connection())
+            .await
+            .expect("qctx2 fingerprint accessor should return the signed fingerprint");
+    assert_eq!(current_principal, None);
+    assert_eq!(current_caller, Some(caller.caller_id().to_string()));
+    assert_eq!(current_object, Some(object_id.to_string()));
+    assert_eq!(current_fingerprint, Some(fingerprint.to_vec()));
+    transaction
+        .commit()
+        .await
+        .expect("Anonymous invocation context transaction should commit");
+
+    // The Object owns one stable Caller; the fingerprint remains per-subject.
+    let other_fingerprint = [0x6b; 32];
+    let other_anonymous =
+        AnonymousContext::from_server_fingerprint(tenant_id, object_id, other_fingerprint)
+            .expect("second server-derived Anonymous context should be valid");
+    let (second_transaction, second_caller) = context
+        .begin_anonymous(&other_anonymous)
+        .await
+        .expect("another Anonymous subject should resolve the same Object Caller");
+    assert_eq!(second_caller.caller_id(), caller.caller_id());
+    second_transaction
+        .commit()
+        .await
+        .expect("second Anonymous context transaction should commit");
+
+    sqlx::query(
+        "UPDATE objects SET anonymous_invocation_enabled = FALSE \
+         WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("Object should be able to disable Anonymous invocation");
+    let disabled = context.begin_anonymous(&anonymous).await;
+    assert!(matches!(
+        disabled,
+        Err(qembed_store::ContextTransactionError::AnonymousCallerResolution(
+            qembed_store::caller::AnonymousCallerResolutionError::NotPubliclyInvokable
+        ))
+    ));
+
     admin_pool.close().await;
     pool.close().await;
 }
