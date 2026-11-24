@@ -143,7 +143,7 @@ impl AnonymousInvocationBackend for PgAnonymousInvocationBackend {
                 object_id,
                 subject_fingerprint,
             )
-            .map_err(|_| OwnerApiBackendError::Internal)?;
+            .map_err(|_| OwnerApiBackendError::InvalidRequest)?;
             let service = AnonymousInvocationStartService::new(
                 PgAnonymousInvocationStartStore::new(self.context.clone()),
             );
