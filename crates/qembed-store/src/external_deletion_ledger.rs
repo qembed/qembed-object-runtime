@@ -736,7 +736,7 @@ mod tests {
             CallerDeletionKeyError::InvalidEncoding
         );
         assert_eq!(
-            CallerDeletionKey::from_hex(&"a".repeat(64)).unwrap_err(),
+            CallerDeletionKey::from_hex(&"g".repeat(64)).unwrap_err(),
             CallerDeletionKeyError::InvalidEncoding
         );
     }
