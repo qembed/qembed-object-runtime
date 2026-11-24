@@ -19,12 +19,12 @@ A Tool side effect must not begin when a matching Platform, Tenant, Object, or T
 - A Tool switch may be global (`tenant_id IS NULL`) or tenant-specific. A global Tool switch is evaluated before a tenant-specific Tool switch.
 - Ignore switches for other tenants, Objects, and Tools.
 - Derive the request context from trusted `Scope`, Object ID, and Tool ID. The context tenant must equal the authenticated Scope tenant.
-- Read matching rows in a signed Principal PostgreSQL transaction so canonical RLS exposes only global switches and the current tenant's switches.
+- Read matching rows in a signed qctx1 Principal or qctx2 Anonymous PostgreSQL transaction so canonical RLS exposes only global switches and the current tenant's switches. Anonymous actions retain their server-derived qctx2 identity; no synthetic Principal is introduced.
 - Store lookup errors fail closed. The runtime invokes the side-effect closure only after the latest switch snapshot permits the action.
 - The check is a pre-side-effect admission gate; it does not retroactively cancel an already-running external operation.
 
 ## Verification
 
-- Domain tests cover all four levels, ancestor-deny precedence, global-vs-tenant Tool precedence, and isolation from unrelated scopes.
+- Domain tests cover all four levels, ancestor-deny precedence, global-vs-tenant Tool precedence, and isolation from unrelated scopes. Runtime tests cover both qctx1 Principal and qctx2 Anonymous admission.
 - Runtime tests prove a denied decision does not invoke the side-effect closure.
 - PostgreSQL integration coverage uses the canonical SQL schema and real signed-context/RLS adapter; a disabled Tenant switch blocks a request despite enabled Object and Tool switches.
