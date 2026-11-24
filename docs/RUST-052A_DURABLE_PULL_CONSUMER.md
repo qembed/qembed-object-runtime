@@ -47,3 +47,5 @@ The CI suite combines the existing PostgreSQL integration cases with the new rea
 The CI PostgreSQL harness starts the nats:2.11-alpine JetStream service in compose.test.yaml; the workspace integration suite runs against that service. No broker mock is used for these delivery and relay scenarios.
 
 - The concurrent budget reservation case now provisions two separate one-connection pools and asserts distinct pg_backend_pid() values before releasing both transactions through the barrier.
+
+The RUST-063 changes are validated with the repository's pinned Rust 1.100.0 toolchain and the PostgreSQL 19 + JetStream CI environment.
