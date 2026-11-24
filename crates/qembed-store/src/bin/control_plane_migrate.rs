@@ -1,9 +1,6 @@
 use std::{env, error::Error};
 
-use qembed_store::{
-    PgPoolConfig, connect_pool,
-    external_deletion_ledger::run_control_plane_migrations,
-};
+use qembed_store::{PgPoolConfig, connect_pool, external_deletion_ledger::run_control_plane_migrations};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
