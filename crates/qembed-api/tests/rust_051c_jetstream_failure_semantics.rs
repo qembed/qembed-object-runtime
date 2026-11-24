@@ -384,6 +384,12 @@ async fn child_process_relay_entrypoint() {
     let pool = database().await;
     let dispatcher = PgOutboxDispatcher::new(pool.clone());
 
+    if mode == "before_nats_connect" {
+        // Simulate a worker process exiting before it has opened a broker connection.
+        pool.close().await;
+        return;
+    }
+
     if mode == "claim_only" {
         let claimed = dispatcher
             .claim_batch(&owner, &topic, 1, 1)
@@ -480,6 +486,51 @@ async fn nats_connect_failure_before_claim_leaves_outbox_unclaimed() {
         .run_once()
         .await
         .expect("the restarted relay publishes the still-pending delivery");
+    assert_eq!(outcome.claimed, 1);
+    assert_eq!(outcome.published, 1);
+    assert_eq!(stream_message_count(&stream).await, 1);
+    assert_eq!(
+        publication_state(&pool, &tenant_id, &delivery_id).await,
+        (true, Some(1), 1)
+    );
+    pool.close().await;
+}
+
+
+#[tokio::test]
+async fn worker_exit_before_nats_connect_leaves_outbox_pending() {
+    let pool = database().await;
+    let (publisher, stream, subject) = jetstream().await;
+    let (tenant_id, delivery_id) = enqueue(&pool, &subject).await;
+
+    let child = run_child_process(&subject, "relay-before-nats-connect", "before_nats_connect");
+    assert!(
+        child.status.success(),
+        "worker process failed before NATS connect: {}{}",
+        String::from_utf8_lossy(&child.stdout),
+        String::from_utf8_lossy(&child.stderr)
+    );
+
+    let state: (bool, Option<String>, bool, i32) = sqlx::query_as(
+        "SELECT delivered_at IS NOT NULL, lease_owner, lease_expires_at IS NOT NULL, attempts FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
+    )
+    .bind(&tenant_id)
+    .bind(&delivery_id)
+    .fetch_one(&pool)
+    .await
+    .expect("Outbox state is readable after the worker exits");
+    assert_eq!(state, (false, None, false, 0));
+    assert_eq!(stream_message_count(&stream).await, 0);
+
+    let relay = OutboxRelay::new(
+        PgOutboxDispatcher::new(pool.clone()),
+        publisher,
+        relay_config("relay-after-preconnect-exit", &subject, 10, 30),
+    );
+    let outcome = relay
+        .run_once()
+        .await
+        .expect("replacement relay publishes the still-pending delivery");
     assert_eq!(outcome.claimed, 1);
     assert_eq!(outcome.published, 1);
     assert_eq!(stream_message_count(&stream).await, 1);
