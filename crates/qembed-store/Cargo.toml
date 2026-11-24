@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 lints.workspace = true
 
+[[bin]]
+name = "qembed-control-plane-migrate"
+path = "src/bin/control_plane_migrate.rs"
+
 [dependencies]
 qembed-domain = { path = "../qembed-domain" }
 serde.workspace = true
