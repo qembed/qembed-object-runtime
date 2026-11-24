@@ -1,11 +1,15 @@
 //! PostgreSQL adapter for the atomic begin-invocation use case.
 
-use crate::PgContext;
 use crate::begin_invocation::{
     BeginInvocationCommand, BeginInvocationError, BeginInvocationOutcome, begin_invocation,
 };
+use crate::{PgContext, fetch_optional};
 use qembed_domain::{
-    ports::{InvocationStartCommand, InvocationStartOutcome, InvocationStartStore},
+    ids::{CallerId, InvocationId, ObjectId},
+    ports::{
+        InvocationIdempotencyPreflight, InvocationStartCommand, InvocationStartOutcome,
+        InvocationStartStore,
+    },
     scope::Scope,
 };
 
@@ -23,6 +27,71 @@ impl PgInvocationStartStore {
 
 impl InvocationStartStore for PgInvocationStartStore {
     type Error = BeginInvocationError;
+
+    async fn inspect_invocation_idempotency(
+        &self,
+        scope: &Scope,
+        object_id: ObjectId,
+        caller_id: CallerId,
+        idempotency_key: String,
+        payload_hash: Vec<u8>,
+    ) -> Result<InvocationIdempotencyPreflight, Self::Error> {
+        let (mut transaction, caller) = self.context.begin_caller(scope, caller_id).await?;
+        let existing = fetch_optional(
+            &mut transaction,
+            sqlx::query_as::<_, (Vec<u8>, String)>(
+                "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4",
+            )
+            .bind(scope.tenant_id().to_string())
+            .bind(object_id.to_string())
+            .bind(caller.caller_id().to_string())
+            .bind(idempotency_key),
+        )
+        .await
+        .map_err(BeginInvocationError::Database)?;
+
+        let result = match existing {
+            Some((existing_hash, _)) if existing_hash != payload_hash => {
+                InvocationIdempotencyPreflight::PayloadMismatch
+            }
+            Some((_, invocation_id)) => InvocationIdempotencyPreflight::Replay {
+                invocation_id: invocation_id
+                    .parse::<InvocationId>()
+                    .map_err(|_| {
+                        BeginInvocationError::Idempotency(
+                            crate::idempotency::IdempotencyReservationError::InvalidPersistedInvocationId,
+                        )
+                    })?,
+            },
+            None => {
+                let object = fetch_optional(
+                    &mut transaction,
+                    sqlx::query_as::<_, (String, Option<String>)>(
+                        "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid",
+                    )
+                    .bind(scope.tenant_id().to_string())
+                    .bind(object_id.to_string()),
+                )
+                .await
+                .map_err(BeginInvocationError::Database)?;
+
+                match object {
+                    None => InvocationIdempotencyPreflight::ObjectNotFound,
+                    Some((state, _)) if state != "active" => {
+                        InvocationIdempotencyPreflight::ObjectNotActive
+                    }
+                    Some((_, None)) => InvocationIdempotencyPreflight::NoPublishedVersion,
+                    Some((_, Some(_))) => InvocationIdempotencyPreflight::New,
+                }
+            }
+        };
+
+        transaction
+            .commit()
+            .await
+            .map_err(BeginInvocationError::Database)?;
+        Ok(result)
+    }
 
     async fn begin_invocation(
         &self,

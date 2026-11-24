@@ -5,7 +5,7 @@ use std::{error::Error, future::Future, time::Duration};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ids::{ObjectId, TenantId},
+    ids::{CallerId, ObjectId, TenantId},
     principal::PrincipalKind,
     scope::Scope,
 };
@@ -29,6 +29,68 @@ impl RateLimitClass {
         }
     }
 }
+
+/// Opaque identity of one idempotent invocation request. The raw key and
+/// Caller ID are never written to Valkey; only this digest is used for the
+/// short-lived "token already charged" marker.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RateLimitRequestId {
+    digest: String,
+    valkey_key: String,
+}
+
+impl RateLimitRequestId {
+    pub fn for_invocation(
+        tenant_id: TenantId,
+        object_id: ObjectId,
+        caller_id: CallerId,
+        idempotency_key: &str,
+    ) -> Result<Self, RateLimitRequestIdError> {
+        if idempotency_key.trim().is_empty() {
+            return Err(RateLimitRequestIdError::EmptyIdempotencyKey);
+        }
+        if idempotency_key.len() > 256 {
+            return Err(RateLimitRequestIdError::IdempotencyKeyTooLong);
+        }
+        let digest = Sha256::digest(
+            format!("qembed:invocation-idempotency:{tenant_id}:{object_id}:{caller_id}:{idempotency_key}")
+                .as_bytes(),
+        );
+        let digest = format!("{digest:x}");
+        let valkey_key = format!("qembed:rl:{{{tenant_id}:{object_id}}}:request:{digest}");
+        Ok(Self { digest, valkey_key })
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.digest
+    }
+
+    /// Returns the stable marker key. Its tenant/object hash tag is identical
+    /// across Anonymous, Authenticated and Owner buckets, so a replay through a
+    /// different admission class is still charged only once.
+    #[must_use]
+    pub fn valkey_key(&self) -> &str {
+        &self.valkey_key
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RateLimitRequestIdError {
+    EmptyIdempotencyKey,
+    IdempotencyKeyTooLong,
+}
+
+impl std::fmt::Display for RateLimitRequestIdError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyIdempotencyKey => formatter.write_str("idempotency key must not be empty"),
+            Self::IdempotencyKeyTooLong => formatter.write_str("idempotency key exceeds 256 bytes"),
+        }
+    }
+}
+
+impl Error for RateLimitRequestIdError {}
 
 /// A validated, opaque Valkey key. Tenant/object form a Redis Cluster hash tag
 /// so related future keys can be placed in one slot.
@@ -253,6 +315,7 @@ pub struct RateLimitDecision {
     allowed: bool,
     remaining: u32,
     retry_after: Option<Duration>,
+    deduplicated: bool,
 }
 
 impl RateLimitDecision {
@@ -262,7 +325,25 @@ impl RateLimitDecision {
             allowed,
             remaining,
             retry_after,
+            deduplicated: false,
         }
+    }
+
+    /// A prior request with the same idempotency identity already paid the
+    /// admission token. This replay is allowed without another bucket mutation.
+    #[must_use]
+    pub const fn deduplicated(remaining: u32) -> Self {
+        Self {
+            allowed: true,
+            remaining,
+            retry_after: None,
+            deduplicated: true,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_deduplicated(self) -> bool {
+        self.deduplicated
     }
 
     #[must_use]
@@ -292,6 +373,22 @@ pub trait RateLimitStore: Send + Sync {
         policy: RateLimitPolicy,
         cost: u32,
     ) -> impl Future<Output = Result<RateLimitDecision, Self::Error>> + Send;
+
+    /// Consumes once for an idempotency identity. Distributed adapters should
+    /// atomically check the request marker and mutate the bucket in one script.
+    /// The default preserves compatibility for simple stores; production
+    /// Valkey overrides it with an atomic marker+Token-Bucket operation.
+    fn consume_once(
+        &self,
+        key: &RateLimitKey,
+        policy: RateLimitPolicy,
+        cost: u32,
+        request_id: &RateLimitRequestId,
+        marker_ttl: Duration,
+    ) -> impl Future<Output = Result<RateLimitDecision, Self::Error>> + Send {
+        let _ = (request_id, marker_ttl);
+        self.consume(key, policy, cost)
+    }
 }
 
 #[cfg(test)]

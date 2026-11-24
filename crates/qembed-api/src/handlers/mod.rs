@@ -6,3 +6,4 @@
 pub mod health;
 pub mod invocation;
 pub mod owner;
+pub mod principal_invocation;

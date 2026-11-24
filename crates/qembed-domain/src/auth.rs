@@ -36,6 +36,66 @@ where
         .map_err(OwnerAuthenticationError::InvalidScope)
 }
 
+/// Authenticates any tenant Principal and establishes its trusted Scope.
+///
+/// The authentication adapter is responsible for mapping SQL roles to the
+/// runtime's two trust classes: TenantOwner remains Owner; TenantAdmin and
+/// Service become Authenticated. PlatformAdmin has no tenant scope and must
+/// be rejected by the adapter before returning an AuthenticatedIdentity.
+pub async fn authenticate_principal<P>(
+    port: &P,
+    credentials: P::Credentials,
+) -> Result<Scope, PrincipalAuthenticationError<P::Error>>
+where
+    P: AuthenticationPort,
+{
+    let identity = port
+        .authenticate(credentials)
+        .await
+        .map_err(PrincipalAuthenticationError::Rejected)?;
+
+    let principal =
+        Principal::from_verified_auth(identity.principal_id(), identity.principal_kind())
+            .map_err(PrincipalAuthenticationError::InvalidPrincipal)?;
+
+    Scope::from_verified_auth(identity.tenant_id(), principal)
+        .map_err(PrincipalAuthenticationError::InvalidScope)
+}
+
+/// Failure to authenticate or establish a tenant Principal scope.
+#[derive(Debug)]
+pub enum PrincipalAuthenticationError<E> {
+    Rejected(E),
+    InvalidPrincipal(PrincipalError),
+    InvalidScope(ScopeError),
+}
+
+impl<E: fmt::Display> fmt::Display for PrincipalAuthenticationError<E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected(error) => {
+                write!(formatter, "Principal authentication rejected: {error}")
+            }
+            Self::InvalidPrincipal(error) => {
+                write!(formatter, "invalid authenticated Principal: {error}")
+            }
+            Self::InvalidScope(error) => {
+                write!(formatter, "invalid authenticated tenant Scope: {error}")
+            }
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for PrincipalAuthenticationError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Rejected(error) => Some(error),
+            Self::InvalidPrincipal(error) => Some(error),
+            Self::InvalidScope(error) => Some(error),
+        }
+    }
+}
+
 /// Failure to authenticate or establish an owner scope.
 #[derive(Debug)]
 pub enum OwnerAuthenticationError<E> {

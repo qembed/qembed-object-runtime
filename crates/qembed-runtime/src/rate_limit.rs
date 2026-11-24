@@ -2,11 +2,14 @@
 
 use std::error::Error;
 
-use qembed_domain::rate_limit::{RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitStore};
+use qembed_domain::rate_limit::{
+    RateLimitDecision, RateLimitKey, RateLimitPolicy, RateLimitRequestId, RateLimitStore,
+};
 
 #[derive(Debug)]
 pub enum RateLimitServiceError<E> {
     InvalidCost,
+    InvalidMarkerTtl,
     Store(E),
 }
 
@@ -15,6 +18,9 @@ impl<E: Error + 'static> std::fmt::Display for RateLimitServiceError<E> {
         match self {
             Self::InvalidCost => {
                 formatter.write_str("rate-limit cost must be non-zero and fit the bucket")
+            }
+            Self::InvalidMarkerTtl => {
+                formatter.write_str("idempotency marker TTL must be non-zero")
             }
             Self::Store(error) => write!(formatter, "rate-limit store failed: {error}"),
         }
@@ -46,6 +52,29 @@ impl<S: RateLimitStore> RateLimitService<S> {
         }
         self.store
             .consume(key, policy, cost)
+            .await
+            .map_err(RateLimitServiceError::Store)
+    }
+
+    /// Consumes a token at most once for an idempotency identity. The Valkey
+    /// adapter atomically stores the request marker with the Token Bucket
+    /// mutation; a replay returns allowed without consuming another token.
+    pub async fn check_once(
+        &self,
+        key: &RateLimitKey,
+        policy: RateLimitPolicy,
+        cost: u32,
+        request_id: &RateLimitRequestId,
+        marker_ttl: std::time::Duration,
+    ) -> Result<RateLimitDecision, RateLimitServiceError<S::Error>> {
+        if cost == 0 || cost > policy.capacity() {
+            return Err(RateLimitServiceError::InvalidCost);
+        }
+        if marker_ttl.is_zero() {
+            return Err(RateLimitServiceError::InvalidMarkerTtl);
+        }
+        self.store
+            .consume_once(key, policy, cost, request_id, marker_ttl)
             .await
             .map_err(RateLimitServiceError::Store)
     }

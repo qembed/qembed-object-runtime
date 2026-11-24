@@ -12,6 +12,7 @@ pub mod begin_invocation;
 mod budget_reservation;
 pub mod budget_settlement;
 pub mod caller;
+pub mod caller_delegation;
 mod cas;
 pub mod context_issuer;
 mod event_outbox;

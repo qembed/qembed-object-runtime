@@ -13,6 +13,11 @@ async fn seed_owner(
     principal_id: PrincipalId,
     token: &str,
 ) {
+    sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid) ON CONFLICT (id) DO NOTHING")
+        .bind(tenant_id.to_string())
+        .execute(pool)
+        .await
+        .expect("tenant fixture should be inserted");
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) VALUES ($1::uuid, $2::uuid, 'tenant_owner')",
     )

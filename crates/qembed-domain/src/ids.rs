@@ -77,6 +77,7 @@ define_id!(ObjectId);
 define_id!(ObjectVersionId);
 define_id!(PrincipalId);
 define_id!(CallerId);
+define_id!(DelegationId);
 define_id!(InvocationId);
 define_id!(TraceId);
 define_id!(SnapshotId);
