@@ -7,19 +7,16 @@ use qembed_domain::{
     kill_switch::{KillSwitch, KillSwitchContext, KillSwitchScope, KillSwitchStore},
     scope::Scope,
 };
-use sqlx::FromRow;
-
 use crate::{PgContext, fetch_all};
 
-#[derive(FromRow)]
-struct KillSwitchRow {
-    scope_type: String,
-    tenant_id: Option<String>,
-    object_id: Option<String>,
-    tool_id: Option<String>,
-    enabled: bool,
-    reason: Option<String>,
-}
+type KillSwitchRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+);
 
 /// PostgreSQL implementation. The canonical `kill_switches` table and its
 /// RLS/management rules remain owned by qembed-sql.
@@ -118,10 +115,11 @@ impl KillSwitchStore for PgKillSwitchStore {
 }
 
 fn reconstitute_switch(row: KillSwitchRow) -> Result<KillSwitch, KillSwitchStoreError> {
-    let tenant_id = parse_optional_id::<TenantId>(row.tenant_id, "tenant_id")?;
-    let object_id = parse_optional_id::<ObjectId>(row.object_id, "object_id")?;
-    let tool_id = parse_optional_id::<ToolId>(row.tool_id, "tool_id")?;
-    let scope = match row.scope_type.as_str() {
+    let (scope_type, tenant_id, object_id, tool_id, enabled, reason) = row;
+    let tenant_id = parse_optional_id::<TenantId>(tenant_id, "tenant_id")?;
+    let object_id = parse_optional_id::<ObjectId>(object_id, "object_id")?;
+    let tool_id = parse_optional_id::<ToolId>(tool_id, "tool_id")?;
+    let scope = match scope_type.as_str() {
         "platform" if tenant_id.is_none() && object_id.is_none() && tool_id.is_none() => {
             KillSwitchScope::Platform
         }
@@ -146,7 +144,7 @@ fn reconstitute_switch(row: KillSwitchRow) -> Result<KillSwitch, KillSwitchStore
             ));
         }
     };
-    Ok(KillSwitch::new(scope, row.enabled, row.reason))
+    Ok(KillSwitch::new(scope, enabled, reason))
 }
 
 fn parse_optional_id<T: FromStr>(
