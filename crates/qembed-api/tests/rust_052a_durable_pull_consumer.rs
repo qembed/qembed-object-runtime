@@ -301,7 +301,12 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     // Worker one commits the business marker, deliberately NAKs the message,
     // and exits. Worker two is a separate process and resumes the same durable.
     drop(consumer);
-    let first_worker = run_consumer_worker_process(&subject, &stream_name, &durable_name, "commit_then_fail");
+    let first_worker = run_consumer_worker_process(
+        &subject,
+        &stream_name,
+        &durable_name,
+        "commit_then_fail",
+    );
     assert!(
         first_worker.status.success(),
         "first consumer worker failed: {}{}",
@@ -310,7 +315,12 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     );
 
     tokio::time::sleep(Duration::from_millis(150)).await;
-    let restarted_worker = run_consumer_worker_process(&subject, &stream_name, &durable_name, "retry_and_ack");
+    let restarted_worker = run_consumer_worker_process(
+        &subject,
+        &stream_name,
+        &durable_name,
+        "retry_and_ack",
+    );
     assert!(
         restarted_worker.status.success(),
         "replacement consumer worker failed: {}{}",
