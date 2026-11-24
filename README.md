@@ -177,6 +177,9 @@ Deployment must provide:
   64 hexadecimal characters and supplied by secret management. Never store it
   in either database or a database backup; retain it for the lifetime of all
   v1 tombstones.
+- `RESTORE_DATABASE_URL` — Runtime-database login that inherits only the
+  restricted `qembed_restore` role. It is used by the pre-start replay step,
+  not by normal request handling.
 
 Apply Control-plane migrations explicitly, separately from Runtime migrations:
 
@@ -184,16 +187,29 @@ Apply Control-plane migrations explicitly, separately from Runtime migrations:
 CONTROL_PLANE_DATABASE_URL=postgres://... cargo run -p qembed-store --bin qembed-control-plane-migrate
 ```
 
+Before composing the API router on every start, run
+`PgCallerDeletionRestore::new(restore_pool, ledger).run()` using the
+`RESTORE_DATABASE_URL` pool and pass its returned
+`CallerDeletionReplayComplete` capability to
+`PgReadinessProbe::new(runtime_pool, control_plane_pool, replay_complete)`.
+The replay process holds a Control-plane advisory lock until the first
+successful readiness check, closing the race between the replay high-water
+check and traffic admission.
+
 The application readiness probe requires both Runtime and Control-plane
-PostgreSQL to be reachable and to have exact migration-history agreement.
-Liveness remains independent. A missing Control-plane pool is not a supported
+PostgreSQL to be reachable, both migration histories to match exactly, and the
+replay capability to be successfully activated. Liveness remains independent.
+A missing Control-plane pool or missing replay capability is not a supported
 configuration.
 
-The Control-plane SQL contract is maintained in
-[`qembed/qembed-sql`](https://github.com/qembed/qembed-sql) at
-`migrations/rt061_control_plane_caller_deletion_ledger.sql`. The Rust
-workspace keeps the corresponding SQLx migration for isolated integration
-tests and explicit deployment migration execution.
+The SQL contract is maintained in
+[`qembed/qembed-sql`](https://github.com/qembed/qembed-sql):
+`migrations/rt061_control_plane_caller_deletion_ledger.sql` provisions the
+external tombstone store, while `migrations/rt061_runtime_caller_erasure.sql`
+installs tenant-scoped deletion and execute-only restore functions in Runtime.
+Apply both to their respective databases. The Rust workspace keeps the
+Control-plane SQLx migration for isolated integration tests and explicit
+deployment migration execution.
 
 The local `deletion_ledger` present in the canonical Runtime schema is not
 consulted by the Rust adapter and must never be used as a fallback.
