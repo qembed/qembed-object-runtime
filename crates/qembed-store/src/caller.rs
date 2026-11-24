@@ -45,6 +45,12 @@ impl ResolvedCaller {
             && self.transaction_token == transaction.transaction_token()
             && transaction.matches_scope(scope)
     }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        self.tenant_id == transaction.tenant_id()
+            && Some(self.principal_id) == transaction.principal_id()
+            && self.transaction_token == transaction.transaction_token()
+    }
 }
 
 /// A database-resolved Anonymous Caller bound to one signed Object transaction.
@@ -83,6 +89,12 @@ impl ResolvedAnonymousCaller {
             && self.subject_fingerprint == context.subject_fingerprint()
             && self.transaction_token == transaction.transaction_token()
             && transaction.matches_anonymous_context(context)
+    }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        self.tenant_id == transaction.tenant_id()
+            && self.transaction_token == transaction.transaction_token()
+            && transaction.matches_anonymous_binding(self.object_id, self.subject_fingerprint)
     }
 }
 
@@ -174,6 +186,41 @@ impl std::error::Error for AnonymousCallerResolutionError {
         match self {
             Self::Database(error) => Some(error),
             _ => None,
+        }
+    }
+}
+
+/// A database-resolved invocation Caller bound to the current SQL transaction.
+///
+/// The variants contain private-field capabilities produced only by the
+/// corresponding PostgreSQL resolver; transport DTOs cannot construct them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResolvedInvocationCaller {
+    Principal(ResolvedCaller),
+    Anonymous(ResolvedAnonymousCaller),
+}
+
+impl ResolvedInvocationCaller {
+    #[must_use]
+    pub const fn caller_id(self) -> CallerId {
+        match self {
+            Self::Principal(caller) => caller.caller_id(),
+            Self::Anonymous(caller) => caller.caller_id(),
+        }
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> CallerKind {
+        match self {
+            Self::Principal(caller) => caller.kind(),
+            Self::Anonymous(caller) => caller.kind(),
+        }
+    }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        match self {
+            Self::Principal(caller) => caller.is_bound_to_transaction(transaction),
+            Self::Anonymous(caller) => caller.is_bound_to_transaction(transaction),
         }
     }
 }
