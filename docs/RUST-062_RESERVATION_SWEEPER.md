@@ -40,13 +40,13 @@ The upgrade migration removes the previous one-argument function and installs th
 
 `qembed_store::reservation_sweeper::PgReservationSweeper` wraps the canonical SQL function.
 
-- It accepts a dedicated worker pool authenticated as `qembed_worker`.
+- It accepts a dedicated worker pool whose login inherits `qembed_worker` (or explicitly assumes that role); the `qembed_worker` group role itself is `NOLOGIN`.
 - It intentionally does not accept `Scope`: the SQL function discovers eligible rows across tenants under its restricted worker capability.
 - `sweep(batch_size)` uses the database clock.
 - `sweep_before(cutoff, batch_size)` supplies a deterministic cutoff for tests/controlled maintenance.
 - The adapter validates batch size and persisted result counts before returning.
 
-The adapter does not create a scheduler or start a worker process. Scheduling belongs to the future independently scalable worker host.
+Provision a separate worker login and grant it membership in the restricted group role, for example:\n\n```sql\nCREATE ROLE qembed_worker_app LOGIN INHERIT PASSWORD '...';\nGRANT qembed_worker TO qembed_worker_app;\n```\n\nThe adapter does not create a scheduler or start a worker process. Scheduling belongs to the future independently scalable worker host.
 
 ## Acceptance evidence
 
