@@ -70,6 +70,9 @@ pub enum InvocationWorkerOutcome {
     OutcomeUnknown {
         invocation_id: InvocationId,
     },
+    Cancelled {
+        invocation_id: InvocationId,
+    },
     AlreadyTerminal {
         invocation_id: InvocationId,
         status: InvocationStatus,
@@ -189,6 +192,9 @@ where
                         content,
                     })
                 }
+                InvocationStatus::Cancelled => {
+                    Ok(InvocationWorkerOutcome::Cancelled { invocation_id })
+                }
                 status if status.is_terminal() => Ok(InvocationWorkerOutcome::AlreadyTerminal {
                     invocation_id,
                     status,
@@ -216,6 +222,12 @@ where
                 .await
                 .map_err(InvocationWorkerError::Store)?;
             if !live {
+                if let Some(outcome) = self
+                    .cancelled_after_lease_loss(scope, invocation_id)
+                    .await?
+                {
+                    return Ok(outcome);
+                }
                 return Err(InvocationWorkerError::Conflict);
             }
 
@@ -298,6 +310,12 @@ where
                         .await
                         .map_err(InvocationWorkerError::Store)?;
                     if !may_send {
+                        if let Some(outcome) = self
+                            .cancelled_after_lease_loss(scope, invocation_id)
+                            .await?
+                        {
+                            return Ok(outcome);
+                        }
                         return Err(InvocationWorkerError::Conflict);
                     }
 
@@ -322,6 +340,12 @@ where
                                     self.config.lease_seconds,
                                 ).await.map_err(InvocationWorkerError::Store)?;
                                 if !renewed {
+                                    if let Some(outcome) = self
+                                    .cancelled_after_lease_loss(scope, invocation_id)
+                                    .await?
+                                {
+                                        return Ok(outcome);
+                                    }
                                     return Err(InvocationWorkerError::Conflict);
                                 }
                             }
@@ -349,6 +373,12 @@ where
                                 .await
                                 .map_err(InvocationWorkerError::Store)?;
                             if !persisted {
+                                if let Some(outcome) = self
+                                    .cancelled_after_lease_loss(scope, invocation_id)
+                                    .await?
+                                {
+                                    return Ok(outcome);
+                                }
                                 return Err(InvocationWorkerError::Conflict);
                             }
                         }
@@ -413,7 +443,10 @@ where
                         content,
                     });
                 }
-                InvocationStatus::Failed | InvocationStatus::Cancelled => {
+                InvocationStatus::Cancelled => {
+                    return Ok(InvocationWorkerOutcome::Cancelled { invocation_id });
+                }
+                InvocationStatus::Failed => {
                     return Ok(InvocationWorkerOutcome::AlreadyTerminal {
                         invocation_id,
                         status: invocation.status(),
@@ -423,6 +456,24 @@ where
             }
         }
         Err(InvocationWorkerError::Conflict)
+    }
+
+    /// A revoked lease is expected when cancellation commits. Reload only to
+    /// distinguish that terminal outcome from an unrelated lease conflict.
+    /// The stale worker never resumes after losing its fencing authority.
+    async fn cancelled_after_lease_loss(
+        &self,
+        scope: &Scope,
+        invocation_id: InvocationId,
+    ) -> Result<Option<InvocationWorkerOutcome>, InvocationWorkerError<S::Error>> {
+        let current = self
+            .store
+            .load_invocation(scope, invocation_id)
+            .await
+            .map_err(InvocationWorkerError::Store)?;
+        Ok(current
+            .filter(|invocation| invocation.status() == InvocationStatus::Cancelled)
+            .map(|_| InvocationWorkerOutcome::Cancelled { invocation_id }))
     }
 
     async fn transition(
@@ -479,6 +530,8 @@ mod lifecycle_tests {
         lease_owner: Option<String>,
         attempt: ProviderCallAttemptState,
         usage: Option<qembed_domain::chat::TokenUsage>,
+        cancel_on_context_loading_heartbeat: bool,
+        cancel_on_provider_heartbeat: bool,
     }
 
     #[derive(Clone)]
@@ -575,7 +628,35 @@ mod lifecycle_tests {
             token: FencingToken,
             _: u32,
         ) -> Result<bool, Self::Error> {
-            let state = self.0.lock().expect("fake store lock");
+            let mut state = self.0.lock().expect("fake store lock");
+            let should_cancel = (state.cancel_on_context_loading_heartbeat
+                && state.invocation.status() == InvocationStatus::ContextLoading)
+                || (state.cancel_on_provider_heartbeat
+                    && state.attempt == ProviderCallAttemptState::MayHaveBeenSent);
+            if should_cancel {
+                state.cancel_on_context_loading_heartbeat = false;
+                state.cancel_on_provider_heartbeat = false;
+                let current = state.invocation.clone();
+                state.invocation = Invocation::from_persisted(
+                    current.id(),
+                    current.tenant_id(),
+                    current.object_id(),
+                    current.caller_id(),
+                    current.snapshot_id(),
+                    InvocationCheckpoint::new(
+                        InvocationStatus::Cancelled,
+                        current.version() + 1,
+                        FencingToken::from_value(current.fencing_token().value() + 1),
+                    ),
+                );
+                state.attempt = if state.attempt == ProviderCallAttemptState::MayHaveBeenSent {
+                    ProviderCallAttemptState::OutcomeUnknown
+                } else {
+                    ProviderCallAttemptState::CancelledBeforeSend
+                };
+                state.lease_owner = None;
+                return Ok(false);
+            }
             Ok(state.invocation.tenant_id() == scope.tenant_id()
                 && state.invocation.id() == invocation_id
                 && state.invocation.fencing_token() == token
@@ -765,6 +846,31 @@ mod lifecycle_tests {
         }
     }
 
+    struct DropSignal(Arc<std::sync::atomic::AtomicBool>);
+
+    impl Drop for DropSignal {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    struct PendingProvider {
+        calls: Arc<AtomicUsize>,
+        dropped: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl ChatProvider for PendingProvider {
+        fn capabilities(&self, _: &str) -> Option<ChatCapabilities> {
+            Some(ChatCapabilities::new(std::iter::empty()))
+        }
+
+        async fn complete(&self, _: ChatRequest) -> Result<ChatResponse, ChatProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let _drop_signal = DropSignal(Arc::clone(&self.dropped));
+            std::future::pending::<Result<ChatResponse, ChatProviderError>>().await
+        }
+    }
+
     struct FakeProvider {
         response: Result<ChatResponse, ChatProviderError>,
         calls: Arc<AtomicUsize>,
@@ -822,6 +928,8 @@ mod lifecycle_tests {
                 ProviderCallAttemptState::NotStarted
             },
             usage: None,
+            cancel_on_context_loading_heartbeat: false,
+            cancel_on_provider_heartbeat: false,
         })));
         (scope, invocation_id, store)
     }
@@ -849,6 +957,87 @@ mod lifecycle_tests {
             calls,
             contexts,
         )
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_worker_start_prevents_provider_call() {
+        let (scope, id, store) = fixture(InvocationStatus::Cancelled, 1, None);
+        let response = ChatResponse::new("must not run", ChatFinishReason::Stop, None)
+            .expect("valid provider response");
+        let (worker, calls, _) = worker(store, Ok(response));
+
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("cancel is terminal");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Cancelled { invocation_id: id }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn cancellation_between_worker_steps_stops_before_provider_call() {
+        let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
+        store
+            .0
+            .lock()
+            .expect("fake store lock")
+            .cancel_on_context_loading_heartbeat = true;
+        let response = ChatResponse::new("must not run", ChatFinishReason::Stop, None)
+            .expect("valid provider response");
+        let (worker, calls, _) = worker(store.clone(), Ok(response));
+
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("cancel is observed");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Cancelled { invocation_id: id }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        let state = store.0.lock().expect("fake store lock");
+        assert_eq!(state.invocation.status(), InvocationStatus::Cancelled);
+        assert_eq!(state.attempt, ProviderCallAttemptState::CancelledBeforeSend);
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_provider_wait_drops_future_and_stops_worker() {
+        let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
+        store
+            .0
+            .lock()
+            .expect("fake store lock")
+            .cancel_on_provider_heartbeat = true;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let provider = PendingProvider {
+            calls: Arc::clone(&calls),
+            dropped: Arc::clone(&dropped),
+        };
+        let config = InvocationWorkerConfig::new("test-chat", 128)
+            .expect("valid worker config")
+            .with_lease("cancel-test-worker", 3);
+        let worker = InvocationWorker::new(store.clone(), provider, config);
+
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("cancel is observed");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Cancelled { invocation_id: id }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "provider future must be dropped"
+        );
+        let state = store.0.lock().expect("fake store lock");
+        assert_eq!(state.invocation.status(), InvocationStatus::Cancelled);
+        assert_eq!(state.attempt, ProviderCallAttemptState::OutcomeUnknown);
     }
 
     #[tokio::test]

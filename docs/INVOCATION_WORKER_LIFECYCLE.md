@@ -36,6 +36,23 @@ reservation remains held because the provider may have accepted the request.
 A durable `ResponseReceived` must finish settlement rather than be
 discarded by cancellation.
 
+The worker treats a revoked lease as a cancellation signal only after
+reloading the durable invocation and confirming `Cancelled`. It then returns
+a distinct cancelled outcome and stops; it never retries under the stale
+fencing token. This check runs at each worker-step boundary and during provider
+waits. During a provider wait, the local provider future is dropped after the
+lease heartbeat detects cancellation. This stops local orchestration, but it
+cannot prove that an already-sent remote request was stopped; the durable
+attempt remains `OutcomeUnknown` and its reservation remains held.
+
+If cancellation wins before the pre-send marker, the marker's fenced write
+fails and the provider is never called. If the worker commits
+`ResponseReceived` first, cancellation is rejected and the worker completes
+settlement. The same live-lease check must guard every future tool-execution
+boundary before a tool side effect is started. The current invocation worker
+does not yet execute tools, so this task does not claim to cancel an
+already-running tool call.
+
 ## Restart behavior and limits
 
 A restart at `Received` or `ContextLoading` resumes from the
