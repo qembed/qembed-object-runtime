@@ -87,6 +87,8 @@ define_id!(CommandId);
 define_id!(ToolExecutionId);
 define_id!(ToolId);
 define_id!(TaskId);
+define_id!(KnowledgeDocumentId);
+define_id!(KnowledgeChunkId);
 
 #[cfg(test)]
 mod tests {
