@@ -549,6 +549,16 @@ impl PgCallerDeletionRestore {
         let has_replay_function = sqlx::query_scalar::<_, bool>(
             r#"SELECT
                 to_regprocedure('qembed_crypto.replay_caller_deletion(uuid,bytea,text,bytea)') IS NOT NULL
+                AND to_regprocedure('qembed_crypto.caller_deletion_schema_version()') IS NOT NULL
+                AND qembed_crypto.caller_deletion_schema_version() = 3
+                AND COALESCE(
+                    has_function_privilege(
+                        current_user,
+                        to_regprocedure('qembed_crypto.caller_deletion_schema_version()'),
+                        'EXECUTE'
+                    ),
+                    FALSE
+                )
                 AND COALESCE(
                     has_function_privilege(
                         current_user,
