@@ -23,13 +23,17 @@ The store adapter performs read-only checks in this order:
 3. Execute `SELECT 1` against the mandatory external Control-plane PostgreSQL.
 4. Compare Control-plane `_sqlx_migrations` with the separate Control-plane
    migration set bundled with this binary using the same exact-match rule.
+5. Activate the private replay-complete capability, releasing the Control-plane
+   advisory lock only after both databases and migration histories are healthy.
 
 A missing migration table, pending migration, unknown extra migration, failed
 migration row, or checksum mismatch in either database makes the service not
 ready. A connection or query failure in either database is classified as
 unavailable. Control-plane absence is never treated as a supported local-only
-mode. The probe never runs
-or repairs migrations; schema changes remain an explicit deployment operation.
+mode. An incomplete replay, lost replay lock, or replay token created for a
+different Control-plane ledger also makes the service not ready. The probe
+never runs or repairs migrations; schema changes remain an explicit deployment
+operation.
 
 ## Public response and security
 
