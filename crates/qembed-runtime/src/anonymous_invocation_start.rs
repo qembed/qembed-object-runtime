@@ -119,13 +119,7 @@ impl<S: AnonymousInvocationStartStore> AnonymousInvocationStartService<S> {
                 .map_err(|_| AnonymousInvocationStartError::RateLimitConfiguration)?;
 
                 match rate_limit
-                    .check_once(
-                        &key,
-                        policy,
-                        cost,
-                        &request_id,
-                        IDEMPOTENCY_RETENTION,
-                    )
+                    .check_once(&key, policy, cost, &request_id, IDEMPOTENCY_RETENTION)
                     .await
                 {
                     Ok(decision) if !decision.allowed() => {
@@ -172,8 +166,8 @@ fn prepare_command<E>(
     request: AnonymousInvocationStartRequest,
     idempotency_key: String,
 ) -> Result<AnonymousInvocationStartCommand, AnonymousInvocationStartError<E>> {
-    let input_bytes =
-        serde_json::to_vec(&request.input).map_err(|_| AnonymousInvocationStartError::InputSerialization)?;
+    let input_bytes = serde_json::to_vec(&request.input)
+        .map_err(|_| AnonymousInvocationStartError::InputSerialization)?;
     let canonical_input =
         canonicalize_json(&input_bytes).map_err(AnonymousInvocationStartError::InvalidInput)?;
     let input_message = String::from_utf8(canonical_input)
