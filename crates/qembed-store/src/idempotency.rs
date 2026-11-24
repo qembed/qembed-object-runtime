@@ -178,7 +178,7 @@ pub async fn reserve_invocation_idempotency(
             sqlx::query_as::<_, (Vec<u8>, String)>(
                 "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4 FOR UPDATE",
             )
-            .bind(scope.tenant_id().to_string())
+            .bind(tenant_id.to_string())
             .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
             .bind(claim.idempotency_key),
