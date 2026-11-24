@@ -3,13 +3,22 @@ use std::time::Duration;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_domain::{
     anonymous::AnonymousContext,
-    ids::{CallerId, ObjectId, ObjectVersionId, TenantId},
+    caller::InvocationPool,
+    ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId},
+    ports::{
+        AnonymousInvocationStartCommand, AnonymousInvocationStartStore,
+        InvocationIdempotencyPreflight, InvocationStartOutcome,
+    },
+    rate_limit::RateLimitRequestId,
 };
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
+    invocation_start::PgAnonymousInvocationStartStore,
     begin_context_transaction, begin_principal_context_transaction, connect_pool,
 };
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use std::time::{Duration, SystemTime};
 use uuid::Uuid;
 
 async fn pool_with_one_connection() -> PgPool {
@@ -799,6 +808,9 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
 async fn seed_public_object(pool: &PgPool, tenant_id: TenantId, object_id: ObjectId) {
     let version_id = ObjectVersionId::new();
+    let snapshot_id = SnapshotId::new();
+    let canonical_json = br#"{"limits":{"max_tokens_per_invocation":10000}}"#;
+    let content_hash = Sha256::digest(canonical_json).to_vec();
     sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
         .bind(tenant_id.to_string())
         .execute(pool)
@@ -847,6 +859,42 @@ async fn seed_public_object(pool: &PgPool, tenant_id: TenantId, object_id: Objec
     .execute(pool)
     .await
     .expect("ObjectVersion should be published through its lifecycle");
+
+    sqlx::query(
+        "INSERT INTO snapshots \
+         (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, '{"limits":{"max_tokens_per_invocation":10000}}'::jsonb)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(snapshot_id.to_string())
+    .bind(object_id.to_string())
+    .bind(version_id.to_string())
+    .bind(canonical_json.as_slice())
+    .bind(content_hash)
+    .execute(pool)
+    .await
+    .expect("immutable snapshot fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO knowledge_revisions (tenant_id, object_id, current_revision) \
+         VALUES ($1::uuid, $2::uuid, 7)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(pool)
+    .await
+    .expect("knowledge revision fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO object_budgets \
+         (tenant_id, object_id, daily_token_limit, daily_cost_limit_micros, per_caller_daily_token_limit, max_concurrent_invocations, max_llm_calls, max_tool_calls, max_tokens_per_invocation, max_duration_ms) \
+         VALUES ($1::uuid, $2::uuid, 100000, 0, 100000, 10, 10, 0, 10000, 60000)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(pool)
+    .await
+    .expect("Object budget fixture should be inserted");
 
     sqlx::query(
         "UPDATE objects SET state = 'active', published_version_id = $3::uuid \
@@ -1031,6 +1079,93 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
         .commit()
         .await
         .expect("second Anonymous context transaction should commit");
+
+    // Exercise the actual invocation Store: the same fingerprint/key replays,
+    // while the same raw key from another fingerprint gets a separate durable
+    // idempotency namespace but retains the Object's stable Caller.
+    let store = PgAnonymousInvocationStartStore::new(context.clone());
+    let raw_idempotency_key = "same-browser-key";
+    let request_id = RateLimitRequestId::for_anonymous_invocation(
+        tenant_id,
+        object_id,
+        fingerprint,
+        raw_idempotency_key,
+    )
+    .expect("Anonymous idempotency namespace should be valid");
+    let payload_hash = Sha256::digest(br#"{"input":{"message":"hello"}}"#).to_vec();
+    assert_eq!(
+        store
+            .inspect_anonymous_invocation_idempotency(
+                &anonymous,
+                request_id.as_str().to_owned(),
+                payload_hash.clone(),
+            )
+            .await
+            .expect("first request preflight should succeed"),
+        InvocationIdempotencyPreflight::New
+    );
+
+    let command = || AnonymousInvocationStartCommand {
+        idempotency_key: request_id.as_str().to_owned(),
+        payload_hash: payload_hash.clone(),
+        input_message: r#"{"message":"hello"}"#.to_owned(),
+        message_expires_at: SystemTime::now() + Duration::from_secs(86_400),
+        idempotency_expires_at: SystemTime::now() + Duration::from_secs(86_400),
+        trace_id: TraceId::new(),
+    };
+    let created = store
+        .begin_anonymous_invocation(&anonymous, command())
+        .await
+        .expect("public Anonymous invocation should be created");
+    let invocation_id = match created {
+        InvocationStartOutcome::Created { invocation_id } => invocation_id,
+        InvocationStartOutcome::Replay { .. } => panic!("first invocation cannot be a replay"),
+    };
+    assert!(matches!(
+        store
+            .inspect_anonymous_invocation_idempotency(
+                &anonymous,
+                request_id.as_str().to_owned(),
+                payload_hash.clone(),
+            )
+            .await
+            .expect("replay preflight should succeed"),
+        InvocationIdempotencyPreflight::Replay { invocation_id: replay_id }
+            if replay_id == invocation_id
+    ));
+    assert!(matches!(
+        store
+            .begin_anonymous_invocation(&anonymous, command())
+            .await
+            .expect("replayed invocation should resolve"),
+        InvocationStartOutcome::Replay { invocation_id: replay_id }
+            if replay_id == invocation_id
+    ));
+
+    let other_request_id = RateLimitRequestId::for_anonymous_invocation(
+        tenant_id,
+        object_id,
+        other_fingerprint,
+        raw_idempotency_key,
+    )
+    .expect("other Anonymous idempotency namespace should be valid");
+    let other_command = AnonymousInvocationStartCommand {
+        idempotency_key: other_request_id.as_str().to_owned(),
+        payload_hash,
+        input_message: r#"{"message":"hello"}"#.to_owned(),
+        message_expires_at: SystemTime::now() + Duration::from_secs(86_400),
+        idempotency_expires_at: SystemTime::now() + Duration::from_secs(86_400),
+        trace_id: TraceId::new(),
+    };
+    let other_created = store
+        .begin_anonymous_invocation(&other_anonymous, other_command)
+        .await
+        .expect("same raw key from another subject should create a separate invocation");
+    assert!(matches!(
+        other_created,
+        InvocationStartOutcome::Created { invocation_id: other_id }
+            if other_id != invocation_id
+    ));
 
     sqlx::query(
         "UPDATE objects SET anonymous_invocation_enabled = FALSE \
