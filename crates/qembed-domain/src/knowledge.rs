@@ -314,23 +314,41 @@ impl KnowledgeDocument {
     }
 
     #[must_use]
-    pub const fn id(&self) -> KnowledgeDocumentId { self.id }
+    pub const fn id(&self) -> KnowledgeDocumentId {
+        self.id
+    }
     #[must_use]
-    pub const fn tenant_id(&self) -> TenantId { self.tenant_id }
+    pub const fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
     #[must_use]
-    pub const fn object_id(&self) -> ObjectId { self.object_id }
+    pub const fn object_id(&self) -> ObjectId {
+        self.object_id
+    }
     #[must_use]
-    pub fn doc_key(&self) -> &str { &self.doc_key }
+    pub fn doc_key(&self) -> &str {
+        &self.doc_key
+    }
     #[must_use]
-    pub fn title(&self) -> &str { &self.title }
+    pub fn title(&self) -> &str {
+        &self.title
+    }
     #[must_use]
-    pub fn source_uri(&self) -> Option<&str> { self.source_uri.as_deref() }
+    pub fn source_uri(&self) -> Option<&str> {
+        self.source_uri.as_deref()
+    }
     #[must_use]
-    pub const fn trusted(&self) -> bool { self.trusted }
+    pub const fn trusted(&self) -> bool {
+        self.trusted
+    }
     #[must_use]
-    pub const fn status(&self) -> KnowledgeDocumentStatus { self.status }
+    pub const fn status(&self) -> KnowledgeDocumentStatus {
+        self.status
+    }
     #[must_use]
-    pub const fn interval(&self) -> Option<RevisionInterval> { self.interval }
+    pub const fn interval(&self) -> Option<RevisionInterval> {
+        self.interval
+    }
 
     pub fn mark_indexed(&mut self) -> Result<(), KnowledgeError> {
         self.transition(KnowledgeDocumentStatus::Indexed)
@@ -505,23 +523,41 @@ impl KnowledgeChunk {
     }
 
     #[must_use]
-    pub const fn id(&self) -> KnowledgeChunkId { self.id }
+    pub const fn id(&self) -> KnowledgeChunkId {
+        self.id
+    }
     #[must_use]
-    pub const fn tenant_id(&self) -> TenantId { self.tenant_id }
+    pub const fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
     #[must_use]
-    pub const fn object_id(&self) -> ObjectId { self.object_id }
+    pub const fn object_id(&self) -> ObjectId {
+        self.object_id
+    }
     #[must_use]
-    pub const fn document_id(&self) -> KnowledgeDocumentId { self.document_id }
+    pub const fn document_id(&self) -> KnowledgeDocumentId {
+        self.document_id
+    }
     #[must_use]
-    pub fn content(&self) -> &str { &self.content }
+    pub fn content(&self) -> &str {
+        &self.content
+    }
     #[must_use]
-    pub const fn is_erased(&self) -> bool { self.erased }
+    pub const fn is_erased(&self) -> bool {
+        self.erased
+    }
     #[must_use]
-    pub const fn position(&self) -> u32 { self.position }
+    pub const fn position(&self) -> u32 {
+        self.position
+    }
     #[must_use]
-    pub fn metadata(&self) -> &Value { &self.metadata }
+    pub fn metadata(&self) -> &Value {
+        &self.metadata
+    }
     #[must_use]
-    pub const fn interval(&self) -> Option<RevisionInterval> { self.interval }
+    pub const fn interval(&self) -> Option<RevisionInterval> {
+        self.interval
+    }
 
     /// Applies the document's initial committed visibility interval to this chunk.
     pub fn set_visibility_interval(
@@ -584,7 +620,7 @@ pub enum KnowledgeError {
     InvalidTransition {
         from: KnowledgeDocumentStatus,
         to: KnowledgeDocumentStatus,
-    }
+    },
 }
 
 impl std::fmt::Display for KnowledgeError {
