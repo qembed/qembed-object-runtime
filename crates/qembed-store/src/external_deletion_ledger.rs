@@ -91,9 +91,15 @@ pub enum CallerDeletionKeyError {
 impl fmt::Display for CallerDeletionKeyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingEnvironmentVariable => formatter.write_str("CALLER_DELETION_HMAC_KEY is required"),
-            Self::InvalidLength => formatter.write_str("Caller deletion HMAC key must be 32 bytes"),
-            Self::InvalidEncoding => formatter.write_str("Caller deletion HMAC key must be 64 hexadecimal characters"),
+            Self::MissingEnvironmentVariable => {
+                formatter.write_str("CALLER_DELETION_HMAC_KEY is required")
+            }
+            Self::InvalidLength => {
+                formatter.write_str("Caller deletion HMAC key must be 32 bytes")
+            }
+            Self::InvalidEncoding => {
+                formatter.write_str("Caller deletion HMAC key must be 64 hexadecimal characters")
+            }
         }
     }
 }
@@ -134,9 +140,15 @@ pub enum CallerDeletionLedgerError {
 impl fmt::Display for CallerDeletionLedgerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Database(error) => write!(formatter, "Control-plane ledger database error: {error}"),
-            Self::InvalidRecord => formatter.write_str("Control-plane ledger returned an invalid tombstone"),
-            Self::UnsupportedKeyVersion => formatter.write_str("Control-plane ledger contains an unsupported HMAC key version"),
+            Self::Database(error) => {
+                write!(formatter, "Control-plane ledger database error: {error}")
+            }
+            Self::InvalidRecord => {
+                formatter.write_str("Control-plane ledger returned an invalid tombstone")
+            }
+            Self::UnsupportedKeyVersion => {
+                formatter.write_str("Control-plane ledger contains an unsupported HMAC key version")
+            }
         }
     }
 }
@@ -176,7 +188,11 @@ impl ExternalCallerDeletionLedger {
         caller_id: CallerId,
     ) -> Result<CallerDeletionRecord, CallerDeletionLedgerError> {
         let caller_hash = self.key.caller_hash(tenant_id, caller_id);
-        let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(CallerDeletionLedgerError::Database)?;
         lock_ledger(&mut transaction).await?;
 
         let inserted = sqlx::query_scalar::<_, i64>(
@@ -207,14 +223,22 @@ impl ExternalCallerDeletionLedger {
             }
         };
 
-        transaction.commit().await.map_err(CallerDeletionLedgerError::Database)?;
-        Ok(CallerDeletionRecord { sequence_id, inserted: was_inserted })
+        transaction
+            .commit()
+            .await
+            .map_err(CallerDeletionLedgerError::Database)?;
+        Ok(CallerDeletionRecord {
+            sequence_id,
+            inserted: was_inserted,
+        })
     }
 
     /// Reads a consistent immutable snapshot. Writers serialize on the same
     /// transaction-scoped advisory lock, so no transaction can commit later with
     /// a sequence ID at or below this snapshot's high-water mark.
-    pub async fn snapshot(&self) -> Result<CallerDeletionLedgerSnapshot, CallerDeletionLedgerError> {
+    pub async fn snapshot(
+        &self,
+    ) -> Result<CallerDeletionLedgerSnapshot, CallerDeletionLedgerError> {
         let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
         lock_ledger(&mut transaction).await?;
         let high_water_mark = sqlx::query_scalar::<_, i64>(
@@ -232,11 +256,16 @@ impl ExternalCallerDeletionLedger {
         .fetch_all(&mut *transaction)
         .await
         .map_err(CallerDeletionLedgerError::Database)?;
-        transaction.commit().await.map_err(CallerDeletionLedgerError::Database)?;
+        transaction
+            .commit()
+            .await
+            .map_err(CallerDeletionLedgerError::Database)?;
 
         let mut tombstones = Vec::with_capacity(rows.len());
         for (sequence_id, tenant_uuid, hash, key_version) in rows {
-            let caller_hash: [u8; 32] = hash.try_into().map_err(|_| CallerDeletionLedgerError::InvalidRecord)?;
+            let caller_hash: [u8; 32] = hash
+                .try_into()
+                .map_err(|_| CallerDeletionLedgerError::InvalidRecord)?;
             if key_version != KEY_VERSION {
                 return Err(CallerDeletionLedgerError::UnsupportedKeyVersion);
             }
@@ -248,7 +277,10 @@ impl ExternalCallerDeletionLedger {
             });
         }
 
-        Ok(CallerDeletionLedgerSnapshot { high_water_mark, tombstones })
+        Ok(CallerDeletionLedgerSnapshot {
+            high_water_mark,
+            tombstones,
+        })
     }
 
     /// Returns a serialized high-water mark suitable for the final catch-up check.
@@ -261,7 +293,10 @@ impl ExternalCallerDeletionLedger {
         .fetch_one(&mut *transaction)
         .await
         .map_err(CallerDeletionLedgerError::Database)?;
-        transaction.commit().await.map_err(CallerDeletionLedgerError::Database)?;
+        transaction
+            .commit()
+            .await
+            .map_err(CallerDeletionLedgerError::Database)?;
         Ok(value)
     }
 }
@@ -304,9 +339,18 @@ mod tests {
     #[test]
     fn key_parser_requires_exact_32_byte_hex_secret() {
         assert!(CallerDeletionKey::from_hex(&"ab".repeat(32)).is_ok());
-        assert_eq!(CallerDeletionKey::new(&[1_u8; 31]).unwrap_err(), CallerDeletionKeyError::InvalidLength);
-        assert_eq!(CallerDeletionKey::from_hex("not-hex").unwrap_err(), CallerDeletionKeyError::InvalidEncoding);
-        assert_eq!(CallerDeletionKey::from_hex(&"a".repeat(64)).unwrap_err(), CallerDeletionKeyError::InvalidEncoding);
+        assert_eq!(
+            CallerDeletionKey::new(&[1_u8; 31]).unwrap_err(),
+            CallerDeletionKeyError::InvalidLength
+        );
+        assert_eq!(
+            CallerDeletionKey::from_hex("not-hex").unwrap_err(),
+            CallerDeletionKeyError::InvalidEncoding
+        );
+        assert_eq!(
+            CallerDeletionKey::from_hex(&"a".repeat(64)).unwrap_err(),
+            CallerDeletionKeyError::InvalidEncoding
+        );
     }
 
     #[test]
