@@ -96,7 +96,7 @@ pub(crate) struct TransactionToken(u64);
 
 static NEXT_TRANSACTION_TOKEN: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransactionIdentity {
     Principal(PrincipalId),
     Anonymous {
