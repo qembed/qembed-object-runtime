@@ -367,6 +367,15 @@ impl KnowledgeDocument {
         Ok(())
     }
 
+    /// Returns whether this document is visible at the pinned tenant/object revision.
+    #[must_use]
+    pub fn is_visible_at(&self, pinned: PinnedKnowledgeRevision) -> bool {
+        self.tenant_id == pinned.tenant_id
+            && self.object_id == pinned.object_id
+            && self.status == KnowledgeDocumentStatus::Live
+            && self.interval.is_some_and(|interval| interval.contains(pinned.revision))
+    }
+
     fn validate(&self) -> Result<(), KnowledgeError> {
         if self.doc_key.trim().is_empty() || self.title.trim().is_empty() {
             return Err(KnowledgeError::EmptyDocumentMetadata);
@@ -482,13 +491,33 @@ impl KnowledgeChunk {
     #[must_use]
     pub const fn interval(&self) -> Option<RevisionInterval> { self.interval }
 
-    /// Applies the document's committed visibility interval to this chunk.
+    /// Applies the document's initial committed visibility interval to this chunk.
     pub fn set_visibility_interval(&mut self, interval: RevisionInterval) -> Result<(), KnowledgeError> {
-        if self.erased || self.interval.is_some() {
+        if self.erased || self.interval.is_some() || interval.to().is_some() {
             return Err(KnowledgeError::ChunkContentIsImmutable);
         }
         self.interval = Some(interval);
         Ok(())
+    }
+
+    /// Closes the chunk's visibility interval when its document is retired.
+    pub fn close_visibility_at(&mut self, revision: RevisionNumber) -> Result<(), KnowledgeError> {
+        if self.erased {
+            return Err(KnowledgeError::ChunkContentIsImmutable);
+        }
+        self.interval
+            .as_mut()
+            .ok_or(KnowledgeError::InvalidRevisionInterval)?
+            .close_at(revision)
+    }
+
+    /// Returns whether this chunk is visible at the pinned tenant/object revision.
+    #[must_use]
+    pub fn is_visible_at(&self, pinned: PinnedKnowledgeRevision) -> bool {
+        self.tenant_id == pinned.tenant_id
+            && self.object_id == pinned.object_id
+            && !self.erased
+            && self.interval.is_some_and(|interval| interval.contains(pinned.revision))
     }
 
     /// Erasure is the only operation allowed to change persisted chunk content.
@@ -560,6 +589,9 @@ mod tests {
         doc.publish_at(RevisionNumber::new(3)).expect("indexed document can go live");
         assert!(doc.interval().expect("live interval").contains(RevisionNumber::new(3)));
         assert!(!doc.interval().expect("live interval").contains(RevisionNumber::new(4)));
+        let pinned = PinnedKnowledgeRevision::new(doc.tenant_id(), doc.object_id(), RevisionNumber::new(3));
+        assert!(doc.is_visible_at(pinned));
+        assert!(!doc.is_visible_at(PinnedKnowledgeRevision::new(TenantId::new(), doc.object_id(), RevisionNumber::new(3))));
         assert!(matches!(doc.retire_at(RevisionNumber::new(3)), Err(KnowledgeError::InvalidRevisionInterval)));
         doc.retire_at(RevisionNumber::new(4)).expect("retirement closes interval");
         assert_eq!(doc.status(), KnowledgeDocumentStatus::Retired);
@@ -608,6 +640,16 @@ mod tests {
         let encoded = serde_json::to_vec(&chunk).expect("serialize chunk");
         let decoded: KnowledgeChunk = serde_json::from_slice(&encoded).expect("validated deserialize");
         assert_eq!(decoded, chunk);
+        let interval = RevisionInterval::new(RevisionNumber::new(2), None).expect("valid interval");
+        let mut visible_chunk = chunk.clone();
+        visible_chunk.set_visibility_interval(interval).expect("publish chunk");
+        assert!(visible_chunk.is_visible_at(PinnedKnowledgeRevision::new(
+            doc.tenant_id(), doc.object_id(), RevisionNumber::new(2),
+        )));
+        visible_chunk.close_visibility_at(RevisionNumber::new(3)).expect("retire chunk");
+        assert!(!visible_chunk.is_visible_at(PinnedKnowledgeRevision::new(
+            doc.tenant_id(), doc.object_id(), RevisionNumber::new(3),
+        )));
     }
 
     #[test]
