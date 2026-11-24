@@ -87,7 +87,7 @@ mod tests {
         let fingerprint = [0x5a; 32];
 
         let context = AnonymousContext::from_server_fingerprint(tenant_id, object_id, fingerprint)
-        .expect("trusted non-nil identifiers should be accepted");
+            .expect("trusted non-nil identifiers should be accepted");
 
         assert_eq!(context.tenant_id(), tenant_id);
         assert_eq!(context.object_id(), object_id);
