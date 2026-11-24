@@ -29,6 +29,14 @@ impl CallerDeletionKey {
         Ok(Self(key))
     }
 
+    /// Loads the required v1 key from CALLER_DELETION_HMAC_KEY. The value
+    /// must be 64 hexadecimal characters supplied by deployment secret management.
+    pub fn from_env() -> Result<Self, CallerDeletionKeyError> {
+        let value = std::env::var("CALLER_DELETION_HMAC_KEY")
+            .map_err(|_| CallerDeletionKeyError::MissingEnvironmentVariable)?;
+        Self::from_hex(&value)
+    }
+
     /// Parses a 64-character hexadecimal representation suitable for an
     /// environment variable backed by a secret manager.
     pub fn from_hex(value: &str) -> Result<Self, CallerDeletionKeyError> {
@@ -75,6 +83,7 @@ impl fmt::Debug for CallerDeletionKey {
 /// Invalid secret material for the v1 Caller deletion HMAC.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallerDeletionKeyError {
+    MissingEnvironmentVariable,
     InvalidLength,
     InvalidEncoding,
 }
@@ -82,6 +91,7 @@ pub enum CallerDeletionKeyError {
 impl fmt::Display for CallerDeletionKeyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingEnvironmentVariable => formatter.write_str("CALLER_DELETION_HMAC_KEY is required"),
             Self::InvalidLength => formatter.write_str("Caller deletion HMAC key must be 32 bytes"),
             Self::InvalidEncoding => formatter.write_str("Caller deletion HMAC key must be 64 hexadecimal characters"),
         }
