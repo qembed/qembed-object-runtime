@@ -28,9 +28,8 @@ impl fmt::Display for ReservationSweepError {
             Self::InvalidBatchSize => {
                 formatter.write_str("reservation sweep batch size must be between 1 and 500")
             }
-            Self::InvalidCutoff => {
-                formatter.write_str("reservation sweep cutoff must be a representable Unix timestamp")
-            }
+            Self::InvalidCutoff => formatter
+                .write_str("reservation sweep cutoff must be a representable Unix timestamp"),
             Self::InvalidPersistedCount => {
                 formatter.write_str("reservation sweep returned an invalid expired-row count")
             }
@@ -108,10 +107,7 @@ fn validate_batch_size(batch_size: u16) -> Result<(), ReservationSweepError> {
     }
 }
 
-fn validate_expired_count(
-    expired: i32,
-    batch_size: u16,
-) -> Result<u32, ReservationSweepError> {
+fn validate_expired_count(expired: i32, batch_size: u16) -> Result<u32, ReservationSweepError> {
     if expired < 0 || expired > i32::from(batch_size) {
         return Err(ReservationSweepError::InvalidPersistedCount);
     }
