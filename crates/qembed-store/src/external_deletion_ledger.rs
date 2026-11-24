@@ -228,8 +228,10 @@ impl ExternalCallerDeletionLedger {
             .begin()
             .await
             .map_err(CallerDeletionLedgerError::Database)?;
-        lock_ledger(&mut transaction).await?;
 
+        // The BEFORE INSERT trigger takes advisory lock 61061 before assigning
+        // the sequence ID. Do not acquire it here as well: the database owns
+        // serialization for every writer, including non-Rust maintenance code.
         let inserted = sqlx::query_scalar::<_, i64>(
             r#"INSERT INTO qembed_control_plane.caller_deletion_tombstones
                (tenant_id, caller_hash, key_version) VALUES ($1, $2, $3)
