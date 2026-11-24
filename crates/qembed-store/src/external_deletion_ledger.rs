@@ -358,6 +358,10 @@ impl CallerDeletionReplayComplete {
         self.high_water_mark
     }
 
+    pub(crate) fn belongs_to(&self, ledger: &ExternalCallerDeletionLedger) -> bool {
+        ledger.shares_identity(&self.ledger_identity)
+    }
+
     pub(crate) async fn activate(&self) -> Result<(), CallerDeletionReplayError> {
         if self.activated.load(Ordering::Acquire) {
             return Ok(());
