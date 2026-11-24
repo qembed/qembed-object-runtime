@@ -27,3 +27,25 @@
 - Integration tests use a real NATS JetStream server and PostgreSQL 19.
 - A failing handler must leave the message unacknowledged for redelivery.
 - The successful handler commits a PostgreSQL marker before the consumer confirms the ACK.
+
+
+## RUST-063 duplicate-delivery concurrency evidence
+
+- `duplicate_jetstream_delivery_after_commit_has_one_postgres_effect` uses a real durable JetStream pull consumer and PostgreSQL. The first handler execution commits its business marker, then deliberately returns a retryable error to leave the message unacknowledged. JetStream redelivers the same stable delivery ID; the second execution commits idempotently and ACKs. The test asserts two handler executions but exactly one durable PostgreSQL effect.
+
+
+## RUST-063 concurrency suite coverage
+
+The CI suite combines the existing PostgreSQL integration cases with the new real-broker duplicate-delivery case:
+
+- stale_compare_and_set_conflicts_across_independent_sessions opens two tenant transactions, verifies distinct pg_backend_pid() values, commits the first state transition, and rejects the stale second transition.
+- invocation_lease_reclaim_fences_the_previous_worker_across_sessions uses a second one-connection worker pool; it verifies live-lease exclusion, expired-lease reclaim, monotonic fencing/version advance, and rejection of the former owner's writes.
+- concurrent_budget_reservations_cannot_overspend_object_daily_limit releases two independent invocation tasks through a barrier and proves exactly one can reserve the final daily budget.
+- independent_relay_processes_claim_disjoint_rows_and_publish_both starts two child relay processes, each with its own PostgreSQL pool and JetStream publisher, and proves disjoint claims and successful publication to the real broker.
+- duplicate_jetstream_delivery_after_commit_has_one_postgres_effect commits a PostgreSQL business marker before deliberately returning a retryable handler error. Real JetStream redelivers the same delivery; the second processing attempt ACKs, while the durable business marker remains unique.
+
+The CI PostgreSQL harness starts the nats:2.11-alpine JetStream service in compose.test.yaml; the workspace integration suite runs against that service. No broker mock is used for these delivery and relay scenarios.
+
+- The concurrent budget reservation case now provisions two separate one-connection pools and asserts distinct pg_backend_pid() values before releasing both transactions through the barrier.
+
+The RUST-063 changes are validated with the repository's pinned Rust 1.100.0 toolchain and the PostgreSQL 19 + JetStream CI environment.

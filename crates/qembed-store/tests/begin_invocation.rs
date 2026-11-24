@@ -2811,9 +2811,55 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
     .await
     .expect("tight object budget should be installed");
 
+    let schema_a = fixture.schema.clone();
+    let pool_a = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema_a.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&std::env::var("DATABASE_URL").expect("DATABASE_URL is configured"))
+        .await
+        .expect("first independent budget session should connect");
+    let schema_b = fixture.schema.clone();
+    let pool_b = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(move |connection, _| {
+            let schema = schema_b.clone();
+            Box::pin(async move {
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&std::env::var("DATABASE_URL").expect("DATABASE_URL is configured"))
+        .await
+        .expect("second independent budget session should connect");
+
+    let mut connection_a = pool_a.acquire().await.expect("first session is acquired");
+    let mut connection_b = pool_b.acquire().await.expect("second session is acquired");
+    let pid_a: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *connection_a)
+        .await
+        .expect("first PostgreSQL backend PID is readable");
+    let pid_b: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *connection_b)
+        .await
+        .expect("second PostgreSQL backend PID is readable");
+    assert_ne!(
+        pid_a, pid_b,
+        "budget race must use independent PostgreSQL sessions"
+    );
+    drop(connection_a);
+    drop(connection_b);
+
     let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-    let pool_a = fixture.pool.clone();
-    let pool_b = fixture.pool.clone();
     let context_a = common::signed_context(&pool_a).await;
     let context_b = common::signed_context(&pool_b).await;
     let scope_a = fixture.scope;
@@ -2875,6 +2921,8 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
         "rejected transaction leaves no reservation"
     );
 
+    pool_a.close().await;
+    pool_b.close().await;
     teardown(fixture).await;
 }
 
