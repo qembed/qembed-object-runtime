@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use qembed_domain::anonymous::AnonymousContext;
 use qembed_domain::ids::CallerId;
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -20,6 +21,7 @@ use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_cal
 use crate::{TenantTransaction, begin_context_tenant_transaction};
 
 const TOKEN_PREFIX: &str = "qctx1";
+const ANONYMOUS_TOKEN_PREFIX: &str = "qctx2";
 const MAX_PAYLOAD_BYTES: usize = 8 * 1024;
 const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(30);
 const MAX_TOKEN_LIFETIME: Duration = Duration::from_secs(60);
@@ -228,6 +230,59 @@ impl ContextIssuer {
             lowercase_hex(&signature)
         ))
     }
+
+    /// Issues a version-2 Anonymous context. The exact claim set is distinct
+    /// from qctx1: Principal is explicitly JSON null and Object/fingerprint/
+    /// subject-kind are mandatory. No synthetic Principal ID is accepted.
+    fn issue_anonymous(
+        &self,
+        context: &AnonymousContext,
+        caller_id: Option<CallerId>,
+        binding: &PgContextBinding,
+    ) -> Result<String, ContextIssuerError> {
+        let now = OffsetDateTime::now_utc();
+        let lifetime = time::Duration::try_from(self.config.token_lifetime)
+            .map_err(|_| ContextIssuerError::InvalidConfiguration)?;
+        let expires_at = now
+            .checked_add(lifetime)
+            .ok_or(ContextIssuerError::InvalidConfiguration)?;
+
+        let claims = AnonymousContextClaims {
+            version: "2".to_owned(),
+            tenant_id: context.tenant_id().to_string(),
+            principal_id: None,
+            caller_id: caller_id.map(|id| id.to_string()),
+            subject_kind: "anonymous".to_owned(),
+            object_id: context.object_id().to_string(),
+            subject_fingerprint: lowercase_hex(&context.subject_fingerprint()),
+            backend_pid: binding.backend_pid.to_string(),
+            transaction_id: binding.transaction_id.clone(),
+            database_oid: binding.database_oid.clone(),
+            deployment_id: self.config.deployment_id.clone(),
+            issuer: self.config.issuer.clone(),
+            audience: self.config.audience.clone(),
+            key_id: self.config.key_id.clone(),
+            issued_at: now
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            expires_at: expires_at
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            nonce: Uuid::new_v4().to_string(),
+        };
+
+        let payload =
+            serde_jcs::to_vec(&claims).map_err(|_| ContextIssuerError::Canonicalization)?;
+        if payload.len() > MAX_PAYLOAD_BYTES {
+            return Err(ContextIssuerError::PayloadTooLarge);
+        }
+        let signature = self.signing_key.sign(&payload)?;
+        Ok(format!(
+            "{ANONYMOUS_TOKEN_PREFIX}:{}:{}",
+            lowercase_hex(&payload),
+            lowercase_hex(&signature)
+        ))
+    }
 }
 
 impl fmt::Debug for ContextIssuer {
@@ -246,6 +301,27 @@ struct ContextClaims {
     tenant_id: String,
     principal_id: String,
     caller_id: Option<String>,
+    backend_pid: String,
+    transaction_id: String,
+    database_oid: String,
+    deployment_id: String,
+    issuer: String,
+    audience: String,
+    key_id: String,
+    issued_at: String,
+    expires_at: String,
+    nonce: String,
+}
+
+#[derive(Serialize)]
+struct AnonymousContextClaims {
+    version: String,
+    tenant_id: String,
+    principal_id: Option<String>,
+    caller_id: Option<String>,
+    subject_kind: String,
+    object_id: String,
+    subject_fingerprint: String,
     backend_pid: String,
     transaction_id: String,
     database_oid: String,
