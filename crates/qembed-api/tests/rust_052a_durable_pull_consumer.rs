@@ -326,13 +326,12 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     assert_eq!(second.handler_failed, 0);
     assert_eq!(handler.calls.load(Ordering::SeqCst), 2);
 
-    let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM rust_052a_ack_probe WHERE delivery_id = $1",
-    )
-    .bind(delivery_id)
-    .fetch_one(&pool)
-    .await
-    .expect("business marker count is readable");
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM rust_052a_ack_probe WHERE delivery_id = $1")
+            .bind(delivery_id)
+            .fetch_one(&pool)
+            .await
+            .expect("business marker count is readable");
     assert_eq!(
         count, 1,
         "duplicate delivery after the first commit must not duplicate the business effect"
