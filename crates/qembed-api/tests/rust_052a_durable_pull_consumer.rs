@@ -176,7 +176,6 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
         .expect("test marker is cleaned up");
 }
 
-
 struct CommitThenRetryOnce {
     pool: PgPool,
     fail_once: std::sync::Arc<std::sync::atomic::AtomicBool>,
