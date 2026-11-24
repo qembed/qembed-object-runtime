@@ -3,12 +3,9 @@
 use std::fmt;
 use std::future::Future;
 
-use qembed_domain::{
-    kill_switch::{
-        KillSwitchAuthority, KillSwitchContext, KillSwitchDecision, KillSwitchScope,
-        KillSwitchStore,
-        evaluate_kill_switches,
-    },
+use qembed_domain::kill_switch::{
+    KillSwitchAuthority, KillSwitchContext, KillSwitchDecision, KillSwitchScope, KillSwitchStore,
+    evaluate_kill_switches,
 };
 
 /// Error returned when a switch prevents an action or its state cannot be read.
@@ -67,9 +64,7 @@ where
         context: KillSwitchContext,
     ) -> Result<(), KillSwitchServiceError<S::Error>> {
         let authority_matches = match authority {
-            KillSwitchAuthority::Principal(scope) => {
-                scope.tenant_id() == context.tenant_id()
-            }
+            KillSwitchAuthority::Principal(scope) => scope.tenant_id() == context.tenant_id(),
             KillSwitchAuthority::Anonymous(anonymous) => {
                 anonymous.tenant_id() == context.tenant_id()
                     && anonymous.object_id() == context.object_id()
@@ -117,8 +112,8 @@ mod tests {
     };
 
     use qembed_domain::{
-        ids::{ObjectId, TenantId, ToolId},
         anonymous::AnonymousContext,
+        ids::{ObjectId, TenantId, ToolId},
         kill_switch::{
             KillSwitch, KillSwitchAuthority, KillSwitchContext, KillSwitchScope, KillSwitchStore,
         },
@@ -209,12 +204,8 @@ mod tests {
     async fn anonymous_qctx2_authority_is_supported_without_synthetic_principal() {
         let tenant_id = TenantId::new();
         let object_id = ObjectId::new();
-        let anonymous = AnonymousContext::from_server_fingerprint(
-            tenant_id,
-            object_id,
-            [0x5a; 32],
-        )
-        .expect("server-derived Anonymous context should be valid");
+        let anonymous = AnonymousContext::from_server_fingerprint(tenant_id, object_id, [0x5a; 32])
+            .expect("server-derived Anonymous context should be valid");
         let context = KillSwitchContext::new(tenant_id, object_id, ToolId::new());
         let service = KillSwitchService::new(MemorySwitchStore(vec![KillSwitch::new(
             KillSwitchScope::Tenant { tenant_id },
@@ -224,9 +215,13 @@ mod tests {
         let calls = AtomicUsize::new(0);
 
         let result = service
-            .run_if_enabled(KillSwitchAuthority::Anonymous(&anonymous), context, || async {
-                calls.fetch_add(1, Ordering::SeqCst);
-            })
+            .run_if_enabled(
+                KillSwitchAuthority::Anonymous(&anonymous),
+                context,
+                || async {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                },
+            )
             .await;
 
         assert!(matches!(
