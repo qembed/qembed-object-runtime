@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     connect_pool,
