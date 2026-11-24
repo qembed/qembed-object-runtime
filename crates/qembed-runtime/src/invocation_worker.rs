@@ -855,7 +855,7 @@ mod lifecycle_tests {
         async fn complete(&self, _: ChatRequest) -> Result<ChatResponse, ChatProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let _drop_signal = DropSignal(Arc::clone(&self.dropped));
-            std::future::pending().await
+            std::future::pending::<Result<ChatResponse, ChatProviderError>>().await
         }
     }
 
