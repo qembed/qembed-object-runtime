@@ -27,6 +27,7 @@ use qembed_store::{
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
+#[allow(dead_code)]
 mod support;
 
 fn compose(args: &[&str]) {
