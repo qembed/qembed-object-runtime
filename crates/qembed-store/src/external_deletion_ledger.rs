@@ -380,14 +380,13 @@ async fn cluster_identity_from_pool(
 async fn cluster_identity_from_connection(
     connection: &mut PoolConnection<Postgres>,
 ) -> Result<PostgresClusterIdentity, sqlx::Error> {
-    let (server_address, server_port, postmaster_start_time) = sqlx::query_as(
-        "SELECT inet_server_addr()::text, inet_server_port(), pg_postmaster_start_time()::text",
+    let (database_name, postmaster_start_time) = sqlx::query_as(
+        "SELECT current_database(), to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')",
     )
     .fetch_one(&mut **connection)
     .await?;
     Ok(PostgresClusterIdentity {
-        server_address,
-        server_port,
+        database_name,
         postmaster_start_time,
     })
 }
