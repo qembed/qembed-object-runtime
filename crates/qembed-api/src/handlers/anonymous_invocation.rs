@@ -279,3 +279,151 @@ fn backend_error(error: OwnerApiBackendError) -> Response {
 fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
     (status, Json(crate::errors::ApiErrorBody { code, message })).into_response()
 }
+
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use axum::{
+        body::Body,
+        extract::ConnectInfo,
+        http::Request,
+    };
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct MockBackend {
+        fingerprint: Arc<Mutex<Option<[u8; 32]>>>,
+    }
+
+    impl AnonymousInvocationBackend for MockBackend {
+        fn invoke(
+            &self,
+            _tenant_id: TenantId,
+            _object_id: ObjectId,
+            subject_fingerprint: [u8; 32],
+            _idempotency_key: String,
+            _input: serde_json::Value,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>,
+        > {
+            let fingerprint = Arc::clone(&self.fingerprint);
+            Box::pin(async move {
+                *fingerprint.lock().expect("fingerprint mutex") = Some(subject_fingerprint);
+                Ok(InvocationId::new())
+            })
+        }
+    }
+
+    fn test_key() -> AnonymousFingerprintKey {
+        AnonymousFingerprintKey::from_secret(&[0x42; 32])
+            .expect("32-byte fingerprint key should be accepted")
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_scoped_to_peer_tenant_and_object() {
+        let key = test_key();
+        let tenant = TenantId::new();
+        let object = ObjectId::new();
+        let peer: SocketAddr = "192.0.2.10:1234".parse().expect("peer address");
+
+        let first = key.fingerprint(peer, tenant, object);
+        assert_eq!(first, key.fingerprint(peer, tenant, object));
+        assert_ne!(
+            first,
+            key.fingerprint(
+                "192.0.2.11:1234".parse().expect("other peer"),
+                tenant,
+                object
+            )
+        );
+        assert_ne!(first, key.fingerprint(peer, tenant, ObjectId::new()));
+        assert_ne!(first, key.fingerprint(peer, TenantId::new(), object));
+    }
+
+    #[tokio::test]
+    async fn public_route_uses_direct_peer_and_ignores_forwarded_headers() {
+        let backend = MockBackend::default();
+        let observed = Arc::clone(&backend.fingerprint);
+        let key = test_key();
+        let tenant = TenantId::new();
+        let object = ObjectId::new();
+        let peer: SocketAddr = "192.0.2.10:4567".parse().expect("peer address");
+        let expected = key.fingerprint(peer, tenant, object);
+        let app = anonymous_invocation_router(backend, key);
+
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/v1/public/tenants/{tenant}/objects/{object}/invocations"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-forwarded-for", "198.51.100.77")
+            .body(Body::from(
+                r#"{"idempotency_key":"client-key","input":{"message":"hello"}}"#,
+            ))
+            .expect("request should be valid");
+        request.extensions_mut().insert(ConnectInfo(peer));
+
+        let response = app
+            .oneshot(request)
+            .await
+            .expect("router should handle request");
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            *observed.lock().expect("fingerprint mutex"),
+            Some(expected)
+        );
+    }
+
+    #[tokio::test]
+    async fn public_route_rejects_caller_id_in_transport_body() {
+        let app = anonymous_invocation_router(MockBackend::default(), test_key());
+        let tenant = TenantId::new();
+        let object = ObjectId::new();
+        let peer: SocketAddr = "192.0.2.10:4567".parse().expect("peer address");
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/v1/public/tenants/{tenant}/objects/{object}/invocations"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"caller_id":"20000000-0000-0000-0000-000000000001","idempotency_key":"key","input":{}}"#,
+            ))
+            .expect("request should be valid");
+        request.extensions_mut().insert(ConnectInfo(peer));
+
+        let response = app
+            .oneshot(request)
+            .await
+            .expect("router should handle request");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn public_route_fails_closed_without_direct_peer_context() {
+        let app = anonymous_invocation_router(MockBackend::default(), test_key());
+        let tenant = TenantId::new();
+        let object = ObjectId::new();
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/v1/public/tenants/{tenant}/objects/{object}/invocations"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"idempotency_key":"client-key","input":{}}"#,
+            ))
+            .expect("request should be valid");
+
+        let response = app
+            .oneshot(request)
+            .await
+            .expect("router should handle request");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+}
