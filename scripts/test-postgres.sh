@@ -14,7 +14,7 @@ export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 # Pin the exact SQL candidate used for the cross-repository integration test.
 # Update when qembed-sql advances its canonical signed-context migration candidate.
-qsa003_sql_commit="4718f26dcddd4dd27013768c40f09cdfeb8bf2bb"
+qsa003_sql_commit="a8f5158f5afab7cf465c9bbe5e7ff1dc59e8daf0"
 sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-qsa003-${qsa003_sql_commit}"
 
 mkdir -p "$evidence_dir"
@@ -122,7 +122,8 @@ for sql_file in \
   migrations/rt059_anonymous_context_v2.sql \
   migrations/rt060_anonymous_object_caller.sql \
   migrations/rt061_runtime_caller_erasure.sql \
-  migrations/rt061b_verified_caller_erasure.sql; do
+  migrations/rt061b_verified_caller_erasure.sql \
+  migrations/rt061c_cancelled_tool_execution_erasure.sql; do
   "${compose[@]}" cp "$sql_repo_dir/$sql_file" "postgres:/tmp/$(basename "$sql_file")"
   psql_in_test_db -f "/tmp/$(basename "$sql_file")"
 done
