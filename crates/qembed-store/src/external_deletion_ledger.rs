@@ -15,9 +15,9 @@ use std::{
 use qembed_domain::ids::{CallerId, TenantId};
 use ring::hmac;
 use sqlx::{
-    PgPool, Postgres,
+    PgPool,
     migrate::{MigrateError, Migrator},
-    pool::PoolConnection,
+    postgres::PgConnection,
 };
 
 const HMAC_DOMAIN: &[u8] = b"qembed/caller-deletion/v1\0";
