@@ -20,8 +20,7 @@ use qembed_domain::{
 };
 use qembed_runtime::outbox_relay::{OutboxRelay, OutboxRelayConfig};
 use qembed_store::{
-    invocation_recovery::PgInvocationRecoverySweeper,
-    outbox_dispatcher::PgOutboxDispatcher,
+    invocation_recovery::PgInvocationRecoverySweeper, outbox_dispatcher::PgOutboxDispatcher,
     run_migrations,
 };
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -109,7 +108,6 @@ async fn existing_async_nats_client_reconnects_after_server_restart() {
     assert_eq!(info.state.messages, 1);
 }
 
-
 async fn recovery_database() -> PgPool {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL is set by test-postgres.sh");
     let pool = PgPoolOptions::new()
@@ -121,7 +119,10 @@ async fn recovery_database() -> PgPool {
     pool
 }
 
-async fn seed_stale_invocations(pool: &PgPool, subject: &str) -> (TenantId, Vec<(InvocationId, EventId)>) {
+async fn seed_stale_invocations(
+    pool: &PgPool,
+    subject: &str,
+) -> (TenantId, Vec<(InvocationId, EventId)>) {
     let tenant_id = TenantId::new();
     let caller_id = CallerId::new();
     let object_id = ObjectId::new();
@@ -256,7 +257,9 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
     let subject = format!("qembed.rust064.loss.{suffix}");
     let stream_name = format!("QEMBED_RUST064_LOSS_{}", suffix.to_uppercase());
     let durable_name = format!("qembed-rust064-loss-{suffix}");
-    let client = async_nats::connect(&url).await.expect("initial NATS is available");
+    let client = async_nats::connect(&url)
+        .await
+        .expect("initial NATS is available");
     let context = jetstream::new(client);
     let stream = context
         .get_or_create_stream(StreamConfig {
@@ -286,7 +289,10 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
         .await
         .expect("both original deliveries receive PubAck");
     assert_eq!(initial_outcome.published, 2);
-    assert_eq!(stream.get_info().await.expect("stream info").state.messages, 2);
+    assert_eq!(
+        stream.get_info().await.expect("stream info").state.messages,
+        2
+    );
 
     let initial_consumer = stream
         .get_or_create_consumer(
@@ -335,7 +341,11 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
     compose(&["up", "--detach", "--wait", "nats"]);
     wait_for_nats("127.0.0.1:4222".parse().expect("valid NATS address"));
 
-    let context = jetstream::new(async_nats::connect(&url).await.expect("fresh NATS connects"));
+    let context = jetstream::new(
+        async_nats::connect(&url)
+            .await
+            .expect("fresh NATS connects"),
+    );
     let stream = context
         .get_or_create_stream(StreamConfig {
             name: stream_name,
@@ -347,7 +357,12 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
         .await
         .expect("empty replacement stream is provisioned");
     assert_eq!(
-        stream.get_info().await.expect("fresh stream info").state.messages,
+        stream
+            .get_info()
+            .await
+            .expect("fresh stream info")
+            .state
+            .messages,
         0,
         "the broker restart intentionally lost both messages, including one already delivered"
     );
@@ -381,7 +396,15 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
         .expect("PostgreSQL-marked Outbox deliveries are republished");
     assert_eq!(outcome.claimed, 2);
     assert_eq!(outcome.published, 2);
-    assert_eq!(stream.get_info().await.expect("replayed stream info").state.messages, 2);
+    assert_eq!(
+        stream
+            .get_info()
+            .await
+            .expect("replayed stream info")
+            .state
+            .messages,
+        2
+    );
 
     let consumer = stream
         .get_or_create_consumer(
