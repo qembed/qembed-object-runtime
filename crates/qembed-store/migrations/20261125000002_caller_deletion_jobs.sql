@@ -1,5 +1,17 @@
 -- RUST-061: durable retryable Caller deletion jobs.
 -- The authoritative tombstones live only in the independent Control-plane DB.
+DO $roles$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'qembed_restore') THEN
+        CREATE ROLE qembed_restore
+            NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    END IF;
+END
+$roles$;
+
+ALTER ROLE qembed_restore
+    NOLOGIN INHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+
 CREATE TABLE deletion_jobs (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
