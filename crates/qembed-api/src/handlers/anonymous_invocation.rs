@@ -13,8 +13,8 @@ use std::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{ConnectInfo, Path, State},
-    http::{HeaderValue, StatusCode, header},
+    extract::{ConnectInfo, FromRequestParts, Path, State},
+    http::{HeaderValue, StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
     routing::post,
 };
@@ -165,10 +165,37 @@ fn parse_invoke_body(body: &[u8]) -> Result<(String, serde_json::Value), ()> {
     Ok((request.idempotency_key, request.input))
 }
 
+#[derive(Clone, Copy)]
+struct DirectPeer(SocketAddr);
+
+impl<S> FromRequestParts<S> for DirectPeer
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|ConnectInfo(peer)| Self(*peer))
+            .ok_or_else(|| {
+                api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "edge_context_unavailable",
+                    "The request edge context is unavailable.",
+                )
+            })
+    }
+}
+
 async fn invoke_public_object(
     State(state): State<AnonymousInvocationState>,
     Path((tenant_id, object_id)): Path<(String, String)>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
+    DirectPeer(peer): DirectPeer,
     body: Bytes,
 ) -> Response {
     let tenant_id = match tenant_id.parse::<TenantId>() {
@@ -190,13 +217,6 @@ async fn invoke_public_object(
                 "The object ID is invalid.",
             );
         }
-    };
-    let Some(ConnectInfo(peer)) = connect_info else {
-        return api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "edge_context_unavailable",
-            "The request edge context is unavailable.",
-        );
     };
     let (idempotency_key, input) = match parse_invoke_body(&body) {
         Ok(request) => request,
