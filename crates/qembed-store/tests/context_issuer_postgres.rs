@@ -327,10 +327,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("enabled tenant Tool switch should be inserted");
 
-    let kill_switch_store = PgKillSwitchStore::new(PgContext::new(
-        pool.clone(),
-        issuer.clone(),
-    ));
+    let kill_switch_store = PgKillSwitchStore::new(PgContext::new(pool.clone(), issuer.clone()));
     let kill_switch_context = KillSwitchContext::new(tenant_id, object_id, tool_id);
     let switches = kill_switch_store
         .load_matching_kill_switches(&scope, kill_switch_context)
