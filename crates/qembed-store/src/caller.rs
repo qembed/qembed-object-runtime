@@ -87,6 +87,92 @@ impl ResolvedAnonymousCaller {
     }
 }
 
+/// Resolves the Object-scoped Anonymous Caller under a signed qctx2 invocation
+/// context. The SQL function locks Object and Caller lifecycle rows until the
+/// enclosing transaction commits.
+pub async fn resolve_anonymous_caller(
+    transaction: &mut TenantTransaction,
+    context: &AnonymousContext,
+    caller_id: CallerId,
+) -> Result<ResolvedAnonymousCaller, AnonymousCallerResolutionError> {
+    if !transaction.matches_anonymous_context(context) {
+        return Err(AnonymousCallerResolutionError::ContextMismatch);
+    }
+    let row = sqlx::query_as::<_, (String, String)>(
+        "SELECT caller_id::text, caller_kind FROM qembed_crypto.resolve_anonymous_caller($1::uuid, $2::uuid, $3::uuid)",
+    )
+    .bind(context.tenant_id().to_string())
+    .bind(context.object_id().to_string())
+    .bind(caller_id.to_string())
+    .fetch_optional(transaction.connection())
+    .await
+    .map_err(|error| match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("42501") =>
+        {
+            AnonymousCallerResolutionError::NotPubliclyInvokable
+        }
+        _ => AnonymousCallerResolutionError::Database(error),
+    })?
+    .ok_or(AnonymousCallerResolutionError::NotPubliclyInvokable)?;
+
+    let resolved_id = row
+        .0
+        .parse::<CallerId>()
+        .map_err(|_| AnonymousCallerResolutionError::InvalidCallerId)?;
+    if resolved_id != caller_id {
+        return Err(AnonymousCallerResolutionError::ContextMismatch);
+    }
+    let kind = CallerKind::parse(&row.1)
+        .ok_or(AnonymousCallerResolutionError::UnknownCallerKind)?;
+    if kind != CallerKind::Anonymous {
+        return Err(AnonymousCallerResolutionError::UnexpectedCallerKind);
+    }
+
+    Ok(ResolvedAnonymousCaller {
+        caller_id: resolved_id,
+        kind,
+        tenant_id: context.tenant_id(),
+        object_id: context.object_id(),
+        subject_fingerprint: context.subject_fingerprint(),
+        transaction_token: transaction.transaction_token(),
+    })
+}
+
+/// Failure to resolve an Object-scoped Anonymous Caller.
+#[derive(Debug)]
+pub enum AnonymousCallerResolutionError {
+    ContextMismatch,
+    NotPubliclyInvokable,
+    InvalidCallerId,
+    UnknownCallerKind,
+    UnexpectedCallerKind,
+    Database(sqlx::Error),
+}
+
+impl fmt::Display for AnonymousCallerResolutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ContextMismatch => formatter.write_str("Anonymous Caller context mismatch"),
+            Self::NotPubliclyInvokable => formatter.write_str("Object is not publicly invokable"),
+            Self::InvalidCallerId => formatter.write_str("Anonymous Caller resolver returned an invalid ID"),
+            Self::UnknownCallerKind => formatter.write_str("Anonymous Caller resolver returned an unknown kind"),
+            Self::UnexpectedCallerKind => formatter.write_str("resolved Caller is not Anonymous"),
+            Self::Database(error) => write!(formatter, "Anonymous Caller resolution database error: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for AnonymousCallerResolutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+
 /// Resolves the caller requested by the application against the authenticated
 /// Principal's active tenant-scoped delegation.
 ///
