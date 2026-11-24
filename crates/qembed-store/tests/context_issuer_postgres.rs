@@ -342,6 +342,31 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         } if *blocked_tenant == tenant_id
     ));
 
+    // Anonymous reads use qctx2's bootstrap token without provisioning
+    // an Anonymous Caller before the policy decision.
+    let anonymous = AnonymousContext::from_server_fingerprint(
+        tenant_id,
+        object_id,
+        [0x44; 32],
+    )
+    .expect("server-derived Anonymous context should be valid");
+    let anonymous_switches = kill_switch_store
+        .load_matching_kill_switches(
+            KillSwitchAuthority::Anonymous(&anonymous),
+            kill_switch_context,
+        )
+        .await
+        .expect("qctx2 Store context should read the same canonical switches");
+    let anonymous_decision =
+        evaluate_kill_switches(kill_switch_context, &anonymous_switches);
+    assert!(matches!(
+        &anonymous_decision,
+        KillSwitchDecision::Blocked {
+            scope: KillSwitchScope::Tenant { tenant_id: blocked_tenant },
+            ..
+        } if *blocked_tenant == tenant_id
+    ));
+
     let side_effects = std::sync::atomic::AtomicUsize::new(0);
     if decision == KillSwitchDecision::Allowed {
         side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -366,6 +391,17 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         .expect("enabled switches should remain readable");
     let decision = evaluate_kill_switches(kill_switch_context, &switches);
     assert_eq!(decision, KillSwitchDecision::Allowed);
+    let anonymous_switches = kill_switch_store
+        .load_matching_kill_switches(
+            KillSwitchAuthority::Anonymous(&anonymous),
+            kill_switch_context,
+        )
+        .await
+        .expect("qctx2 Store context should remain readable after re-enable");
+    assert_eq!(
+        evaluate_kill_switches(kill_switch_context, &anonymous_switches),
+        KillSwitchDecision::Allowed
+    );
     if decision == KillSwitchDecision::Allowed {
         side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
