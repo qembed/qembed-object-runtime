@@ -409,6 +409,32 @@ pub async fn begin_principal_context_transaction(
         .map(|(transaction, _)| transaction)
 }
 
+/// Begins a read-only qctx2 context for an Anonymous Object policy check.
+///
+/// This issues the bootstrap token with a null Caller claim but deliberately
+/// does not provision or resolve the Object's Anonymous Caller. It is suitable
+/// for RLS-protected reads such as kill-switch evaluation that must happen
+/// before any invocation-side provisioning.
+pub async fn begin_anonymous_context_read_transaction(
+    pool: &sqlx::PgPool,
+    context: &AnonymousContext,
+    issuer: &ContextIssuer,
+) -> Result<ContextTransaction, ContextTransactionError> {
+    let mut transaction = begin_anonymous_context_tenant_transaction(pool, context)
+        .await
+        .map_err(ContextTransactionError::Database)?;
+    let binding = PgContextBinding::read(&mut transaction).await?;
+    let bootstrap_token = issuer
+        .issue_anonymous(context, None, &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(bootstrap_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+    Ok(transaction)
+}
+
 /// Begins a qctx2 transaction for one public Anonymous Object invocation.
 ///
 /// PostgreSQL provisions or reuses the Object's stable Anonymous Caller under
