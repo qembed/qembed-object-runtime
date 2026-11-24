@@ -2,6 +2,7 @@
 
 use std::future::Future;
 
+use crate::anonymous::AnonymousContext;
 use crate::ids::{ObjectId, TenantId, ToolId};
 use crate::scope::Scope;
 
@@ -37,6 +38,14 @@ impl KillSwitchContext {
     pub const fn tool_id(self) -> ToolId {
         self.tool_id
     }
+}
+
+/// Trusted identity used to read switches for an action. Anonymous requests use
+/// their qctx2 context and are never converted into a synthetic Principal.
+#[derive(Clone, Copy, Debug)]
+pub enum KillSwitchAuthority<'a> {
+    Principal(&'a Scope),
+    Anonymous(&'a AnonymousContext),
 }
 
 /// One persisted switch. A Tool switch may be global (tenant_id=None) or
@@ -160,7 +169,7 @@ pub trait KillSwitchStore: Send + Sync {
 
     fn load_matching_kill_switches(
         &self,
-        scope: &Scope,
+        authority: KillSwitchAuthority<'_>,
         context: KillSwitchContext,
     ) -> impl Future<Output = Result<Vec<KillSwitch>, Self::Error>> + Send;
 }
