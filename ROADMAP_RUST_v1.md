@@ -471,7 +471,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Eligibility: истёкшие `Reserved` rows освобождаются только при provider attempt `NotStarted`, `ConfirmedNotAccepted` или `CancelledBeforeSend`. `MayHaveBeenSent`, `OutcomeUnknown`, `ResponseReceived` и отсутствующая attempt row сохраняют reservation.
   - SQL: детерминированный `p_now` cutoff, default на PostgreSQL clock, batch 1..=500; provider-attempt row lock с `SKIP LOCKED` сериализует конкурирующие sweepers; reservation и object/per-caller counters меняются атомарно.
   - Тесты: deterministic cutoff, повторный запуск, два независимых worker pools, preservation of OutcomeUnknown и проверка, что counters уменьшаются ровно один раз.
-  - Evidence/design: `docs/RUST-062_RESERVATION_SWEEPER.md`; SQL PR [#95](https://github.com/qembed/qembed-sql/pull/95).
+  - Evidence/design: `docs/RUST-062_RESERVATION_SWEEPER.md`; SQL PRs [#95](https://github.com/qembed/qembed-sql/pull/95) and [#96](https://github.com/qembed/qembed-sql/pull/96); the latter rejects NULL batch sizes because PostgreSQL treats `LIMIT NULL` as unbounded.
   - DoD: sweeper идемпотентен и не освобождает reservation при неоднозначном provider outcome.
 
 - [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions и relay/consumer instances.
