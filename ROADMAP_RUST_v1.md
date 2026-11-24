@@ -459,16 +459,20 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: integration — cancel до старта, во время ожидания, между шагами; после принятой отмены новые tool calls не стартуют.
   - DoD: cancellation распространяется на все последующие шаги.
 
-- [ ] **RUST-061 (M)** Реализовать обязательный External Caller Deletion Ledger и restore replay. Локального ledger/fallback режима нет.
+- [x] **RUST-061 (M)** Реализовать обязательный External Caller Deletion Ledger и restore replay. Локального ledger/fallback режима нет.
   - Архитектура: `docs/ADR-RUST-061-EXTERNAL-CALLER-DELETION-LEDGER.md`. Control-plane PostgreSQL — отдельный кластер и единственный authoritative источник append-only HMAC tombstones; `CONTROL_PLANE_DATABASE_URL` и v1 HMAC secret обязательны.
   - Протокол: Runtime сначала отзывает Caller (без физического удаления), затем фиксирует tombstone в Control-plane, после durable acknowledgement очищает Caller-derived data. Ошибки оставляют Caller revoked и deletion job retryable; local fallback запрещён.
   - Restore: readiness/traffic закрыты до полного replay внешнего ledger, проверки отсутствия Caller-derived rows и достижения стабильного high-water mark. Для replay используется узко привилегированная cross-tenant capability без ослабления обычного RLS.
-  - Тесты: integration — delete, повторный delete, отказ/потеря Control-plane, crash points протокола, восстановление старого Runtime backup и replay до readiness.
+  - Evidence: SQL PR [#94](https://github.com/qembed/qembed-sql/pull/94) и Rust PR [#134](https://github.com/qembed/qembed-object-runtime/pull/134); Rust CI run #2900 и canonical SQL smoke прошли.
   - DoD: erased Caller data не возвращаются после restore; Control-plane недоступность не приводит к downgrade или открытию traffic.
 
-- [ ] **RUST-062 (S)** Реализовать reservation sweeper.
-  - Тесты: deterministic clock; повторный запуск; параллельные sweeper; counters не обновляются дважды.
-  - DoD: sweeper идемпотентен.
+- [ ] **RUST-062 (S)** Реализовать worker-only reservation sweeper.
+  - Rust adapter: `qembed_store::reservation_sweeper::PgReservationSweeper` использует отдельный pool с ролью `qembed_worker`; операция глобальная, без tenant Scope.
+  - Eligibility: истёкшие `Reserved` rows освобождаются только при provider attempt `NotStarted`, `ConfirmedNotAccepted` или `CancelledBeforeSend`. `MayHaveBeenSent`, `OutcomeUnknown`, `ResponseReceived` и отсутствующая attempt row сохраняют reservation.
+  - SQL: детерминированный `p_now` cutoff, default на PostgreSQL clock, batch 1..=500; provider-attempt row lock с `SKIP LOCKED` сериализует конкурирующие sweepers; reservation и object/per-caller counters меняются атомарно.
+  - Тесты: deterministic cutoff, повторный запуск, два независимых worker pools, preservation of OutcomeUnknown и проверка, что counters уменьшаются ровно один раз.
+  - Evidence/design: `docs/RUST-062_RESERVATION_SWEEPER.md`; SQL PRs [#95](https://github.com/qembed/qembed-sql/pull/95) and [#96](https://github.com/qembed/qembed-sql/pull/96); the latter rejects NULL batch sizes because PostgreSQL treats `LIMIT NULL` as unbounded.
+  - DoD: sweeper идемпотентен и не освобождает reservation при неоднозначном provider outcome.
 
 - [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions и relay/consumer instances.
   - Тесты: stale CAS, lease reclaim, concurrent budget reservation, competing state transition, competing relay claims и duplicate JetStream deliveries.

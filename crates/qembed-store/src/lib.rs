@@ -30,6 +30,7 @@ pub mod object_repository;
 pub mod outbox_dispatcher;
 pub mod pg_context;
 pub mod readiness;
+pub mod reservation_sweeper;
 pub mod snapshot_repository;
 pub mod tool_execution_store;
 pub mod valkey_rate_limit;
