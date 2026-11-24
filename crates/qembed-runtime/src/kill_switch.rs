@@ -90,7 +90,7 @@ mod tests {
         test_support::scope_for_tenant,
     };
 
-    use super::*;
+    use super::{KillSwitchService, KillSwitchServiceError};
 
     struct MemorySwitchStore(Vec<KillSwitch>);
 
