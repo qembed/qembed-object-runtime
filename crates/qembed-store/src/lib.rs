@@ -35,9 +35,8 @@ pub use cas::{CasError, execute_cas};
 pub use context_issuer::{
     ContextIssuer, ContextIssuerConfig, ContextIssuerError, ContextSigner, ContextTransaction,
     ContextTransactionError, RingEd25519SigningKey, begin_anonymous_context_read_transaction,
-    begin_anonymous_context_transaction,
-    begin_caller_context_transaction, begin_context_transaction,
-    begin_principal_context_transaction,
+    begin_anonymous_context_transaction, begin_caller_context_transaction,
+    begin_context_transaction, begin_principal_context_transaction,
 };
 pub use pg_context::PgContext;
 pub use readiness::{PgReadinessFailure, PgReadinessProbe};
