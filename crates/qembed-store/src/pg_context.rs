@@ -16,8 +16,7 @@ use crate::caller::{ResolvedAnonymousCaller, ResolvedCaller};
 use crate::{
     ContextIssuer, ContextTransaction, ContextTransactionError,
     begin_anonymous_context_read_transaction, begin_anonymous_context_transaction,
-    begin_caller_context_transaction,
-    begin_principal_context_transaction,
+    begin_caller_context_transaction, begin_principal_context_transaction,
 };
 
 /// PostgreSQL access capability that requires signed context for transactions.
