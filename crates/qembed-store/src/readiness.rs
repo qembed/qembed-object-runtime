@@ -5,6 +5,10 @@ use std::path::Path;
 use sqlx::PgPool;
 use sqlx::migrate::Migrator;
 
+use crate::external_deletion_ledger::{
+    CallerDeletionReplayComplete, CallerDeletionReplayError, ExternalCallerDeletionLedger,
+};
+
 /// Why the database is not ready. This type is intentionally diagnostic-free.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PgReadinessFailure {
@@ -48,8 +52,8 @@ impl PgReadinessProbe {
         })
     }
 
-    /// Returns ready only when PostgreSQL answers and its applied migration
-    /// history exactly matches this binary's embedded migration files.
+    /// Returns ready only when both databases and their migration histories
+    /// match this binary, and the completed replay lock can be safely released.
     ///
     /// The probe does not run migrations, acquire tenant context, or expose
     /// connection details and SQL diagnostics in its result.
