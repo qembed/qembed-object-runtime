@@ -73,7 +73,9 @@ impl ReadinessProbe for StoreReadinessProbe {
                 Err(PgReadinessFailure::DatabaseUnavailable) => {
                     ReadinessStatus::DatabaseUnavailable
                 }
-                Err(PgReadinessFailure::MigrationMismatch) => ReadinessStatus::MigrationMismatch,
+                Err(PgReadinessFailure::MigrationMismatch)
+                | Err(PgReadinessFailure::ControlPlaneMigrationMismatch) => ReadinessStatus::MigrationMismatch,
+                Err(PgReadinessFailure::ControlPlaneUnavailable) => ReadinessStatus::DatabaseUnavailable,
             }
         })
     }
