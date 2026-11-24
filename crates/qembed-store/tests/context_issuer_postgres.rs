@@ -17,7 +17,7 @@ use qembed_store::{
 };
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use uuid::Uuid;
 
 async fn pool_with_one_connection() -> PgPool {
