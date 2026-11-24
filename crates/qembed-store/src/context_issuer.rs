@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use qembed_domain::anonymous::AnonymousContext;
-use qembed_domain::ids::{CallerId, TenantId};
+use qembed_domain::ids::CallerId;
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::Serialize;
