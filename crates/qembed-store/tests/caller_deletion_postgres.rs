@@ -9,7 +9,8 @@ use qembed_store::{
     caller_deletion::{CallerDeletionJobStatus, PgCallerDeletionRepository},
     connect_pool,
     external_deletion_ledger::{
-        CallerDeletionKey, ExternalCallerDeletionLedger, run_control_plane_migrations,
+        CallerDeletionKey, ExternalCallerDeletionLedger, PgCallerDeletionRestore,
+        run_control_plane_migrations,
     },
 };
 use sqlx::PgPool;
@@ -338,6 +339,85 @@ async fn owner_deletion_commits_external_tombstone_before_idempotent_data_erasur
         .await
         .expect("repeated cleanup should remain idempotent");
     assert_eq!(repeated_process.status, CallerDeletionJobStatus::Done);
+
+    // Simulate an older Runtime backup being restored: caller-derived rows
+    // reappear locally, but the independent Control-plane tombstone must erase
+    // them again before the restore capability is issued.
+    sqlx::query(
+        "INSERT INTO interaction_messages \
+         (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, 'user', 'restored private message', now() + interval '1 day')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id.into_uuid())
+    .bind(object_id.into_uuid())
+    .bind(caller_id.into_uuid())
+    .bind(invocation_id)
+    .execute(&runtime)
+    .await
+    .expect("simulated restored message should be inserted");
+    sqlx::query(
+        "INSERT INTO memories \
+         (id, tenant_id, object_id, caller_id, memory_kind, claim, source_kind, \
+          verification, confidence, invocation_id, expires_at) \
+         VALUES ($1, $2, $3, $4, 'episodic', 'restored private memory', 'User', \
+                 'Unverified', 0.9, $5, now() + interval '1 day')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id.into_uuid())
+    .bind(object_id.into_uuid())
+    .bind(caller_id.into_uuid())
+    .bind(invocation_id)
+    .execute(&runtime)
+    .await
+    .expect("simulated restored memory should be inserted");
+    sqlx::query(
+        "INSERT INTO invocation_idempotency \
+         (tenant_id, object_id, caller_id, idempotency_key, payload_hash, invocation_id, expires_at) \
+         VALUES ($1, $2, $3, 'rt061-idempotency-restored', $4, $5, now() + interval '1 day')",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(object_id.into_uuid())
+    .bind(caller_id.into_uuid())
+    .bind(content_hash.as_ref())
+    .bind(invocation_id)
+    .execute(&runtime)
+    .await
+    .expect("simulated restored idempotency row should be inserted");
+
+    let replay = PgCallerDeletionRestore::new(runtime.clone(), ledger.clone())
+        .run()
+        .await
+        .expect("restore replay must erase data reintroduced by an old backup");
+    assert_eq!(replay.high_water_mark(), tombstone.sequence_id);
+    drop(replay);
+
+    let restored_message_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM interaction_messages WHERE tenant_id = $1 AND caller_id = $2",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(caller_id.into_uuid())
+    .fetch_one(&runtime)
+    .await
+    .expect("restored message count should be readable");
+    let restored_memory_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM memories WHERE tenant_id = $1 AND caller_id = $2")
+            .bind(tenant_id.into_uuid())
+            .bind(caller_id.into_uuid())
+            .fetch_one(&runtime)
+            .await
+            .expect("restored memory count should be readable");
+    let restored_idempotency_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invocation_idempotency WHERE tenant_id = $1 AND caller_id = $2",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(caller_id.into_uuid())
+    .fetch_one(&runtime)
+    .await
+    .expect("restored idempotency count should be readable");
+    assert_eq!(restored_message_count, 0);
+    assert_eq!(restored_memory_count, 0);
+    assert_eq!(restored_idempotency_count, 0);
 
     runtime.close().await;
     control_plane.close().await;
