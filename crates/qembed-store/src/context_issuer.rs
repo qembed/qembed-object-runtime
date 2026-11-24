@@ -666,19 +666,72 @@ mod tests {
     }
 
     #[test]
-    fn issuer_rejects_a_mismatched_key_id() {
-        let signer =
-            RingEd25519SigningKey::from_seed("key-a", &[3_u8; 32]).expect("seed must be accepted");
+    fn qctx2_anonymous_claims_have_exact_shape_and_never_mint_a_principal() {
+        use qembed_domain::ids::{ObjectId, TenantId};
+
+        let signer = RingEd25519SigningKey::from_seed("key-v2", &[11_u8; 32])
+            .expect("seed must be accepted");
         let config = ContextIssuerConfig::with_default_lifetime(
             "qembed-runtime",
             "postgres://deployment/db",
-            "deployment-a",
-            "key-b",
+            "deployment-v2",
+            "key-v2",
         )
         .expect("config must be valid");
-        assert!(matches!(
-            ContextIssuer::new(config, signer),
-            Err(ContextIssuerError::KeyIdMismatch)
-        ));
+        let issuer = ContextIssuer::new(config, signer).expect("issuer should be valid");
+        let fingerprint = [0x5a; 32];
+        let context = AnonymousContext::from_server_fingerprint(
+            TenantId::new(),
+            ObjectId::new(),
+            fingerprint,
+        )
+        .expect("trusted context should be valid");
+        let binding = PgContextBinding {
+            backend_pid: 123,
+            transaction_id: "456".to_owned(),
+            database_oid: "789".to_owned(),
+        };
+
+        for caller_id in [None, Some(CallerId::new())] {
+            let token = issuer
+                .issue_anonymous(&context, caller_id, &binding)
+                .expect("qctx2 token should be issued");
+            assert!(token.starts_with("qctx2:"));
+
+            let payload_hex = token.split(':').nth(1).expect("payload segment exists");
+            let payload = decode_test_hex(payload_hex);
+            let claims: serde_json::Value =
+                serde_json::from_slice(&payload).expect("payload should be JSON");
+            let object = claims.as_object().expect("claims should be an object");
+
+            assert_eq!(object.len(), 17, "qctx2 must use its exact claim set");
+            assert_eq!(claims["version"], "2");
+            assert_eq!(claims["tenant_id"], context.tenant_id().to_string());
+            assert_eq!(claims["principal_id"], serde_json::Value::Null);
+            assert_eq!(
+                claims["caller_id"],
+                caller_id
+                    .map(|id| serde_json::Value::String(id.to_string()))
+                    .unwrap_or(serde_json::Value::Null)
+            );
+            assert_eq!(claims["subject_kind"], "anonymous");
+            assert_eq!(claims["object_id"], context.object_id().to_string());
+            assert_eq!(claims["subject_fingerprint"], lowercase_hex(&fingerprint));
+            assert_eq!(claims["backend_pid"], "123");
+            assert_eq!(claims["transaction_id"], "456");
+            assert_eq!(claims["database_oid"], "789");
+        }
+    }
+
+    fn decode_test_hex(value: &str) -> Vec<u8> {
+        value
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let high = (pair[0] as char).to_digit(16).expect("hex digit") as u8;
+                let low = (pair[1] as char).to_digit(16).expect("hex digit") as u8;
+                (high << 4) | low
+            })
+            .collect()
     }
 }
