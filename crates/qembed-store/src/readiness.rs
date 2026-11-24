@@ -16,6 +16,8 @@ pub enum PgReadinessFailure {
     ControlPlaneUnavailable,
     /// The Control-plane migration history differs from this binary.
     ControlPlaneMigrationMismatch,
+    /// External tombstone replay has not been completed or its lock was lost.
+    RestoreReplayIncomplete,
 }
 
 /// Read-only probe for the database dependency required by the runtime.
@@ -23,14 +25,20 @@ pub enum PgReadinessFailure {
 pub struct PgReadinessProbe {
     runtime_pool: PgPool,
     control_plane_pool: PgPool,
+    replay_complete: CallerDeletionReplayComplete,
 }
 
 impl PgReadinessProbe {
     #[must_use]
-    pub fn new(runtime_pool: PgPool, control_plane_pool: PgPool) -> Self {
+    pub fn new(
+        runtime_pool: PgPool,
+        control_plane_pool: PgPool,
+        replay_complete: CallerDeletionReplayComplete,
+    ) -> Self {
         Self {
             runtime_pool,
             control_plane_pool,
+            replay_complete,
         }
     }
 
@@ -59,6 +67,13 @@ impl PgReadinessProbe {
             PgReadinessFailure::DatabaseUnavailable => PgReadinessFailure::ControlPlaneUnavailable,
             _ => PgReadinessFailure::ControlPlaneMigrationMismatch,
         })?;
+
+        self.replay_complete
+            .activate()
+            .await
+            .map_err(|_error: CallerDeletionReplayError| {
+                PgReadinessFailure::RestoreReplayIncomplete
+            })?;
 
         Ok(())
     }
