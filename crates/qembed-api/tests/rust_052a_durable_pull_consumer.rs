@@ -276,7 +276,7 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
         .expect("durable pull consumer is provisioned");
     let consumer = NatsJetStreamConsumer::new(
         durable,
-        context,
+        context.clone(),
         NatsJetStreamConsumerConfig::new(
             "qembed.dlq.rust063",
             5,
@@ -316,11 +316,40 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     assert_eq!(first.acknowledged, 0);
     assert_eq!(first.retry_scheduled, 1);
 
+    // Simulate a worker process restart: discard the original consumer handle
+    // and reconnect to the same durable consumer before its delayed redelivery.
+    drop(consumer);
+    let restarted_durable = stream
+        .get_or_create_consumer(
+            &durable_name,
+            consumer::pull::Config {
+                durable_name: Some(durable_name.clone()),
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(2),
+                max_deliver: 5,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("the durable consumer survives worker restart");
+    let consumer = NatsJetStreamConsumer::new(
+        restarted_durable,
+        context,
+        NatsJetStreamConsumerConfig::new(
+            "qembed.dlq.rust063",
+            5,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            2,
+        )
+        .expect("valid retry policy"),
+    );
+
     tokio::time::sleep(Duration::from_millis(150)).await;
     let second = consumer
         .process_batch(&handler, 1, Duration::from_secs(2))
         .await
-        .expect("JetStream redelivery is processed idempotently");
+        .expect("restarted worker processes JetStream redelivery idempotently");
     assert_eq!(second.received, 1);
     assert_eq!(second.acknowledged, 1);
     assert_eq!(second.handler_failed, 0);
