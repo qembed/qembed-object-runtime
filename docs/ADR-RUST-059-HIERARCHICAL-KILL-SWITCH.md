@@ -19,7 +19,7 @@ A Tool side effect must not begin when a matching Platform, Tenant, Object, or T
 - A Tool switch may be global (`tenant_id IS NULL`) or tenant-specific. A global Tool switch is evaluated before a tenant-specific Tool switch.
 - Ignore switches for other tenants, Objects, and Tools.
 - Derive the request context from trusted `Scope`, Object ID, and Tool ID. The context tenant must equal the authenticated Scope tenant.
-- Read matching rows in a signed qctx1 Principal or qctx2 Anonymous PostgreSQL transaction so canonical RLS exposes only global switches and the current tenant's switches. Anonymous actions retain their server-derived qctx2 identity; no synthetic Principal is introduced.
+- Read matching rows in a signed qctx1 Principal or qctx2 Anonymous PostgreSQL transaction so canonical RLS exposes only global switches and the current tenant's switches. Anonymous policy reads use the qctx2 bootstrap token with a null Caller claim and do not provision an Anonymous Caller before the decision; no synthetic Principal is introduced.
 - Store lookup errors fail closed. The runtime invokes the side-effect closure only after the latest switch snapshot permits the action.
 - The check is a pre-side-effect admission gate; it does not retroactively cancel an already-running external operation.
 
