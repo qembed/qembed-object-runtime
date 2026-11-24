@@ -724,9 +724,10 @@ mod tests {
     }
 
     fn decode_test_hex(value: &str) -> Vec<u8> {
-        value
-            .as_bytes()
-            .chunks_exact(2)
+        let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+        assert!(remainder.is_empty(), "hex input must have an even length");
+        pairs
+            .iter()
             .map(|pair| {
                 let high = (pair[0] as char).to_digit(16).expect("hex digit") as u8;
                 let low = (pair[1] as char).to_digit(16).expect("hex digit") as u8;
