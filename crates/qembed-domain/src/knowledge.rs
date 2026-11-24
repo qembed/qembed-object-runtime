@@ -680,9 +680,10 @@ mod tests {
                 .contains(RevisionNumber::new(3))
         );
         assert!(
-            !doc.interval()
+            doc.interval()
                 .expect("live interval")
-                .contains(RevisionNumber::new(4))
+                .contains(RevisionNumber::new(4)),
+            "an open interval remains visible until it is closed"
         );
         let pinned =
             PinnedKnowledgeRevision::new(doc.tenant_id(), doc.object_id(), RevisionNumber::new(3));
