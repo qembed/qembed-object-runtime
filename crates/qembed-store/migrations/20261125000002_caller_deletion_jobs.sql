@@ -38,3 +38,6 @@ CREATE POLICY deletion_jobs_runtime_tenant
 
 GRANT SELECT, INSERT, UPDATE ON deletion_jobs TO qembed_runtime;
 GRANT SELECT ON deletion_jobs TO qembed_admin;
+
+-- The runtime readiness probe compares the complete SQLx migration history.
+GRANT SELECT ON TABLE _sqlx_migrations TO qembed_runtime;
