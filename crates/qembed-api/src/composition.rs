@@ -32,7 +32,7 @@ use qembed_runtime::{
     rate_limit::RateLimitService,
 };
 use qembed_store::{
-    PgContext, PgReadinessFailure, PgReadinessProbe,
+    ContextIssuer, PgContext, PgReadinessFailure, PgReadinessProbe,
     auth::{
         OwnerAuthenticationError as StoreAuthError, OwnerAuthenticator, OwnerCredentials,
         PrincipalAuthenticationError as StorePrincipalAuthError, PrincipalAuthenticator,
