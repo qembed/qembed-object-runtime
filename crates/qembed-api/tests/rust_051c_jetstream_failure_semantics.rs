@@ -444,7 +444,6 @@ async fn independent_relay_processes_claim_disjoint_rows_and_publish_both() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn nats_connect_failure_before_claim_leaves_outbox_unclaimed() {
     let pool = database().await;
