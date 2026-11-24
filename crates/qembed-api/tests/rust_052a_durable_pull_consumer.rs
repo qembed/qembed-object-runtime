@@ -90,7 +90,7 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
     let durable_name = format!("qembed-rust052a-{suffix}");
     let stream = context
         .get_or_create_stream(StreamConfig {
-            name: stream_name,
+            name: stream_name.clone(),
             subjects: vec![subject.clone()],
             max_messages: 100,
             ..Default::default()
@@ -130,7 +130,7 @@ async fn durable_pull_consumer_acks_only_after_handler_commit() {
     publisher
         .publish(OutboundMessage::new(
             delivery_id.to_string(),
-            subject,
+            subject.clone(),
             serde_json::json!({
                 "type": "invocation_received",
                 "invocation_id": Uuid::new_v4()
@@ -392,7 +392,7 @@ async fn consumer_worker_process_entrypoint() {
         .get_or_create_consumer(
             &durable_name,
             consumer::pull::Config {
-                durable_name: Some(durable_name),
+                durable_name: Some(durable_name.clone()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(2),
                 max_deliver: 5,
