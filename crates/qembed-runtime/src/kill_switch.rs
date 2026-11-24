@@ -1,9 +1,13 @@
 //! Runtime gate for hierarchical kill-switch evaluation.
-use std::future::Future;
+
 use std::fmt;
+use std::future::Future;
 
 use qembed_domain::{
-    kill_switch::{KillSwitchContext, KillSwitchDecision, KillSwitchScope, KillSwitchStore, evaluate_kill_switches},
+    kill_switch::{
+        KillSwitchContext, KillSwitchDecision, KillSwitchScope, KillSwitchStore,
+        evaluate_kill_switches,
+    },
     scope::Scope,
 };
 
@@ -12,22 +16,34 @@ use qembed_domain::{
 pub enum KillSwitchServiceError<E> {
     Store(E),
     ContextTenantMismatch,
-    Disabled { scope: KillSwitchScope, reason: Option<String> },
+    Disabled {
+        scope: KillSwitchScope,
+        reason: Option<String>,
+    },
 }
 
 impl<E: fmt::Display> fmt::Display for KillSwitchServiceError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store(error) => write!(formatter, "kill-switch lookup failed: {error}"),
-            Self::ContextTenantMismatch => formatter.write_str("kill-switch context does not match authenticated tenant"),
-            Self::Disabled { scope, reason } => write!(formatter, "action blocked by {scope:?} kill switch: {}", reason.as_deref().unwrap_or("disabled")),
+            Self::ContextTenantMismatch => {
+                formatter.write_str("kill-switch context does not match authenticated tenant")
+            }
+            Self::Disabled { scope, reason } => write!(
+                formatter,
+                "action blocked by {scope:?} kill switch: {}",
+                reason.as_deref().unwrap_or("disabled")
+            ),
         }
     }
 }
 
 impl<E: std::error::Error + 'static> std::error::Error for KillSwitchServiceError<E> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self { Self::Store(error) => Some(error), _ => None }
+        match self {
+            Self::Store(error) => Some(error),
+            _ => None,
+        }
     }
 }
 
@@ -41,7 +57,9 @@ where
     S: KillSwitchStore,
 {
     #[must_use]
-    pub const fn new(store: S) -> Self { Self { store } }
+    pub const fn new(store: S) -> Self {
+        Self { store }
+    }
 
     pub async fn ensure_enabled(
         &self,
@@ -51,7 +69,8 @@ where
         if scope.tenant_id() != context.tenant_id() {
             return Err(KillSwitchServiceError::ContextTenantMismatch);
         }
-        let switches = self.store
+        let switches = self
+            .store
             .load_matching_kill_switches(scope, context)
             .await
             .map_err(KillSwitchServiceError::Store)?;
@@ -82,7 +101,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, future::{ready, Future}, sync::atomic::{AtomicUsize, Ordering}};
+    use std::{
+        convert::Infallible,
+        future::{Future, ready},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     use qembed_domain::{
         ids::{ObjectId, TenantId, ToolId},
@@ -112,16 +135,26 @@ mod tests {
         let tenant_id = TenantId::new();
         let scope = scope_for_tenant(tenant_id);
         let context = KillSwitchContext::new(tenant_id, ObjectId::new(), ToolId::new());
-        let service = KillSwitchService::new(MemorySwitchStore(vec![
-            KillSwitch::new(KillSwitchScope::Object { tenant_id, object_id: context.object_id() }, false, None),
-        ]));
+        let service = KillSwitchService::new(MemorySwitchStore(vec![KillSwitch::new(
+            KillSwitchScope::Object {
+                tenant_id,
+                object_id: context.object_id(),
+            },
+            false,
+            None,
+        )]));
         let calls = AtomicUsize::new(0);
 
-        let result = service.run_if_enabled(&scope, context, || async {
-            calls.fetch_add(1, Ordering::SeqCst);
-        }).await;
+        let result = service
+            .run_if_enabled(&scope, context, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+            })
+            .await;
 
-        assert!(matches!(result, Err(KillSwitchServiceError::Disabled { .. })));
+        assert!(matches!(
+            result,
+            Err(KillSwitchServiceError::Disabled { .. })
+        ));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
@@ -133,14 +166,31 @@ mod tests {
         let service = KillSwitchService::new(MemorySwitchStore(vec![
             KillSwitch::new(KillSwitchScope::Platform, true, None),
             KillSwitch::new(KillSwitchScope::Tenant { tenant_id }, true, None),
-            KillSwitch::new(KillSwitchScope::Object { tenant_id, object_id: context.object_id() }, true, None),
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: Some(tenant_id), tool_id: context.tool_id() }, true, None),
+            KillSwitch::new(
+                KillSwitchScope::Object {
+                    tenant_id,
+                    object_id: context.object_id(),
+                },
+                true,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: Some(tenant_id),
+                    tool_id: context.tool_id(),
+                },
+                true,
+                None,
+            ),
         ]));
         let calls = AtomicUsize::new(0);
 
-        service.run_if_enabled(&scope, context, || async {
-            calls.fetch_add(1, Ordering::SeqCst);
-        }).await.expect("enabled hierarchy should permit the side effect");
+        service
+            .run_if_enabled(&scope, context, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+            })
+            .await
+            .expect("enabled hierarchy should permit the side effect");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
@@ -152,11 +202,16 @@ mod tests {
         let service = KillSwitchService::new(MemorySwitchStore(vec![]));
         let calls = AtomicUsize::new(0);
 
-        let result = service.run_if_enabled(&scope, context, || async {
-            calls.fetch_add(1, Ordering::SeqCst);
-        }).await;
+        let result = service
+            .run_if_enabled(&scope, context, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+            })
+            .await;
 
-        assert!(matches!(result, Err(KillSwitchServiceError::ContextTenantMismatch)));
+        assert!(matches!(
+            result,
+            Err(KillSwitchServiceError::ContextTenantMismatch)
+        ));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }
