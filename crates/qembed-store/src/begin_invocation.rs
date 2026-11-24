@@ -14,7 +14,7 @@ use serde::Serialize;
 
 pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
-use crate::caller::{CallerResolutionError, ResolvedAnonymousCaller, ResolvedCaller};
+use crate::caller::CallerResolutionError;
 use crate::idempotency::{
     IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
     reserve_invocation_idempotency,
@@ -210,15 +210,6 @@ impl InvocationReceivedPayload {
 /// ID defines the key namespace. The claim is the first invocation write; all
 /// later reads/writes remain in the same transaction. Any error before commit
 /// drops the SQLx transaction and rolls back the claim and every subsequent row.
-pub async fn begin_invocation(
-    context: &PgContext,
-    scope: &Scope,
-    command: BeginInvocationCommand,
-) -> Result<BeginInvocationOutcome, BeginInvocationError> {
-    let (mut transaction, caller) = context
-        .begin_caller(scope, command.requested_caller_id)
-        .await?;
-
 /// Atomically begins a Principal-backed invocation after resolving its selected Caller.
 pub async fn begin_invocation(
     context: &PgContext,
@@ -465,15 +456,14 @@ async fn begin_invocation_in_transaction(
         invocation_pool: command.invocation_pool,
     })
 }
-
-
 struct InvocationReceivedContext<'a> {
-    scope: &'a Scope,
+    tenant_id: TenantId,
     event_id: EventId,
     invocation_id: InvocationId,
     command: &'a BeginInvocationCommand,
     snapshot_id: SnapshotId,
-    caller: ResolvedCaller,
+    caller_id: CallerId,
+    caller_kind: CallerKind,
     knowledge_revision: u64,
 }
 
@@ -482,18 +472,20 @@ async fn append_invocation_received(
     context: InvocationReceivedContext<'_>,
 ) -> Result<(), sqlx::Error> {
     let InvocationReceivedContext {
-        scope,
+        tenant_id,
         event_id,
         invocation_id,
         command,
         snapshot_id,
-        caller,
+        caller_id,
+        caller_kind,
         knowledge_revision,
     } = context;
     let payload = serde_json::to_string(&InvocationReceivedPayload::new(
         invocation_id,
         command.object_id,
-        caller,
+        caller_id,
+        caller_kind,
         snapshot_id,
         knowledge_revision,
         command.invocation_pool,
@@ -505,7 +497,7 @@ async fn append_invocation_received(
         sqlx::query(
             "INSERT INTO events (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload) VALUES ($1::uuid, $2::uuid, 'invocation', $3::uuid, 'invocation.received', $4::jsonb)",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(event_id.to_string())
         .bind(invocation_id.to_string())
         .bind(payload),
