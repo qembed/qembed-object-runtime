@@ -4,11 +4,21 @@
 //! raw Caller IDs, credentials, or Caller-derived content. This adapter has no
 //! Runtime-local implementation or fallback.
 
-use std::fmt;
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use qembed_domain::ids::{CallerId, TenantId};
 use ring::hmac;
-use sqlx::{Acquire, PgPool, migrate::MigrateError, migrate::Migrator};
+use sqlx::{
+    Acquire, PgPool, Postgres,
+    migrate::{MigrateError, Migrator},
+    pool::PoolConnection,
+};
 
 const HMAC_DOMAIN: &[u8] = b"qembed/caller-deletion/v1\0";
 const KEY_VERSION: &str = "v1";
@@ -57,6 +67,11 @@ impl CallerDeletionKey {
     }
 
     /// Computes the tenant-bound, domain-separated digest for one Caller.
+    #[must_use]
+    pub(crate) fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
     #[must_use]
     pub fn caller_hash(&self, tenant_id: TenantId, caller_id: CallerId) -> [u8; 32] {
         let key = hmac::Key::new(hmac::HMAC_SHA256, &self.0);
@@ -310,6 +325,224 @@ async fn lock_ledger(
         .await
         .map_err(CallerDeletionLedgerError::Database)?;
     Ok(())
+}
+
+/// A startup capability proving that the complete external ledger was replayed.
+///
+/// The Control-plane session advisory lock remains held until the first readiness
+/// check activates this token. That closes the race between replay's final
+/// high-water check and admitting Runtime traffic.
+#[derive(Clone)]
+pub struct CallerDeletionReplayComplete {
+    connection: Arc<tokio::sync::Mutex<Option<PoolConnection<Postgres>>>>,
+    activated: Arc<AtomicBool>,
+    high_water_mark: i64,
+}
+
+impl CallerDeletionReplayComplete {
+    #[must_use]
+    pub const fn high_water_mark(&self) -> i64 {
+        self.high_water_mark
+    }
+
+    pub(crate) async fn activate(&self) -> Result<(), CallerDeletionReplayError> {
+        if self.activated.load(Ordering::Acquire) {
+            return Ok(());
+        }
+
+        let mut guard = self.connection.lock().await;
+        let Some(mut connection) = guard.take() else {
+            return Err(CallerDeletionReplayError::ReplayLockLost);
+        };
+
+        let unlocked = sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
+            .bind(ADVISORY_LOCK_KEY)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(CallerDeletionReplayError::Runtime)?;
+
+        if !unlocked {
+            return Err(CallerDeletionReplayError::ReplayLockLost);
+        }
+
+        self.activated.store(true, Ordering::Release);
+        Ok(())
+    }
+}
+
+/// Why a startup restore replay could not be proven complete.
+#[derive(Debug)]
+pub enum CallerDeletionReplayError {
+    Ledger(CallerDeletionLedgerError),
+    Runtime(sqlx::Error),
+    RestoreRoleRequired,
+    ActiveWorkPending { sequence_id: i64 },
+    ReplayLockLost,
+}
+
+impl fmt::Display for CallerDeletionReplayError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ledger(error) => write!(formatter, "Control-plane replay ledger error: {error}"),
+            Self::Runtime(error) => write!(formatter, "Runtime restore database error: {error}"),
+            Self::RestoreRoleRequired => {
+                formatter.write_str("restore connection must inherit qembed_restore")
+            }
+            Self::ActiveWorkPending { sequence_id } => {
+                write!(formatter, "Caller deletion tombstone {sequence_id} is waiting for active work")
+            }
+            Self::ReplayLockLost => {
+                formatter.write_str("Control-plane replay lock was lost before readiness")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CallerDeletionReplayError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Ledger(error) => Some(error),
+            Self::Runtime(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// Runs the restore replay through the narrowly privileged qembed_restore role.
+#[derive(Clone)]
+pub struct PgCallerDeletionRestore {
+    runtime_restore_pool: PgPool,
+    ledger: ExternalCallerDeletionLedger,
+}
+
+impl PgCallerDeletionRestore {
+    #[must_use]
+    pub fn new(runtime_restore_pool: PgPool, ledger: ExternalCallerDeletionLedger) -> Self {
+        Self {
+            runtime_restore_pool,
+            ledger,
+        }
+    }
+
+    /// Replays every tombstone while holding the Control-plane writer lock.
+    ///
+    /// The returned capability must be passed to PgReadinessProbe. Its first
+    /// successful readiness check releases the lock, allowing new tombstones.
+    pub async fn run(&self) -> Result<CallerDeletionReplayComplete, CallerDeletionReplayError> {
+        let has_restore_role = sqlx::query_scalar::<_, bool>(
+            "SELECT pg_has_role(current_user, 'qembed_restore', 'MEMBER')",
+        )
+        .fetch_one(&self.runtime_restore_pool)
+        .await
+        .map_err(CallerDeletionReplayError::Runtime)?;
+
+        if !has_restore_role {
+            return Err(CallerDeletionReplayError::RestoreRoleRequired);
+        }
+
+        let mut control_plane_connection = self
+            .ledger
+            .pool
+            .acquire()
+            .await
+            .map_err(|error| CallerDeletionReplayError::Ledger(
+                CallerDeletionLedgerError::Database(error),
+            ))?;
+
+        sqlx::query("SELECT pg_advisory_lock($1)")
+            .bind(ADVISORY_LOCK_KEY)
+            .execute(&mut *control_plane_connection)
+            .await
+            .map_err(|error| CallerDeletionReplayError::Ledger(
+                CallerDeletionLedgerError::Database(error),
+            ))?;
+
+        // With the session lock held, no ledger writer can commit until the
+        // readiness probe activates the returned capability.
+        let snapshot = read_snapshot_with_lock(&mut control_plane_connection)
+            .await
+            .map_err(CallerDeletionReplayError::Ledger)?;
+
+        for tombstone in &snapshot.tombstones {
+            let complete = sqlx::query_scalar::<_, bool>(
+                "SELECT qembed_crypto.replay_caller_deletion($1, $2, $3, $4)",
+            )
+            .bind(tombstone.tenant_id.into_uuid())
+            .bind(tombstone.caller_hash.as_slice())
+            .bind(&tombstone.key_version)
+            .bind(self.ledger.key.as_bytes().as_slice())
+            .fetch_one(&self.runtime_restore_pool)
+            .await
+            .map_err(CallerDeletionReplayError::Runtime)?;
+
+            if !complete {
+                return Err(CallerDeletionReplayError::ActiveWorkPending {
+                    sequence_id: tombstone.sequence_id,
+                });
+            }
+        }
+
+        let high_water_mark = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
+        )
+        .fetch_one(&mut *control_plane_connection)
+        .await
+        .map_err(|error| CallerDeletionReplayError::Ledger(
+            CallerDeletionLedgerError::Database(error),
+        ))?;
+
+        if high_water_mark != snapshot.high_water_mark {
+            return Err(CallerDeletionReplayError::ReplayLockLost);
+        }
+
+        Ok(CallerDeletionReplayComplete {
+            connection: Arc::new(tokio::sync::Mutex::new(Some(control_plane_connection))),
+            activated: Arc::new(AtomicBool::new(false)),
+            high_water_mark,
+        })
+    }
+}
+
+async fn read_snapshot_with_lock(
+    connection: &mut PoolConnection<Postgres>,
+) -> Result<CallerDeletionLedgerSnapshot, CallerDeletionLedgerError> {
+    let high_water_mark = sqlx::query_scalar::<_, i64>(
+        "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
+    )
+    .fetch_one(&mut **connection)
+    .await
+    .map_err(CallerDeletionLedgerError::Database)?;
+
+    let rows = sqlx::query_as::<_, (i64, uuid::Uuid, Vec<u8>, String)>(
+        r#"SELECT sequence_id, tenant_id, caller_hash, key_version
+           FROM qembed_control_plane.caller_deletion_tombstones
+           WHERE sequence_id <= $1 ORDER BY sequence_id"#,
+    )
+    .bind(high_water_mark)
+    .fetch_all(&mut **connection)
+    .await
+    .map_err(CallerDeletionLedgerError::Database)?;
+
+    let mut tombstones = Vec::with_capacity(rows.len());
+    for (sequence_id, tenant_uuid, hash, key_version) in rows {
+        let caller_hash: [u8; 32] = hash
+            .try_into()
+            .map_err(|_| CallerDeletionLedgerError::InvalidRecord)?;
+        if key_version != KEY_VERSION {
+            return Err(CallerDeletionLedgerError::UnsupportedKeyVersion);
+        }
+        tombstones.push(CallerDeletionTombstone {
+            sequence_id,
+            tenant_id: TenantId::from_uuid(tenant_uuid),
+            caller_hash,
+            key_version,
+        });
+    }
+
+    Ok(CallerDeletionLedgerSnapshot {
+        high_water_mark,
+        tombstones,
+    })
 }
 
 /// Applies the standalone SQLx migration set to the Control-plane database.
