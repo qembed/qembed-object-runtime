@@ -3,17 +3,20 @@ use std::time::Duration;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_domain::{
     anonymous::AnonymousContext,
-    ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId},
+    ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, ToolId, TraceId},
+    kill_switch::{KillSwitchContext, KillSwitchScope},
     ports::{
         AnonymousInvocationStartCommand, AnonymousInvocationStartStore,
         InvocationIdempotencyPreflight, InvocationStartOutcome,
     },
     rate_limit::RateLimitRequestId,
 };
+use qembed_runtime::{kill_switch::{KillSwitchService, KillSwitchServiceError}};
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     begin_context_transaction, begin_principal_context_transaction, connect_pool,
     invocation_start::PgAnonymousInvocationStartStore,
+    kill_switch::PgKillSwitchStore,
 };
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -266,6 +269,104 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     let issuer = ContextIssuer::new(config, signing_key)
         .expect("issuer configuration and signing key IDs should match");
+
+    // A disabled Tenant switch must block a Tool action even when the more
+    // specific Object and Tool switches are enabled. The side-effect closure
+    // is the boundary that must remain untouched on denial.
+    let object_id = ObjectId::new();
+    let tool_id = ToolId::new();
+    sqlx::query("INSERT INTO objects (tenant_id, object_id) VALUES ($1::uuid, $2::uuid)")
+        .bind(tenant_id.to_string())
+        .bind(object_id.to_string())
+        .execute(&pool)
+        .await
+        .expect("kill-switch Object fixture should be inserted");
+    sqlx::query("INSERT INTO tool_definitions (id, name, description) VALUES ($1::uuid, $2, 'kill switch test tool')")
+        .bind(tool_id.to_string())
+        .bind(format!("kill-switch-test-{}", Uuid::new_v4()))
+        .execute(&pool)
+        .await
+        .expect("kill-switch Tool fixture should be inserted");
+
+    sqlx::query(
+        "INSERT INTO kill_switches (id, scope_type, enabled, changed_by) \
+         VALUES ($1::uuid, 'platform', TRUE, 'integration-test')",
+    )
+    .bind(Uuid::new_v4())
+    .execute(&pool)
+    .await
+    .expect("enabled Platform switch should be inserted");
+    sqlx::query(
+        "INSERT INTO kill_switches (id, scope_type, tenant_id, enabled, changed_by) \
+         VALUES ($1::uuid, 'tenant', $2::uuid, FALSE, 'integration-test')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("disabled Tenant switch should be inserted");
+    sqlx::query(
+        "INSERT INTO kill_switches (id, scope_type, tenant_id, object_id, enabled, changed_by) \
+         VALUES ($1::uuid, 'object', $2::uuid, $3::uuid, TRUE, 'integration-test')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("enabled Object switch should be inserted");
+    sqlx::query(
+        "INSERT INTO kill_switches (id, scope_type, tenant_id, tool_id, enabled, changed_by) \
+         VALUES ($1::uuid, 'tool', $2::uuid, $3::uuid, TRUE, 'integration-test')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id.to_string())
+    .bind(tool_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("enabled tenant Tool switch should be inserted");
+
+    let kill_switch_service = KillSwitchService::new(PgKillSwitchStore::new(
+        PgContext::new(pool.clone(), issuer.clone()),
+    ));
+    let kill_switch_context = KillSwitchContext::new(tenant_id, object_id, tool_id);
+    let side_effects = std::sync::atomic::AtomicUsize::new(0);
+    let blocked = kill_switch_service
+        .run_if_enabled(&scope, kill_switch_context, || async {
+            side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })
+        .await;
+    assert!(matches!(
+        blocked,
+        Err(KillSwitchServiceError::Disabled {
+            scope: KillSwitchScope::Tenant { tenant_id: blocked_tenant },
+            ..
+        }) if blocked_tenant == tenant_id
+    ));
+    assert_eq!(
+        side_effects.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "disabled Tenant switch must stop the side effect before it runs"
+    );
+
+    sqlx::query(
+        "UPDATE kill_switches SET enabled = TRUE \
+         WHERE scope_type = 'tenant' AND tenant_id = $1::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("test should be able to re-enable its Tenant switch");
+    kill_switch_service
+        .run_if_enabled(&scope, kill_switch_context, || async {
+            side_effects.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        })
+        .await
+        .expect("enabled hierarchy should permit the side effect");
+    assert_eq!(
+        side_effects.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
 
     let mut transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
         .await
