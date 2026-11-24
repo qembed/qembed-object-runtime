@@ -69,6 +69,18 @@ async fn seed_owner_and_caller(
     .execute(pool)
     .await
     .expect("Caller should be inserted");
+
+    sqlx::query(
+        "INSERT INTO principal_caller_delegations \
+         (delegation_id, tenant_id, principal_id, caller_id) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id.into_uuid())
+    .bind(principal_id)
+    .bind(caller_id.into_uuid())
+    .execute(pool)
+    .await
+    .expect("Owner-to-Caller delegation should be inserted");
 }
 
 async fn context_issuer(pool: &PgPool) -> ContextIssuer {
