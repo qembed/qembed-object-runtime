@@ -8,6 +8,7 @@ fi
 
 compose=(docker compose --project-name qembed-rust-test --file compose.test.yaml)
 export DATABASE_URL="${DATABASE_URL:-postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test}"
+export CONTROL_PLANE_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL:-postgres://qembed_test:qembed_test@127.0.0.1:55433/qembed_control_plane_test}"
 export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
