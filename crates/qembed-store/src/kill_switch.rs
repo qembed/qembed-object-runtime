@@ -5,7 +5,9 @@ use std::{fmt, str::FromStr};
 use crate::{PgContext, fetch_all};
 use qembed_domain::{
     ids::{ObjectId, TenantId, ToolId},
-    kill_switch::{KillSwitch, KillSwitchContext, KillSwitchScope, KillSwitchStore},
+    kill_switch::{
+        KillSwitch, KillSwitchAuthority, KillSwitchContext, KillSwitchScope, KillSwitchStore,
+    },
     scope::Scope,
 };
 
@@ -85,14 +87,26 @@ impl KillSwitchStore for PgKillSwitchStore {
 
     async fn load_matching_kill_switches(
         &self,
-        scope: &Scope,
+        authority: KillSwitchAuthority<'_>,
         context: KillSwitchContext,
     ) -> Result<Vec<KillSwitch>, Self::Error> {
-        if scope.tenant_id() != context.tenant_id() {
-            return Err(KillSwitchStoreError::TenantMismatch);
-        }
-
-        let mut transaction = self.context.begin_principal(scope).await?;
+        let mut transaction = match authority {
+            KillSwitchAuthority::Principal(scope) => {
+                if scope.tenant_id() != context.tenant_id() {
+                    return Err(KillSwitchStoreError::TenantMismatch);
+                }
+                self.context.begin_principal(scope).await?
+            }
+            KillSwitchAuthority::Anonymous(anonymous) => {
+                if anonymous.tenant_id() != context.tenant_id()
+                    || anonymous.object_id() != context.object_id()
+                {
+                    return Err(KillSwitchStoreError::TenantMismatch);
+                }
+                let (transaction, _caller) = self.context.begin_anonymous(anonymous).await?;
+                transaction
+            }
+        };
         let rows = fetch_all(
             &mut transaction,
             sqlx::query_as::<_, KillSwitchRow>(
