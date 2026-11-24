@@ -27,3 +27,8 @@
 - Integration tests use a real NATS JetStream server and PostgreSQL 19.
 - A failing handler must leave the message unacknowledged for redelivery.
 - The successful handler commits a PostgreSQL marker before the consumer confirms the ACK.
+
+
+## RUST-063 duplicate-delivery concurrency evidence
+
+- `duplicate_jetstream_delivery_after_commit_has_one_postgres_effect` uses a real durable JetStream pull consumer and PostgreSQL. The first handler execution commits its business marker, then deliberately returns a retryable error to leave the message unacknowledged. JetStream redelivers the same stable delivery ID; the second execution commits idempotently and ACKs. The test asserts two handler executions but exactly one durable PostgreSQL effect.
