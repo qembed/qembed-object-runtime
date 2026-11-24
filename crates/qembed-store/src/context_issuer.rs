@@ -18,12 +18,11 @@ use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use crate::caller::{
-    AnonymousCallerResolutionError, CallerResolutionError, ResolvedAnonymousCaller,
-    ResolvedCaller, resolve_anonymous_caller, resolve_delegated_caller,
+    AnonymousCallerResolutionError, CallerResolutionError, ResolvedAnonymousCaller, ResolvedCaller,
+    resolve_anonymous_caller, resolve_delegated_caller,
 };
 use crate::{
-    TenantTransaction, begin_anonymous_context_tenant_transaction,
-    begin_context_tenant_transaction,
+    TenantTransaction, begin_anonymous_context_tenant_transaction, begin_context_tenant_transaction,
 };
 
 const TOKEN_PREFIX: &str = "qctx1";
@@ -568,7 +567,9 @@ impl fmt::Display for ContextTransactionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
-            Self::AnonymousCallerResolution(error) => write!(formatter, "Anonymous Caller resolution failed: {error}"),
+            Self::AnonymousCallerResolution(error) => {
+                write!(formatter, "Anonymous Caller resolution failed: {error}")
+            }
             Self::CallerTransactionMismatch => {
                 formatter.write_str("resolved Caller is not bound to this transaction and Scope")
             }
