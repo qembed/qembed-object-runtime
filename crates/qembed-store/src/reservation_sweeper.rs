@@ -2,8 +2,8 @@
 //!
 //! The database function is SECURITY DEFINER and executable only by qembed_worker.
 //! This adapter is intentionally not tenant-scoped: one worker sweep spans tenants.
-//! Production callers must use a dedicated qembed_worker login/pool, never the
-//! ordinary qembed_runtime application pool.
+//! Production callers must use a dedicated worker login that inherits qembed_worker,
+//! never the ordinary qembed_runtime application pool.
 
 use std::{
     error::Error,
@@ -49,7 +49,7 @@ impl Error for ReservationSweepError {
 
 /// Executes the canonical cross-tenant reservation expiry function.
 ///
-/// The supplied pool must authenticate as `qembed_worker`. The database
+/// The supplied pool's login must inherit `qembed_worker` (or explicitly SET ROLE to it). The database
 /// function locks provider-attempt rows with `SKIP LOCKED`, and releases only
 /// expired reservations whose provider attempt proves that no request may have
 /// been accepted. `MayHaveBeenSent` and `OutcomeUnknown` are never swept.
