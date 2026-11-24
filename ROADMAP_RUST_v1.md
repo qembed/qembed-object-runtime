@@ -466,12 +466,12 @@ SQLX_OFFLINE=true cargo check --workspace
   - Evidence: SQL PR [#94](https://github.com/qembed/qembed-sql/pull/94) и Rust PR [#134](https://github.com/qembed/qembed-object-runtime/pull/134); Rust CI run #2900 и canonical SQL smoke прошли.
   - DoD: erased Caller data не возвращаются после restore; Control-plane недоступность не приводит к downgrade или открытию traffic.
 
-- [ ] **RUST-062 (S)** Реализовать worker-only reservation sweeper.
-  - Rust adapter: `qembed_store::reservation_sweeper::PgReservationSweeper` использует отдельный pool с ролью `qembed_worker`; операция глобальная, без tenant Scope.
+- [x] **RUST-062 (S)** Реализовать worker-only reservation sweeper.
+  - Rust adapter: `qembed_store::reservation_sweeper::PgReservationSweeper` использует отдельный pool с login, наследующим restricted роль `qembed_worker`; операция глобальная, без tenant Scope.
   - Eligibility: истёкшие `Reserved` rows освобождаются только при provider attempt `NotStarted`, `ConfirmedNotAccepted` или `CancelledBeforeSend`. `MayHaveBeenSent`, `OutcomeUnknown`, `ResponseReceived` и отсутствующая attempt row сохраняют reservation.
-  - SQL: детерминированный `p_now` cutoff, default на PostgreSQL clock, batch 1..=500; provider-attempt row lock с `SKIP LOCKED` сериализует конкурирующие sweepers; reservation и object/per-caller counters меняются атомарно.
-  - Тесты: deterministic cutoff, повторный запуск, два независимых worker pools, preservation of OutcomeUnknown и проверка, что counters уменьшаются ровно один раз.
-  - Evidence/design: `docs/RUST-062_RESERVATION_SWEEPER.md`; SQL PRs [#95](https://github.com/qembed/qembed-sql/pull/95) and [#96](https://github.com/qembed/qembed-sql/pull/96); the latter rejects NULL batch sizes because PostgreSQL treats `LIMIT NULL` as unbounded.
+  - SQL: детерминированный `p_now` cutoff, default на PostgreSQL clock, batch 1..=500; NULL и невалидные batch sizes отклоняются. Provider-attempt row lock с `SKIP LOCKED` сериализует конкурирующие sweepers; reservation и object/per-caller counters меняются атомарно.
+  - Тесты: deterministic cutoff, повторный запуск, два независимых worker pools, preservation of OutcomeUnknown и проверка стабильности object/per-caller counters после повторного запуска.
+  - Evidence/design: `docs/RUST-062_RESERVATION_SWEEPER.md`; SQL PRs [#95](https://github.com/qembed/qembed-sql/pull/95) и [#96](https://github.com/qembed/qembed-sql/pull/96); Rust PR [#135](https://github.com/qembed/qembed-object-runtime/pull/135), CI run [#2911](https://github.com/qembed/qembed-object-runtime/actions/runs/45478611692).
   - DoD: sweeper идемпотентен и не освобождает reservation при неоднозначном provider outcome.
 
 - [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions и relay/consumer instances.
