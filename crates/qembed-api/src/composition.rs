@@ -38,7 +38,11 @@ use qembed_store::{
         PrincipalAuthenticationError as StorePrincipalAuthError, PrincipalAuthenticator,
         PrincipalCredentials,
     },
+    caller_deletion::{
+        CallerDeletionJobStatus, CallerDeletionStoreError, PgCallerDeletionRepository,
+    },
     caller_delegation::{CallerDelegationError, PgCallerDelegationRepository},
+    external_deletion_ledger::ExternalCallerDeletionLedger,
     invocation_query::PgInvocationQueryStore,
     invocation_start::{PgAnonymousInvocationStartStore, PgInvocationStartStore},
     object_repository::ObjectRepository,
@@ -57,8 +61,8 @@ use crate::handlers::{
     invocation::{InvocationResponse, get_invocation},
     owner::{
         ObjectVersionCreationOutcome, ObjectVersionCreationResponse,
-        ObjectVersionPublicationResponse, OwnerApiBackend, OwnerApiBackendError,
-        owner_router as configure_owner,
+        CallerDeletionResponse, ObjectVersionPublicationResponse, OwnerApiBackend,
+        OwnerApiBackendError, owner_router as configure_owner,
     },
     principal_invocation::{PrincipalInvocationBackend, principal_invocation_router},
 };
@@ -93,6 +97,7 @@ pub fn configure_health_routes(probe: PgReadinessProbe) -> Router {
 struct PgOwnerApiBackend {
     pool: PgPool,
     context: PgContext,
+    deletion_ledger: Option<ExternalCallerDeletionLedger>,
     rate_limit: Option<RateLimitService<ValkeyRateLimitStore>>,
     rate_limit_policies: Option<RateLimitPolicies>,
 }
@@ -573,6 +578,63 @@ impl OwnerApiBackend for PgOwnerApiBackend {
                 .map_err(map_caller_delegation_error)
         })
     }
+
+    fn delete_caller(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        caller_id: CallerId,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<CallerDeletionResponse, OwnerApiBackendError>> + Send + '_>,
+    > {
+        Box::pin(async move {
+            let ledger = self
+                .deletion_ledger
+                .as_ref()
+                .ok_or(OwnerApiBackendError::Internal)?;
+            let scope = self.authenticate(tenant_id, owner_token).await?;
+            let repository = PgCallerDeletionRepository::new(self.context.clone());
+
+            // Commit revocation and the retryable job before crossing into the
+            // independent Control-plane database. No SQL transaction spans I/O.
+            let job = repository
+                .request(&scope, caller_id)
+                .await
+                .map_err(map_caller_deletion_error)?;
+
+            // This is the authoritative commit point. Failure leaves the Caller
+            // revoked and the job pending; there is deliberately no local fallback.
+            let tombstone = ledger
+                .record(scope.tenant_id(), caller_id)
+                .await
+                .map_err(|_| OwnerApiBackendError::Internal)?;
+
+            let job = repository
+                .process(&scope, caller_id, job.id, tombstone.sequence_id)
+                .await
+                .map_err(map_caller_deletion_error)?;
+
+            let status = match job.status {
+                CallerDeletionJobStatus::Pending => "pending",
+                CallerDeletionJobStatus::Running => "running",
+                CallerDeletionJobStatus::Done => "done",
+                CallerDeletionJobStatus::Failed => "failed",
+            };
+            Ok(CallerDeletionResponse {
+                deletion_job_id: job.id.to_string(),
+                status,
+            })
+        })
+    }
+}
+
+fn map_caller_deletion_error(error: CallerDeletionStoreError) -> OwnerApiBackendError {
+    match error {
+        CallerDeletionStoreError::NotFound => OwnerApiBackendError::NotFound,
+        CallerDeletionStoreError::Context(_)
+        | CallerDeletionStoreError::Database(_)
+        | CallerDeletionStoreError::InvalidStatus => OwnerApiBackendError::Internal,
+    }
 }
 
 fn map_caller_delegation_error(error: CallerDelegationError) -> OwnerApiBackendError {
@@ -594,6 +656,7 @@ pub fn configure_owner_routes(pool: PgPool, context: PgContext) -> Router {
     configure_owner(PgOwnerApiBackend {
         pool,
         context,
+        deletion_ledger: None,
         rate_limit: None,
         rate_limit_policies: None,
     })
@@ -604,10 +667,12 @@ pub fn configure_owner_routes_with_rate_limit(
     context: PgContext,
     rate_limit_store: ValkeyRateLimitStore,
     rate_limit_policies: RateLimitPolicies,
+    deletion_ledger: ExternalCallerDeletionLedger,
 ) -> Router {
     configure_owner(PgOwnerApiBackend {
         pool,
         context,
+        deletion_ledger: Some(deletion_ledger),
         rate_limit: Some(RateLimitService::new(rate_limit_store)),
         rate_limit_policies: Some(rate_limit_policies),
     })
@@ -617,6 +682,7 @@ pub fn configure_owner_routes_with_rate_limit(
 pub fn api_router(
     pool: PgPool,
     context: PgContext,
+    deletion_ledger: ExternalCallerDeletionLedger,
     probe: PgReadinessProbe,
     rate_limit_store: ValkeyRateLimitStore,
     rate_limit_policies: RateLimitPolicies,
@@ -639,6 +705,7 @@ pub fn api_router(
             context,
             rate_limit_store,
             rate_limit_policies,
+            deletion_ledger,
         ))
         .merge(principal_invocation_router(principal_backend))
         .merge(anonymous_invocation_router(
