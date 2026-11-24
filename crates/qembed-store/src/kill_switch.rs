@@ -90,7 +90,7 @@ impl KillSwitchStore for PgKillSwitchStore {
                  WHERE scope_type = 'platform' \
                     OR (scope_type = 'tenant' AND tenant_id = $1::uuid) \
                     OR (scope_type = 'object' AND tenant_id = $1::uuid AND object_id = $2::uuid) \
-                    OR (scope_type = 'tool' AND tool_id = $3::uuid AND (tenant_id IS NULL OR tenant_id = $1::uuid)",
+                    OR (scope_type = 'tool' AND tool_id = $3::uuid AND (tenant_id IS NULL OR tenant_id = $1::uuid))",
             )
             .bind(context.tenant_id().to_string())
             .bind(context.object_id().to_string())
