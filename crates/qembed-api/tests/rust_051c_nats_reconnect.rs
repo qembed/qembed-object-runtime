@@ -256,7 +256,7 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
     let pool = recovery_database().await;
     let url = std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
     let suffix = Uuid::new_v4().simple().to_string();
-    let subject = format!("qembed.rust064.loss.{suffix}");
+    let subject = "invocation.received".to_owned();
     let stream_name = format!("QEMBED_RUST064_LOSS_{}", suffix.to_uppercase());
     let durable_name = format!("qembed-rust064-loss-{suffix}");
     let client = async_nats::connect(&url)
