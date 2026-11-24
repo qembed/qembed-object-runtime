@@ -128,6 +128,20 @@ impl TenantTransaction {
         matches!(self.identity, TransactionIdentity::Anonymous { object_id, subject_fingerprint } if self.tenant_id == context.tenant_id() && object_id == context.object_id() && subject_fingerprint == context.subject_fingerprint())
     }
 
+    pub(crate) fn matches_anonymous_binding(
+        &self,
+        object_id: ObjectId,
+        subject_fingerprint: [u8; 32],
+    ) -> bool {
+        matches!(
+            self.identity,
+            TransactionIdentity::Anonymous {
+                object_id: bound_object_id,
+                subject_fingerprint: bound_fingerprint,
+            } if bound_object_id == object_id && bound_fingerprint == subject_fingerprint
+        )
+    }
+
     pub(crate) const fn transaction_token(&self) -> TransactionToken {
         self.transaction_token
     }
