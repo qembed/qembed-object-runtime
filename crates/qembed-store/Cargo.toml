@@ -30,4 +30,5 @@ icu_properties_data.workspace = true
 icu_provider.workspace = true
 
 [dev-dependencies]
+qembed-runtime = { path = "../qembed-runtime" }
 qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
