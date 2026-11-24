@@ -1,10 +1,8 @@
 mod common;
 
 use qembed_domain::ids::{CallerId, TenantId};
-use qembed_store::{
-    external_deletion_ledger::{
-        CallerDeletionKey, ExternalCallerDeletionLedger, run_control_plane_migrations,
-    },
+use qembed_store::external_deletion_ledger::{
+    CallerDeletionKey, ExternalCallerDeletionLedger, run_control_plane_migrations,
 };
 use sqlx::Row;
 
@@ -49,7 +47,10 @@ async fn external_ledger_is_idempotent_and_returns_a_stable_snapshot() {
     assert_eq!(matches[0].caller_hash.len(), 32);
 
     assert_eq!(
-        ledger.high_water_mark().await.expect("watermark should be readable"),
+        ledger
+            .high_water_mark()
+            .await
+            .expect("watermark should be readable"),
         snapshot.high_water_mark
     );
     pool.close().await;
@@ -103,7 +104,10 @@ async fn control_plane_runtime_role_can_read_and_append_but_cannot_mutate_or_tru
     .bind(hash.as_slice())
     .execute(&mut *connection)
     .await;
-    assert!(update.is_err(), "application role must not update tombstones");
+    assert!(
+        update.is_err(),
+        "application role must not update tombstones"
+    );
 
     let delete = sqlx::query(
         "DELETE FROM qembed_control_plane.caller_deletion_tombstones \
@@ -113,12 +117,18 @@ async fn control_plane_runtime_role_can_read_and_append_but_cannot_mutate_or_tru
     .bind(hash.as_slice())
     .execute(&mut *connection)
     .await;
-    assert!(delete.is_err(), "application role must not delete tombstones");
+    assert!(
+        delete.is_err(),
+        "application role must not delete tombstones"
+    );
 
     let truncate = sqlx::query("TRUNCATE qembed_control_plane.caller_deletion_tombstones")
         .execute(&mut *connection)
         .await;
-    assert!(truncate.is_err(), "application role must not truncate tombstones");
+    assert!(
+        truncate.is_err(),
+        "application role must not truncate tombstones"
+    );
 
     sqlx::query("RESET ROLE")
         .execute(&mut *connection)
