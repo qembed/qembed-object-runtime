@@ -159,7 +159,7 @@ impl PgCallerDeletionRepository {
             None => {
                 self.insert_job(&mut transaction, tenant_id, caller_uuid)
                     .await?
-            },
+            }
         };
 
         transaction
