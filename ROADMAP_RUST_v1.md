@@ -490,9 +490,11 @@ SQLX_OFFLINE=true cargo check --workspace
 
 **Результат:** ingestion и retrieval по закреплённой revision с проверяемым provenance.
 
-- [ ] **RUST-065 (M)** Определить domain model для KnowledgeDocument, Chunk, Revision и pinned revision.
-  - Тесты: unit state transition matrix; serialization tests; invalid revision references.
-  - DoD: staged/live/retired и revision identity типизированы.
+- [x] **RUST-065 (M)** Определить domain model для KnowledgeDocument, Chunk, Revision и pinned revision.
+  - Реализация: typed document/chunk IDs; tenant+object-scoped current/pinned revisions; half-open visibility intervals; guarded document lifecycle и terminal erasure; immutable chunk content с erasure-only mutation; invariant-validating deserialization.
+  - Тесты: unit state transition matrix; serialization round-trip; invalid revision references; historical visibility after retirement; chunk visibility/erasure.
+  - Evidence: Rust PR [#138](https://github.com/qembed/qembed-object-runtime/pull/138), merge `034ed67353b9563a09d779de592ab7722676612f`; CI run [#2952](https://github.com/qembed/qembed-object-runtime/actions/runs/45491358354) — success.
+  - DoD: staged/indexed/live/retired/erased lifecycle и tenant/object-scoped revision identity типизированы; persistence и atomic revision commit остаются Store responsibilities в RUST-066.
 
 - [ ] **RUST-066 (L)** Реализовать `commit_knowledge_revision` repository operation.  - Тесты: DB integration — успешный commit, rollback, concurrent commit, revision log, event/outbox atomicity.
   - DoD: lock revision row; проверить indexing completeness; обновить intervals/revision/event в одной транзакции.
