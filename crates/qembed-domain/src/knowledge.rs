@@ -14,7 +14,9 @@ use crate::ids::{KnowledgeChunkId, KnowledgeDocumentId, ObjectId, TenantId};
 ///
 /// Zero represents an object with no committed knowledge revision yet.
 /// Documents can only become visible at a positive revision.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 #[serde(transparent)]
 pub struct RevisionNumber(u64);
 
@@ -53,7 +55,11 @@ pub struct KnowledgeRevision {
 impl KnowledgeRevision {
     #[must_use]
     pub const fn new(tenant_id: TenantId, object_id: ObjectId, current: RevisionNumber) -> Self {
-        Self { tenant_id, object_id, current }
+        Self {
+            tenant_id,
+            object_id,
+            current,
+        }
     }
 
     #[must_use]
@@ -98,7 +104,11 @@ pub struct PinnedKnowledgeRevision {
 impl PinnedKnowledgeRevision {
     #[must_use]
     pub const fn new(tenant_id: TenantId, object_id: ObjectId, revision: RevisionNumber) -> Self {
-        Self { tenant_id, object_id, revision }
+        Self {
+            tenant_id,
+            object_id,
+            revision,
+        }
     }
 
     #[must_use]
@@ -153,10 +163,7 @@ impl<'de> Deserialize<'de> for RevisionInterval {
 }
 
 impl RevisionInterval {
-    pub fn new(
-        from: RevisionNumber,
-        to: Option<RevisionNumber>,
-    ) -> Result<Self, KnowledgeError> {
+    pub fn new(from: RevisionNumber, to: Option<RevisionNumber>) -> Result<Self, KnowledgeError> {
         if from == RevisionNumber::INITIAL || to.is_some_and(|end| end <= from) {
             return Err(KnowledgeError::InvalidRevisionInterval);
         }
@@ -263,7 +270,9 @@ impl TryFrom<KnowledgeDocumentWire> for KnowledgeDocument {
             status: value.status,
             interval: value.interval,
         };
-        document.validate().map_err(|_| "invalid knowledge document state")?;
+        document
+            .validate()
+            .map_err(|_| "invalid knowledge document state")?;
         Ok(document)
     }
 }
@@ -361,7 +370,10 @@ impl KnowledgeDocument {
 
     fn transition(&mut self, next: KnowledgeDocumentStatus) -> Result<(), KnowledgeError> {
         if !self.status.can_transition_to(next) {
-            return Err(KnowledgeError::InvalidTransition { from: self.status, to: next });
+            return Err(KnowledgeError::InvalidTransition {
+                from: self.status,
+                to: next,
+            });
         }
         self.status = next;
         Ok(())
@@ -373,7 +385,9 @@ impl KnowledgeDocument {
         self.tenant_id == pinned.tenant_id
             && self.object_id == pinned.object_id
             && self.status == KnowledgeDocumentStatus::Live
-            && self.interval.is_some_and(|interval| interval.contains(pinned.revision))
+            && self
+                .interval
+                .is_some_and(|interval| interval.contains(pinned.revision))
     }
 
     fn validate(&self) -> Result<(), KnowledgeError> {
@@ -381,9 +395,15 @@ impl KnowledgeDocument {
             return Err(KnowledgeError::EmptyDocumentMetadata);
         }
         let valid = match self.status {
-            KnowledgeDocumentStatus::Staged | KnowledgeDocumentStatus::Indexed => self.interval.is_none(),
-            KnowledgeDocumentStatus::Live => self.interval.is_some_and(|interval| interval.to().is_none()),
-            KnowledgeDocumentStatus::Retired => self.interval.is_some_and(|interval| interval.to().is_some()),
+            KnowledgeDocumentStatus::Staged | KnowledgeDocumentStatus::Indexed => {
+                self.interval.is_none()
+            }
+            KnowledgeDocumentStatus::Live => self
+                .interval
+                .is_some_and(|interval| interval.to().is_none()),
+            KnowledgeDocumentStatus::Retired => self
+                .interval
+                .is_some_and(|interval| interval.to().is_some()),
             KnowledgeDocumentStatus::Erased => true,
         };
         if !valid {
@@ -436,7 +456,9 @@ impl TryFrom<KnowledgeChunkWire> for KnowledgeChunk {
             metadata: value.metadata,
             interval: value.interval,
         };
-        chunk.validate().map_err(|_| "invalid knowledge chunk state")?;
+        chunk
+            .validate()
+            .map_err(|_| "invalid knowledge chunk state")?;
         Ok(chunk)
     }
 }
@@ -462,8 +484,15 @@ impl KnowledgeChunk {
         metadata: Value,
     ) -> Result<Self, KnowledgeError> {
         let chunk = Self {
-            id, tenant_id, object_id, document_id, content: content.into(),
-            erased: false, position, metadata, interval: None,
+            id,
+            tenant_id,
+            object_id,
+            document_id,
+            content: content.into(),
+            erased: false,
+            position,
+            metadata,
+            interval: None,
         };
         chunk.validate()?;
         if chunk.content.trim().is_empty() {
@@ -492,7 +521,10 @@ impl KnowledgeChunk {
     pub const fn interval(&self) -> Option<RevisionInterval> { self.interval }
 
     /// Applies the document's initial committed visibility interval to this chunk.
-    pub fn set_visibility_interval(&mut self, interval: RevisionInterval) -> Result<(), KnowledgeError> {
+    pub fn set_visibility_interval(
+        &mut self,
+        interval: RevisionInterval,
+    ) -> Result<(), KnowledgeError> {
         if self.erased || self.interval.is_some() || interval.to().is_some() {
             return Err(KnowledgeError::ChunkContentIsImmutable);
         }
@@ -517,7 +549,9 @@ impl KnowledgeChunk {
         self.tenant_id == pinned.tenant_id
             && self.object_id == pinned.object_id
             && !self.erased
-            && self.interval.is_some_and(|interval| interval.contains(pinned.revision))
+            && self
+                .interval
+                .is_some_and(|interval| interval.contains(pinned.revision))
     }
 
     /// Erasure is the only operation allowed to change persisted chunk content.
@@ -544,7 +578,10 @@ pub enum KnowledgeError {
     ErasedChunkMustBeEmpty,
     InvalidDocumentRevisionReference,
     ChunkContentIsImmutable,
-    InvalidTransition { from: KnowledgeDocumentStatus, to: KnowledgeDocumentStatus },
+    InvalidTransition {
+        from: KnowledgeDocumentStatus,
+        to: KnowledgeDocumentStatus,
+    }
 }
 
 impl std::fmt::Display for KnowledgeError {
@@ -562,9 +599,15 @@ mod tests {
 
     fn document() -> KnowledgeDocument {
         KnowledgeDocument::staged(
-            KnowledgeDocumentId::new(), TenantId::new(), ObjectId::new(),
-            "handbook", "Handbook", None, true,
-        ).expect("valid staged document")
+            KnowledgeDocumentId::new(),
+            TenantId::new(),
+            ObjectId::new(),
+            "handbook",
+            "Handbook",
+            None,
+            true,
+        )
+        .expect("valid staged document")
     }
 
     #[test]
@@ -573,7 +616,8 @@ mod tests {
         let states = [S::Staged, S::Indexed, S::Live, S::Retired, S::Erased];
         for from in states {
             for to in states {
-                let expected = matches!((from, to),
+                let expected = matches!(
+                    (from, to),
                     (S::Staged, S::Indexed) | (S::Indexed, S::Live) | (S::Live, S::Retired)
                 ) || (from != S::Erased && to == S::Erased);
                 assert_eq!(from.can_transition_to(to), expected, "{from:?} -> {to:?}");
@@ -584,23 +628,49 @@ mod tests {
     #[test]
     fn document_requires_indexing_before_publication_and_monotonic_retirement() {
         let mut doc = document();
-        assert!(matches!(doc.publish_at(RevisionNumber::new(1)), Err(KnowledgeError::InvalidTransition { .. })));
+        assert!(matches!(
+            doc.publish_at(RevisionNumber::new(1)),
+            Err(KnowledgeError::InvalidTransition { .. })
+        ));
         doc.mark_indexed().expect("staged document can be indexed");
-        doc.publish_at(RevisionNumber::new(3)).expect("indexed document can go live");
-        assert!(doc.interval().expect("live interval").contains(RevisionNumber::new(3)));
-        assert!(!doc.interval().expect("live interval").contains(RevisionNumber::new(4)));
-        let pinned = PinnedKnowledgeRevision::new(doc.tenant_id(), doc.object_id(), RevisionNumber::new(3));
+        doc.publish_at(RevisionNumber::new(3))
+            .expect("indexed document can go live");
+        assert!(
+            doc.interval()
+                .expect("live interval")
+                .contains(RevisionNumber::new(3))
+        );
+        assert!(
+            !doc.interval()
+                .expect("live interval")
+                .contains(RevisionNumber::new(4))
+        );
+        let pinned =
+            PinnedKnowledgeRevision::new(doc.tenant_id(), doc.object_id(), RevisionNumber::new(3));
         assert!(doc.is_visible_at(pinned));
-        assert!(!doc.is_visible_at(PinnedKnowledgeRevision::new(TenantId::new(), doc.object_id(), RevisionNumber::new(3))));
-        assert!(matches!(doc.retire_at(RevisionNumber::new(3)), Err(KnowledgeError::InvalidRevisionInterval)));
-        doc.retire_at(RevisionNumber::new(4)).expect("retirement closes interval");
+        assert!(!doc.is_visible_at(PinnedKnowledgeRevision::new(
+            TenantId::new(),
+            doc.object_id(),
+            RevisionNumber::new(3)
+        )));
+        assert!(matches!(
+            doc.retire_at(RevisionNumber::new(3)),
+            Err(KnowledgeError::InvalidRevisionInterval)
+        ));
+        doc.retire_at(RevisionNumber::new(4))
+            .expect("retirement closes interval");
         assert_eq!(doc.status(), KnowledgeDocumentStatus::Retired);
-        assert!(!doc.interval().expect("retired interval").contains(RevisionNumber::new(4)));
+        assert!(
+            !doc.interval()
+                .expect("retired interval")
+                .contains(RevisionNumber::new(4))
+        );
     }
 
     #[test]
     fn revision_identity_is_scoped_and_pin_is_immutable() {
-        let mut revision = KnowledgeRevision::new(TenantId::new(), ObjectId::new(), RevisionNumber::INITIAL);
+        let mut revision =
+            KnowledgeRevision::new(TenantId::new(), ObjectId::new(), RevisionNumber::INITIAL);
         let pinned = revision.pin();
         assert_eq!(pinned.revision(), RevisionNumber::INITIAL);
         revision.advance().expect("revision can advance");
@@ -630,25 +700,41 @@ mod tests {
         doc.mark_indexed().expect("indexed");
         doc.publish_at(RevisionNumber::new(2)).expect("published");
         let encoded = serde_json::to_vec(&doc).expect("serialize document");
-        let decoded: KnowledgeDocument = serde_json::from_slice(&encoded).expect("validated deserialize");
+        let decoded: KnowledgeDocument =
+            serde_json::from_slice(&encoded).expect("validated deserialize");
         assert_eq!(decoded, doc);
 
         let chunk = KnowledgeChunk::staged(
-            KnowledgeChunkId::new(), doc.tenant_id(), doc.object_id(), doc.id(),
-            "durable content", 0, json!({"source":"test"}),
-        ).expect("valid chunk");
+            KnowledgeChunkId::new(),
+            doc.tenant_id(),
+            doc.object_id(),
+            doc.id(),
+            "durable content",
+            0,
+            json!({"source":"test"}),
+        )
+        .expect("valid chunk");
         let encoded = serde_json::to_vec(&chunk).expect("serialize chunk");
-        let decoded: KnowledgeChunk = serde_json::from_slice(&encoded).expect("validated deserialize");
+        let decoded: KnowledgeChunk =
+            serde_json::from_slice(&encoded).expect("validated deserialize");
         assert_eq!(decoded, chunk);
         let interval = RevisionInterval::new(RevisionNumber::new(2), None).expect("valid interval");
         let mut visible_chunk = chunk.clone();
-        visible_chunk.set_visibility_interval(interval).expect("publish chunk");
+        visible_chunk
+            .set_visibility_interval(interval)
+            .expect("publish chunk");
         assert!(visible_chunk.is_visible_at(PinnedKnowledgeRevision::new(
-            doc.tenant_id(), doc.object_id(), RevisionNumber::new(2),
+            doc.tenant_id(),
+            doc.object_id(),
+            RevisionNumber::new(2),
         )));
-        visible_chunk.close_visibility_at(RevisionNumber::new(3)).expect("retire chunk");
+        visible_chunk
+            .close_visibility_at(RevisionNumber::new(3))
+            .expect("retire chunk");
         assert!(!visible_chunk.is_visible_at(PinnedKnowledgeRevision::new(
-            doc.tenant_id(), doc.object_id(), RevisionNumber::new(3),
+            doc.tenant_id(),
+            doc.object_id(),
+            RevisionNumber::new(3),
         )));
     }
 
@@ -660,9 +746,15 @@ mod tests {
         assert!(serde_json::from_value::<KnowledgeDocument>(value).is_err());
 
         let chunk = KnowledgeChunk::staged(
-            KnowledgeChunkId::new(), doc.tenant_id(), doc.object_id(), doc.id(),
-            "payload", 0, json!({}),
-        ).expect("valid chunk");
+            KnowledgeChunkId::new(),
+            doc.tenant_id(),
+            doc.object_id(),
+            doc.id(),
+            "payload",
+            0,
+            json!({}),
+        )
+        .expect("valid chunk");
         let mut value = serde_json::to_value(&chunk).expect("serialize");
         value["erased"] = json!(true);
         assert!(serde_json::from_value::<KnowledgeChunk>(value).is_err());
@@ -676,9 +768,15 @@ mod tests {
         assert!(doc.erase().is_err());
 
         let mut chunk = KnowledgeChunk::staged(
-            KnowledgeChunkId::new(), doc.tenant_id(), doc.object_id(), doc.id(),
-            "secret payload", 0, json!({}),
-        ).expect("valid chunk");
+            KnowledgeChunkId::new(),
+            doc.tenant_id(),
+            doc.object_id(),
+            doc.id(),
+            "secret payload",
+            0,
+            json!({}),
+        )
+        .expect("valid chunk");
         chunk.erase();
         assert!(chunk.is_erased());
         assert!(chunk.content().is_empty());
