@@ -99,7 +99,10 @@ static NEXT_TRANSACTION_TOKEN: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TransactionIdentity {
     Principal(PrincipalId),
-    Anonymous { object_id: ObjectId, subject_fingerprint: [u8; 32] },
+    Anonymous {
+        object_id: ObjectId,
+        subject_fingerprint: [u8; 32],
+    },
 }
 
 pub struct TenantTransaction {
@@ -130,7 +133,8 @@ impl TenantTransaction {
     }
 
     pub(crate) fn matches_scope(&self, scope: &Scope) -> bool {
-        self.tenant_id == scope.tenant_id() && self.principal_id() == Some(scope.principal().principal_id())
+        self.tenant_id == scope.tenant_id()
+            && self.principal_id() == Some(scope.principal().principal_id())
     }
 
     /// Returns the PostgreSQL connection carrying this transaction's tenant context.
@@ -204,7 +208,6 @@ pub(crate) async fn begin_context_tenant_transaction(
         transaction_token: TransactionToken(NEXT_TRANSACTION_TOKEN.fetch_add(1, Ordering::Relaxed)),
     })
 }
-
 
 /// Begins a READ COMMITTED transaction bound to a server-derived Anonymous
 /// context. No Principal identity or legacy Principal GUC is manufactured.
