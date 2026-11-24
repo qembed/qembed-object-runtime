@@ -362,7 +362,11 @@ async fn same_key_with_different_payload_is_rejected() {
         InvocationId::new(),
         SystemTime::now() + Duration::from_secs(3_600),
     );
-    let mismatch = reserve_invocation_idempotency(&mut transaction, &scope, &caller, &claim)
+    let mismatch = reserve_invocation_idempotency(
+        &mut transaction,
+        &ResolvedInvocationCaller::Principal(caller),
+        &claim,
+    )
         .await
         .expect_err("same key with a different payload must conflict");
     assert!(matches!(
