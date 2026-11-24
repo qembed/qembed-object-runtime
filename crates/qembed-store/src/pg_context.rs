@@ -14,7 +14,8 @@ use sqlx::PgPool;
 use crate::caller::{ResolvedAnonymousCaller, ResolvedCaller};
 use crate::{
     ContextIssuer, ContextTransaction, ContextTransactionError,
-    begin_anonymous_context_transaction, begin_caller_context_transaction,
+    begin_anonymous_context_read_transaction, begin_anonymous_context_transaction,
+    begin_caller_context_transaction,
     begin_principal_context_transaction,
 };
 
@@ -56,6 +57,17 @@ impl PgContext {
         caller_id: CallerId,
     ) -> Result<(ContextTransaction, ResolvedCaller), ContextTransactionError> {
         begin_caller_context_transaction(&self.pool, scope, caller_id, &self.issuer).await
+    }
+
+    /// Begins a signed qctx2 read context without provisioning an Anonymous Caller.
+    ///
+    /// Use this for RLS-protected policy reads that must precede invocation-side
+    /// provisioning, such as hierarchical kill-switch evaluation.
+    pub async fn begin_anonymous_read(
+        &self,
+        context: &AnonymousContext,
+    ) -> Result<ContextTransaction, ContextTransactionError> {
+        begin_anonymous_context_read_transaction(&self.pool, context, &self.issuer).await
     }
 
     /// Begins a signed qctx2 transaction for a public Anonymous invocation.
