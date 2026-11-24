@@ -282,8 +282,7 @@ async fn begin_invocation_in_transaction(
         proposed_invocation_id,
         command.idempotency_expires_at,
     );
-    let reservation =
-        reserve_invocation_idempotency(&mut transaction, &caller, &claim).await?;
+    let reservation = reserve_invocation_idempotency(&mut transaction, &caller, &claim).await?;
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
