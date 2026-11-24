@@ -1,4 +1,5 @@
 //! Hierarchical kill-switch policy and evaluation.
+
 use std::future::Future;
 
 use crate::ids::{ObjectId, TenantId, ToolId};
@@ -15,17 +16,27 @@ pub struct KillSwitchContext {
 impl KillSwitchContext {
     #[must_use]
     pub const fn new(tenant_id: TenantId, object_id: ObjectId, tool_id: ToolId) -> Self {
-        Self { tenant_id, object_id, tool_id }
+        Self {
+            tenant_id,
+            object_id,
+            tool_id,
+        }
     }
 
     #[must_use]
-    pub const fn tenant_id(self) -> TenantId { self.tenant_id }
+    pub const fn tenant_id(self) -> TenantId {
+        self.tenant_id
+    }
 
     #[must_use]
-    pub const fn object_id(self) -> ObjectId { self.object_id }
+    pub const fn object_id(self) -> ObjectId {
+        self.object_id
+    }
 
     #[must_use]
-    pub const fn tool_id(self) -> ToolId { self.tool_id }
+    pub const fn tool_id(self) -> ToolId {
+        self.tool_id
+    }
 }
 
 /// One persisted switch. A Tool switch may be global (tenant_id=None) or
@@ -33,9 +44,17 @@ impl KillSwitchContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KillSwitchScope {
     Platform,
-    Tenant { tenant_id: TenantId },
-    Object { tenant_id: TenantId, object_id: ObjectId },
-    Tool { tenant_id: Option<TenantId>, tool_id: ToolId },
+    Tenant {
+        tenant_id: TenantId,
+    },
+    Object {
+        tenant_id: TenantId,
+        object_id: ObjectId,
+    },
+    Tool {
+        tenant_id: Option<TenantId>,
+        tool_id: ToolId,
+    },
 }
 
 impl KillSwitchScope {
@@ -44,8 +63,12 @@ impl KillSwitchScope {
             Self::Platform => 0,
             Self::Tenant { .. } => 1,
             Self::Object { .. } => 2,
-            Self::Tool { tenant_id: None, .. } => 3,
-            Self::Tool { tenant_id: Some(_), .. } => 4,
+            Self::Tool {
+                tenant_id: None, ..
+            } => 3,
+            Self::Tool {
+                tenant_id: Some(_), ..
+            } => 4,
         }
     }
 
@@ -53,12 +76,12 @@ impl KillSwitchScope {
         match self {
             Self::Platform => true,
             Self::Tenant { tenant_id } => *tenant_id == context.tenant_id,
-            Self::Object { tenant_id, object_id } => {
-                *tenant_id == context.tenant_id && *object_id == context.object_id
-            }
+            Self::Object {
+                tenant_id,
+                object_id,
+            } => *tenant_id == context.tenant_id && *object_id == context.object_id,
             Self::Tool { tenant_id, tool_id } => {
-                tenant_id.is_none_or(|id| id == context.tenant_id)
-                    && *tool_id == context.tool_id
+                tenant_id.is_none_or(|id| id == context.tenant_id) && *tool_id == context.tool_id
             }
         }
     }
@@ -75,17 +98,27 @@ pub struct KillSwitch {
 impl KillSwitch {
     #[must_use]
     pub fn new(scope: KillSwitchScope, enabled: bool, reason: Option<String>) -> Self {
-        Self { scope, enabled, reason }
+        Self {
+            scope,
+            enabled,
+            reason,
+        }
     }
 
     #[must_use]
-    pub fn scope(&self) -> &KillSwitchScope { &self.scope }
+    pub fn scope(&self) -> &KillSwitchScope {
+        &self.scope
+    }
 
     #[must_use]
-    pub const fn enabled(&self) -> bool { self.enabled }
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
 
     #[must_use]
-    pub fn reason(&self) -> Option<&str> { self.reason.as_deref() }
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
 }
 
 /// Effective result. Missing switches are treated as enabled; a disabled
@@ -93,7 +126,10 @@ impl KillSwitch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KillSwitchDecision {
     Allowed,
-    Blocked { scope: KillSwitchScope, reason: Option<String> },
+    Blocked {
+        scope: KillSwitchScope,
+        reason: Option<String>,
+    },
 }
 
 /// Evaluates matching switches in Platform → Tenant → Object → Tool order.
@@ -139,7 +175,10 @@ mod tests {
 
     #[test]
     fn no_switches_means_allowed() {
-        assert_eq!(evaluate_kill_switches(context(), &[]), KillSwitchDecision::Allowed);
+        assert_eq!(
+            evaluate_kill_switches(context(), &[]),
+            KillSwitchDecision::Allowed
+        );
     }
 
     #[test]
@@ -147,13 +186,36 @@ mod tests {
         let context = context();
         let switches = vec![
             KillSwitch::new(KillSwitchScope::Platform, false, Some("maintenance".into())),
-            KillSwitch::new(KillSwitchScope::Tenant { tenant_id: context.tenant_id() }, true, None),
-            KillSwitch::new(KillSwitchScope::Object { tenant_id: context.tenant_id(), object_id: context.object_id() }, true, None),
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: Some(context.tenant_id()), tool_id: context.tool_id() }, true, None),
+            KillSwitch::new(
+                KillSwitchScope::Tenant {
+                    tenant_id: context.tenant_id(),
+                },
+                true,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Object {
+                    tenant_id: context.tenant_id(),
+                    object_id: context.object_id(),
+                },
+                true,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: Some(context.tenant_id()),
+                    tool_id: context.tool_id(),
+                },
+                true,
+                None,
+            ),
         ];
         assert_eq!(
             evaluate_kill_switches(context, &switches),
-            KillSwitchDecision::Blocked { scope: KillSwitchScope::Platform, reason: Some("maintenance".into()) }
+            KillSwitchDecision::Blocked {
+                scope: KillSwitchScope::Platform,
+                reason: Some("maintenance".into())
+            }
         );
     }
 
@@ -161,13 +223,36 @@ mod tests {
     fn disabled_tenant_switch_precedes_enabled_object_and_tool_switches() {
         let context = context();
         let switches = vec![
-            KillSwitch::new(KillSwitchScope::Tenant { tenant_id: context.tenant_id() }, false, None),
-            KillSwitch::new(KillSwitchScope::Object { tenant_id: context.tenant_id(), object_id: context.object_id() }, true, None),
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: Some(context.tenant_id()), tool_id: context.tool_id() }, true, None),
+            KillSwitch::new(
+                KillSwitchScope::Tenant {
+                    tenant_id: context.tenant_id(),
+                },
+                false,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Object {
+                    tenant_id: context.tenant_id(),
+                    object_id: context.object_id(),
+                },
+                true,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: Some(context.tenant_id()),
+                    tool_id: context.tool_id(),
+                },
+                true,
+                None,
+            ),
         ];
         assert!(matches!(
             evaluate_kill_switches(context, &switches),
-            KillSwitchDecision::Blocked { scope: KillSwitchScope::Tenant { .. }, .. }
+            KillSwitchDecision::Blocked {
+                scope: KillSwitchScope::Tenant { .. },
+                ..
+            }
         ));
     }
 
@@ -175,12 +260,29 @@ mod tests {
     fn disabled_object_switch_precedes_enabled_tool_switch() {
         let context = context();
         let switches = vec![
-            KillSwitch::new(KillSwitchScope::Object { tenant_id: context.tenant_id(), object_id: context.object_id() }, false, None),
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: Some(context.tenant_id()), tool_id: context.tool_id() }, true, None),
+            KillSwitch::new(
+                KillSwitchScope::Object {
+                    tenant_id: context.tenant_id(),
+                    object_id: context.object_id(),
+                },
+                false,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: Some(context.tenant_id()),
+                    tool_id: context.tool_id(),
+                },
+                true,
+                None,
+            ),
         ];
         assert!(matches!(
             evaluate_kill_switches(context, &switches),
-            KillSwitchDecision::Blocked { scope: KillSwitchScope::Object { .. }, .. }
+            KillSwitchDecision::Blocked {
+                scope: KillSwitchScope::Object { .. },
+                ..
+            }
         ));
     }
 
@@ -188,13 +290,19 @@ mod tests {
     fn disabled_tool_switch_blocks_when_ancestors_are_not_disabled() {
         let context = context();
         let switches = vec![KillSwitch::new(
-            KillSwitchScope::Tool { tenant_id: Some(context.tenant_id()), tool_id: context.tool_id() },
+            KillSwitchScope::Tool {
+                tenant_id: Some(context.tenant_id()),
+                tool_id: context.tool_id(),
+            },
             false,
             Some("tool disabled".into()),
         )];
         assert!(matches!(
             evaluate_kill_switches(context, &switches),
-            KillSwitchDecision::Blocked { scope: KillSwitchScope::Tool { .. }, .. }
+            KillSwitchDecision::Blocked {
+                scope: KillSwitchScope::Tool { .. },
+                ..
+            }
         ));
     }
 
@@ -202,13 +310,30 @@ mod tests {
     fn global_tool_switch_is_evaluated_before_tenant_specific_tool_switch() {
         let context = context();
         let switches = vec![
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: Some(context.tenant_id()), tool_id: context.tool_id() }, false, None),
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: None, tool_id: context.tool_id() }, false, Some("global".into())),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: Some(context.tenant_id()),
+                    tool_id: context.tool_id(),
+                },
+                false,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: None,
+                    tool_id: context.tool_id(),
+                },
+                false,
+                Some("global".into()),
+            ),
         ];
         assert_eq!(
             evaluate_kill_switches(context, &switches),
             KillSwitchDecision::Blocked {
-                scope: KillSwitchScope::Tool { tenant_id: None, tool_id: context.tool_id() },
+                scope: KillSwitchScope::Tool {
+                    tenant_id: None,
+                    tool_id: context.tool_id()
+                },
                 reason: Some("global".into()),
             }
         );
@@ -218,10 +343,33 @@ mod tests {
     fn switches_for_other_tenants_objects_and_tools_are_ignored() {
         let context = context();
         let switches = vec![
-            KillSwitch::new(KillSwitchScope::Tenant { tenant_id: TenantId::new() }, false, None),
-            KillSwitch::new(KillSwitchScope::Object { tenant_id: context.tenant_id(), object_id: ObjectId::new() }, false, None),
-            KillSwitch::new(KillSwitchScope::Tool { tenant_id: None, tool_id: ToolId::new() }, false, None),
+            KillSwitch::new(
+                KillSwitchScope::Tenant {
+                    tenant_id: TenantId::new(),
+                },
+                false,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Object {
+                    tenant_id: context.tenant_id(),
+                    object_id: ObjectId::new(),
+                },
+                false,
+                None,
+            ),
+            KillSwitch::new(
+                KillSwitchScope::Tool {
+                    tenant_id: None,
+                    tool_id: ToolId::new(),
+                },
+                false,
+                None,
+            ),
         ];
-        assert_eq!(evaluate_kill_switches(context, &switches), KillSwitchDecision::Allowed);
+        assert_eq!(
+            evaluate_kill_switches(context, &switches),
+            KillSwitchDecision::Allowed
+        );
     }
 }
