@@ -104,17 +104,17 @@ async fn context_issuer(pool: &PgPool) -> ContextIssuer {
         .expect("test superuser should assume the key control-plane role");
 
     sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
-    .bind(&key_id)
-    .bind(public_key.to_vec())
-    .bind("qembed-runtime")
-    .bind(&audience)
-    .bind(deployment_id)
-    .bind("operator:rt061-test")
-    .bind(Uuid::new_v4())
-    .bind("RUST-061 caller deletion integration test")
-    .execute(&mut *admin)
-    .await
-    .expect("test public key should be staged");
+        .bind(&key_id)
+        .bind(public_key.to_vec())
+        .bind("qembed-runtime")
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rt061-test")
+        .bind(Uuid::new_v4())
+        .bind("RUST-061 caller deletion integration test")
+        .execute(&mut *admin)
+        .await
+        .expect("test public key should be staged");
 
     let _: String = sqlx::query_scalar(
         "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
