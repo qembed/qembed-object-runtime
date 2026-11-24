@@ -84,8 +84,15 @@ else
   cargo test --workspace 2>&1 | tee "$evidence_dir/cargo-test.log"
 fi
 
-# RUST-064: serial, destructive JetStream restart tests. The loss test removes
-# only the NATS container; its PostgreSQL recovery source remains untouched.
+# RUST-064: isolate the destructive recovery suite from pending invocation
+# rows left by the workspace tests. Keep NATS running so the test can exercise
+# real broker storage loss while PostgreSQL starts from a clean Rust schema.
+"${compose[@]}" rm --force --stop --volumes postgres postgres-control-plane
+"${compose[@]}" up --detach --wait postgres postgres-control-plane
+install_legacy_rt050_test_fixture
+
+# Run serially: the loss test removes the NATS container and attached volumes,
+# while PostgreSQL remains available as the independent recovery source.
 cargo test -p qembed-api --test rust_051c_nats_reconnect -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/nats-reconnect.log"
 
