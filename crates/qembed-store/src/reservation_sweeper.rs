@@ -65,7 +65,7 @@ impl PgReservationSweeper {
         Self { pool: worker_pool }
     }
 
-    /// Sweeps up to `batch_size` reservations using the current application clock.
+    /// Sweeps up to `batch_size` reservations using PostgreSQL's current clock.
     pub async fn sweep(&self, batch_size: u16) -> Result<u32, ReservationSweepError> {
         validate_batch_size(batch_size)?;
         let expired: i32 = sqlx::query_scalar("SELECT sweep_expired_reservations($1)")
@@ -85,9 +85,7 @@ impl PgReservationSweeper {
         cutoff: SystemTime,
         batch_size: u16,
     ) -> Result<u32, ReservationSweepError> {
-        if !(1..=500).contains(&batch_size) {
-            return Err(ReservationSweepError::InvalidBatchSize);
-        }
+        validate_batch_size(batch_size)?;
         let cutoff_micros = system_time_to_micros(cutoff)?;
         let expired: i32 = sqlx::query_scalar(
             "SELECT sweep_expired_reservations(\u00241, to_timestamp(\u00242::double precision / 1000000.0))",
