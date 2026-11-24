@@ -209,10 +209,9 @@ async fn invoke_public_object(
         }
     };
 
-    let subject_fingerprint =
-        state
-            .fingerprint_key
-            .fingerprint(peer, tenant_id, object_id);
+    let subject_fingerprint = state
+        .fingerprint_key
+        .fingerprint(peer, tenant_id, object_id);
     match state
         .backend
         .invoke(
@@ -285,11 +284,7 @@ fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> R
 mod tests {
     use std::sync::Mutex;
 
-    use axum::{
-        body::Body,
-        extract::ConnectInfo,
-        http::Request,
-    };
+    use axum::{body::Body, extract::ConnectInfo, http::Request};
     use tower::ServiceExt;
 
     use super::*;
@@ -307,9 +302,8 @@ mod tests {
             subject_fingerprint: [u8; 32],
             _idempotency_key: String,
             _input: serde_json::Value,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>>
+        {
             let fingerprint = Arc::clone(&self.fingerprint);
             Box::pin(async move {
                 *fingerprint.lock().expect("fingerprint mutex") = Some(subject_fingerprint);
@@ -373,10 +367,7 @@ mod tests {
             .await
             .expect("router should handle request");
         assert_eq!(response.status(), StatusCode::ACCEPTED);
-        assert_eq!(
-            *observed.lock().expect("fingerprint mutex"),
-            Some(expected)
-        );
+        assert_eq!(*observed.lock().expect("fingerprint mutex"), Some(expected));
     }
 
     #[tokio::test]
@@ -415,9 +406,7 @@ mod tests {
                 "/v1/public/tenants/{tenant}/objects/{object}/invocations"
             ))
             .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                r#"{"idempotency_key":"client-key","input":{}}"#,
-            ))
+            .body(Body::from(r#"{"idempotency_key":"client-key","input":{}}"#))
             .expect("request should be valid");
 
         let response = app
