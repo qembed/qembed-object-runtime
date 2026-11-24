@@ -683,7 +683,6 @@ pub fn configure_owner_routes_with_rate_limit(
 pub fn api_router(
     pool: PgPool,
     context: PgContext,
-    deletion_ledger: ExternalCallerDeletionLedger,
     probe: PgReadinessProbe,
     rate_limit_store: ValkeyRateLimitStore,
     rate_limit_policies: RateLimitPolicies,
@@ -700,6 +699,7 @@ pub fn api_router(
         rate_limit: RateLimitService::new(rate_limit_store.clone()),
         rate_limit_policies,
     };
+    let deletion_ledger = probe.deletion_ledger();
     configure_health_routes(probe)
         .merge(configure_owner_routes_with_rate_limit(
             pool,
