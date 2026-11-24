@@ -175,12 +175,12 @@ async fn reserve_and_finish(
         .await
         .expect("requested Caller must be actively delegated");
 
-    let reservation =
-        reserve_invocation_idempotency(
-            &mut transaction,
-            &ResolvedInvocationCaller::Principal(caller),
-            &claim,
-        ).await?;
+    let reservation = reserve_invocation_idempotency(
+        &mut transaction,
+        &ResolvedInvocationCaller::Principal(caller),
+        &claim,
+    )
+    .await?;
 
     if let IdempotencyReservation::Reserved { invocation_id } = reservation {
         insert_invocation(
@@ -367,8 +367,8 @@ async fn same_key_with_different_payload_is_rejected() {
         &ResolvedInvocationCaller::Principal(caller),
         &claim,
     )
-        .await
-        .expect_err("same key with a different payload must conflict");
+    .await
+    .expect_err("same key with a different payload must conflict");
     assert!(matches!(
         mismatch,
         IdempotencyReservationError::PayloadMismatch
@@ -414,8 +414,8 @@ async fn rolling_back_a_new_claim_releases_the_key() {
         &ResolvedInvocationCaller::Principal(caller),
         &claim,
     )
-        .await
-        .expect("first transaction should acquire the key");
+    .await
+    .expect("first transaction should acquire the key");
     assert_eq!(
         result,
         IdempotencyReservation::Reserved {
@@ -487,8 +487,8 @@ async fn resolved_caller_cannot_be_reused_in_another_transaction() {
         &ResolvedInvocationCaller::Principal(resolved),
         &claim,
     )
-        .await
-        .expect_err("a resolved Caller is bound to the transaction that checked its delegation");
+    .await
+    .expect_err("a resolved Caller is bound to the transaction that checked its delegation");
     assert!(matches!(
         error,
         IdempotencyReservationError::CallerContextMismatch
