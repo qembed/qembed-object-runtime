@@ -124,7 +124,6 @@ impl InvocationStartStore for PgInvocationStartStore {
     }
 }
 
-
 /// PostgreSQL adapter for the public Anonymous invocation path.
 #[derive(Clone)]
 pub struct PgAnonymousInvocationStartStore {
