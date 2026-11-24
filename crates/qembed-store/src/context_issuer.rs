@@ -423,6 +423,10 @@ pub async fn begin_anonymous_context_read_transaction(
     let mut transaction = begin_anonymous_context_tenant_transaction(pool, context)
         .await
         .map_err(ContextTransactionError::Database)?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
     let binding = PgContextBinding::read(&mut transaction).await?;
     let bootstrap_token = issuer
         .issue_anonymous(context, None, &binding)
