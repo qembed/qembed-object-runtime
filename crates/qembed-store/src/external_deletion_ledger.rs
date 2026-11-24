@@ -295,8 +295,8 @@ mod tests {
     fn key_parser_requires_exact_32_byte_hex_secret() {
         assert!(CallerDeletionKey::from_hex(&"ab".repeat(32)).is_ok());
         assert_eq!(CallerDeletionKey::new(&[1_u8; 31]).unwrap_err(), CallerDeletionKeyError::InvalidLength);
-        assert_eq!(CallerDeletionKey::from_hex("not-hex"), Err(CallerDeletionKeyError::InvalidEncoding));
-        assert_eq!(CallerDeletionKey::from_hex(&"a".repeat(64)), Err(CallerDeletionKeyError::InvalidEncoding));
+        assert_eq!(CallerDeletionKey::from_hex("not-hex").unwrap_err(), CallerDeletionKeyError::InvalidEncoding);
+        assert_eq!(CallerDeletionKey::from_hex(&"a".repeat(64)).unwrap_err(), CallerDeletionKeyError::InvalidEncoding);
     }
 
     #[test]
