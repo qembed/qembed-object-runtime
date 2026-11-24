@@ -52,7 +52,7 @@ impl ResolvedCaller {
 /// The stable Caller ID belongs to the public Object. The per-request
 /// fingerprint remains separate and is used for rate-limit and idempotency
 /// namespaces; it is never treated as a Principal identity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedAnonymousCaller {
     caller_id: CallerId,
     kind: CallerKind,
