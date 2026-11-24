@@ -122,6 +122,7 @@ async fn startup_restore_fails_closed_when_control_plane_is_unavailable() {
     run_migrations(&runtime_pool)
         .await
         .expect("Runtime migrations should be applicable");
+    install_replay_stub(&runtime_pool).await;
     let control_plane_pool = common::connect_control_plane().await;
     run_control_plane_migrations(&control_plane_pool)
         .await
