@@ -12,10 +12,10 @@ export CONTROL_PLANE_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL:-postgres://qemb
 export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
-# Pin the exact SQL candidate used for the cross-repository integration test.
-# Update when qembed-sql advances its canonical signed-context migration candidate.
-qsa003_sql_commit="a8f5158f5afab7cf465c9bbe5e7ff1dc59e8daf0"
-sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-qsa003-${qsa003_sql_commit}"
+# Pin the canonical SQL revision that includes deterministic reservation expiry.
+# Update only when the Rust/SQL cross-repository contract advances.
+canonical_sql_commit="70057b853c02e0f27aba1c908945154b0a37fb18"
+sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rust-062-${canonical_sql_commit}"
 
 mkdir -p "$evidence_dir"
 
@@ -96,7 +96,7 @@ cargo test -p qembed-api --test rust_051c_nats_reconnect -- --ignored --test-thr
 if [[ ! -d "$sql_repo_dir/.git" ]]; then
   rm -rf "$sql_repo_dir"
   git clone --no-checkout https://github.com/qembed/qembed-sql.git "$sql_repo_dir"
-  git -C "$sql_repo_dir" fetch --depth 1 origin "$qsa003_sql_commit"
+  git -C "$sql_repo_dir" fetch --depth 1 origin "$canonical_sql_commit"
   git -C "$sql_repo_dir" checkout --detach "$qsa003_sql_commit"
 fi
 
@@ -148,3 +148,9 @@ cargo test -p qembed-store --test context_issuer_postgres -- --ignored --test-th
 # ordering and repeated deletion idempotency through the Rust Store adapter.
 cargo test -p qembed-store --test caller_deletion_postgres -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/rust-061-caller-deletion-canonical.log"
+
+# RUST-062 uses the canonical worker-only reservation expiry function. The test
+# runs competing qembed_worker sessions against one safe and one ambiguous
+# reservation, proving the counters are released exactly once.
+cargo test -p qembed-store --test reservation_sweeper_postgres -- --ignored --test-threads=1 2>&1 \
+  | tee "$evidence_dir/rust-062-reservation-sweeper-canonical.log"
