@@ -204,9 +204,11 @@ configuration.
 
 The SQL contract is maintained in
 [`qembed/qembed-sql`](https://github.com/qembed/qembed-sql):
-`migrations/rt061_control_plane_caller_deletion_ledger.sql` provisions the
-external tombstone store, while `migrations/rt061_runtime_caller_erasure.sql`
-installs tenant-scoped deletion and execute-only restore functions in Runtime.
+`migrations/rt061_control_plane_caller_deletion_ledger.sql` plus
+`migrations/rt061a_control_plane_tombstone_sequence_lock.sql` provision the
+external tombstone store and serialize sequence assignment. The
+`migrations/rt061_runtime_caller_erasure.sql` migration installs tenant-scoped
+deletion and execute-only restore functions in Runtime.
 Apply both to their respective databases. The Rust workspace keeps the
 Control-plane SQLx migration for isolated integration tests and explicit
 deployment migration execution.
