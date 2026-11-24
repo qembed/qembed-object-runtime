@@ -357,6 +357,43 @@ async fn lock_ledger(
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PostgresClusterIdentity {
+    server_address: Option<String>,
+    server_port: Option<i32>,
+    postmaster_start_time: String,
+}
+
+async fn cluster_identity_from_pool(
+    pool: &PgPool,
+) -> Result<PostgresClusterIdentity, sqlx::Error> {
+    let (server_address, server_port, postmaster_start_time) = sqlx::query_as(
+        "SELECT inet_server_addr()::text, inet_server_port(), pg_postmaster_start_time()::text",
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(PostgresClusterIdentity {
+        server_address,
+        server_port,
+        postmaster_start_time,
+    })
+}
+
+async fn cluster_identity_from_connection(
+    connection: &mut PoolConnection<Postgres>,
+) -> Result<PostgresClusterIdentity, sqlx::Error> {
+    let (server_address, server_port, postmaster_start_time) = sqlx::query_as(
+        "SELECT inet_server_addr()::text, inet_server_port(), pg_postmaster_start_time()::text",
+    )
+    .fetch_one(&mut **connection)
+    .await?;
+    Ok(PostgresClusterIdentity {
+        server_address,
+        server_port,
+        postmaster_start_time,
+    })
+}
+
 /// A startup capability proving that the complete external ledger was replayed.
 ///
 /// The Control-plane session advisory lock remains held until the first readiness
@@ -368,6 +405,8 @@ pub struct CallerDeletionReplayComplete {
     activated: Arc<AtomicBool>,
     high_water_mark: i64,
     ledger_identity: Arc<()>,
+    runtime_cluster_identity: PostgresClusterIdentity,
+    control_plane_cluster_identity: PostgresClusterIdentity,
 }
 
 impl CallerDeletionReplayComplete {
@@ -380,7 +419,10 @@ impl CallerDeletionReplayComplete {
         ledger.shares_identity(&self.ledger_identity)
     }
 
-    pub(crate) async fn activate(&self) -> Result<(), CallerDeletionReplayError> {
+    pub(crate) async fn activate(
+        &self,
+        runtime_pool: &PgPool,
+    ) -> Result<(), CallerDeletionReplayError> {
         if self.activated.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -389,6 +431,23 @@ impl CallerDeletionReplayComplete {
         let Some(mut connection) = guard.take() else {
             return Err(CallerDeletionReplayError::ReplayLockLost);
         };
+
+        let runtime_identity = cluster_identity_from_pool(runtime_pool)
+            .await
+            .map_err(CallerDeletionReplayError::Runtime)?;
+        let control_plane_identity = cluster_identity_from_connection(&mut connection)
+            .await
+            .map_err(CallerDeletionReplayError::Runtime)?;
+
+        if runtime_identity != self.runtime_cluster_identity {
+            return Err(CallerDeletionReplayError::RuntimeDatabaseMismatch);
+        }
+        if control_plane_identity != self.control_plane_cluster_identity {
+            return Err(CallerDeletionReplayError::ControlPlaneDatabaseMismatch);
+        }
+        if runtime_identity == control_plane_identity {
+            return Err(CallerDeletionReplayError::ControlPlaneNotIndependent);
+        }
 
         let unlocked = sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
             .bind(ADVISORY_LOCK_KEY)
@@ -413,6 +472,9 @@ pub enum CallerDeletionReplayError {
     RestoreRoleRequired,
     ActiveWorkPending { sequence_id: i64 },
     ReplayLockLost,
+    RuntimeDatabaseMismatch,
+    ControlPlaneDatabaseMismatch,
+    ControlPlaneNotIndependent,
 }
 
 impl fmt::Display for CallerDeletionReplayError {
@@ -431,6 +493,15 @@ impl fmt::Display for CallerDeletionReplayError {
             }
             Self::ReplayLockLost => {
                 formatter.write_str("Control-plane replay lock was lost before readiness")
+            }
+            Self::RuntimeDatabaseMismatch => {
+                formatter.write_str("Runtime database differs from the database used for replay")
+            }
+            Self::ControlPlaneDatabaseMismatch => {
+                formatter.write_str("Control-plane database differs from the database used for replay")
+            }
+            Self::ControlPlaneNotIndependent => {
+                formatter.write_str("Runtime and Control-plane must be separate PostgreSQL clusters")
             }
         }
     }
@@ -492,6 +563,17 @@ impl PgCallerDeletionRestore {
 
         // With the session lock held, no ledger writer can commit until the
         // readiness probe activates the returned capability.
+        let runtime_cluster_identity = cluster_identity_from_pool(&self.runtime_restore_pool)
+            .await
+            .map_err(CallerDeletionReplayError::Runtime)?;
+        let control_plane_cluster_identity =
+            cluster_identity_from_connection(&mut control_plane_connection)
+                .await
+                .map_err(CallerDeletionReplayError::Runtime)?;
+        if runtime_cluster_identity == control_plane_cluster_identity {
+            return Err(CallerDeletionReplayError::ControlPlaneNotIndependent);
+        }
+
         let snapshot = read_snapshot_with_lock(&mut control_plane_connection)
             .await
             .map_err(CallerDeletionReplayError::Ledger)?;
@@ -533,6 +615,8 @@ impl PgCallerDeletionRestore {
             activated: Arc::new(AtomicBool::new(false)),
             high_water_mark,
             ledger_identity: Arc::clone(&self.ledger.identity),
+            runtime_cluster_identity,
+            control_plane_cluster_identity,
         })
     }
 }
