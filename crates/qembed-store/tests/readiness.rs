@@ -37,7 +37,8 @@ async fn reports_ready_only_when_both_databases_and_restore_replay_are_ready() {
     let control_plane_pool = common::connect_control_plane().await;
     let (ledger, replay) = prepare_replay(&runtime_pool, &control_plane_pool).await;
 
-    let probe = PgReadinessProbe::new(runtime_pool.clone(), ledger, replay);
+    let probe = PgReadinessProbe::new(runtime_pool.clone(), ledger, replay)
+        .expect("readiness must use the same ledger instance as replay");
     assert_eq!(probe.check().await, Ok(()));
     runtime_pool.close().await;
     control_plane_pool.close().await;
@@ -50,7 +51,8 @@ async fn reports_runtime_database_unavailable_when_runtime_pool_is_closed() {
     let (ledger, replay) = prepare_replay(&runtime_pool, &control_plane_pool).await;
     runtime_pool.close().await;
 
-    let probe = PgReadinessProbe::new(runtime_pool, ledger, replay);
+    let probe = PgReadinessProbe::new(runtime_pool, ledger, replay)
+        .expect("readiness must use the same ledger instance as replay");
     assert_eq!(
         probe.check().await,
         Err(PgReadinessFailure::DatabaseUnavailable)
