@@ -161,3 +161,39 @@ provider calls.
 ## Health and readiness
 
 The API exposes process liveness and dependency readiness checks. Readiness verifies PostgreSQL connectivity and exact SQLx migration-history agreement without applying migrations. See [health checks](docs/HEALTH_CHECKS.md) for endpoint and response contracts.
+
+
+## External Caller deletion ledger (RUST-061)
+
+The Caller deletion ledger is mandatory and lives in a dedicated Control-plane
+PostgreSQL cluster, independent from the Runtime database and its backup
+lifecycle. There is no Runtime-local fallback.
+
+Deployment must provide:
+
+- `DATABASE_URL` — Runtime PostgreSQL.
+- `CONTROL_PLANE_DATABASE_URL` — dedicated Control-plane PostgreSQL.
+- `CALLER_DELETION_HMAC_KEY` — 32-byte v1 HMAC secret encoded as exactly
+  64 hexadecimal characters and supplied by secret management. Never store it
+  in either database or a database backup; retain it for the lifetime of all
+  v1 tombstones.
+
+Apply Control-plane migrations explicitly, separately from Runtime migrations:
+
+```bash
+CONTROL_PLANE_DATABASE_URL=postgres://... cargo run -p qembed-store --bin qembed-control-plane-migrate
+```
+
+The application readiness probe requires both Runtime and Control-plane
+PostgreSQL to be reachable and to have exact migration-history agreement.
+Liveness remains independent. A missing Control-plane pool is not a supported
+configuration.
+
+The Control-plane SQL contract is maintained in
+[`qembed/qembed-sql`](https://github.com/qembed/qembed-sql) at
+`migrations/rt061_control_plane_caller_deletion_ledger.sql`. The Rust
+workspace keeps the corresponding SQLx migration for isolated integration
+tests and explicit deployment migration execution.
+
+The local `deletion_ledger` present in the canonical Runtime schema is not
+consulted by the Rust adapter and must never be used as a fallback.
