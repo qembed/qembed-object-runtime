@@ -80,7 +80,7 @@ async fn check_database_and_migrations(
         let applied: Vec<(i64, Vec<u8>, bool)> = match sqlx::query_as(
             "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(pool)
         .await
         {
             Ok(rows) => rows,
