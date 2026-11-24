@@ -14,7 +14,7 @@ use axum::{
     Json, Router,
     body::Bytes,
     extract::{ConnectInfo, Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
@@ -169,7 +169,6 @@ async fn invoke_public_object(
     State(state): State<AnonymousInvocationState>,
     Path((tenant_id, object_id)): Path<(String, String)>,
     connect_info: Option<ConnectInfo<SocketAddr>>,
-    _headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let tenant_id = match tenant_id.parse::<TenantId>() {
