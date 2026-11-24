@@ -359,22 +359,20 @@ async fn lock_ledger(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PostgresClusterIdentity {
-    server_address: Option<String>,
-    server_port: Option<i32>,
+    database_name: String,
     postmaster_start_time: String,
 }
 
 async fn cluster_identity_from_pool(
     pool: &PgPool,
 ) -> Result<PostgresClusterIdentity, sqlx::Error> {
-    let (server_address, server_port, postmaster_start_time) = sqlx::query_as(
-        "SELECT inet_server_addr()::text, inet_server_port(), pg_postmaster_start_time()::text",
+    let (database_name, postmaster_start_time) = sqlx::query_as(
+        "SELECT current_database(), to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')",
     )
     .fetch_one(pool)
     .await?;
     Ok(PostgresClusterIdentity {
-        server_address,
-        server_port,
+        database_name,
         postmaster_start_time,
     })
 }
@@ -445,7 +443,7 @@ impl CallerDeletionReplayComplete {
         if control_plane_identity != self.control_plane_cluster_identity {
             return Err(CallerDeletionReplayError::ControlPlaneDatabaseMismatch);
         }
-        if runtime_identity == control_plane_identity {
+        if runtime_identity.postmaster_start_time == control_plane_identity.postmaster_start_time {
             return Err(CallerDeletionReplayError::ControlPlaneNotIndependent);
         }
 
@@ -570,7 +568,9 @@ impl PgCallerDeletionRestore {
             cluster_identity_from_connection(&mut control_plane_connection)
                 .await
                 .map_err(CallerDeletionReplayError::Runtime)?;
-        if runtime_cluster_identity == control_plane_cluster_identity {
+        if runtime_cluster_identity.postmaster_start_time
+            == control_plane_cluster_identity.postmaster_start_time
+        {
             return Err(CallerDeletionReplayError::ControlPlaneNotIndependent);
         }
 
