@@ -2,8 +2,8 @@
 
 use std::fmt;
 
-use qembed_domain::caller::CallerKind;
 use qembed_domain::anonymous::AnonymousContext;
+use qembed_domain::caller::CallerKind;
 use qembed_domain::ids::{CallerId, ObjectId, PrincipalId, TenantId};
 
 use crate::{TenantTransaction, TransactionToken, fetch_optional};
@@ -46,7 +46,6 @@ impl ResolvedCaller {
             && transaction.matches_scope(scope)
     }
 }
-
 
 /// A database-resolved Anonymous Caller bound to one signed Object transaction.
 ///
@@ -123,8 +122,8 @@ pub async fn resolve_anonymous_caller(
     if resolved_id != caller_id {
         return Err(AnonymousCallerResolutionError::ContextMismatch);
     }
-    let kind = CallerKind::parse(&row.1)
-        .ok_or(AnonymousCallerResolutionError::UnknownCallerKind)?;
+    let kind =
+        CallerKind::parse(&row.1).ok_or(AnonymousCallerResolutionError::UnknownCallerKind)?;
     if kind != CallerKind::Anonymous {
         return Err(AnonymousCallerResolutionError::UnexpectedCallerKind);
     }
@@ -155,10 +154,17 @@ impl fmt::Display for AnonymousCallerResolutionError {
         match self {
             Self::ContextMismatch => formatter.write_str("Anonymous Caller context mismatch"),
             Self::NotPubliclyInvokable => formatter.write_str("Object is not publicly invokable"),
-            Self::InvalidCallerId => formatter.write_str("Anonymous Caller resolver returned an invalid ID"),
-            Self::UnknownCallerKind => formatter.write_str("Anonymous Caller resolver returned an unknown kind"),
+            Self::InvalidCallerId => {
+                formatter.write_str("Anonymous Caller resolver returned an invalid ID")
+            }
+            Self::UnknownCallerKind => {
+                formatter.write_str("Anonymous Caller resolver returned an unknown kind")
+            }
             Self::UnexpectedCallerKind => formatter.write_str("resolved Caller is not Anonymous"),
-            Self::Database(error) => write!(formatter, "Anonymous Caller resolution database error: {error}"),
+            Self::Database(error) => write!(
+                formatter,
+                "Anonymous Caller resolution database error: {error}"
+            ),
         }
     }
 }
@@ -171,7 +177,6 @@ impl std::error::Error for AnonymousCallerResolutionError {
         }
     }
 }
-
 
 /// Resolves the caller requested by the application against the authenticated
 /// Principal's active tenant-scoped delegation.
