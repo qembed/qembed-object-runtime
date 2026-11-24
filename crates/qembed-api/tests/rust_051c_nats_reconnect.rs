@@ -16,7 +16,6 @@ use qembed_domain::{
     ids::{
         CallerId, EventId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId,
     },
-    ports::MessagePublisher,
     test_support::scope_for_tenant,
 };
 use qembed_runtime::outbox_relay::{OutboxRelay, OutboxRelayConfig};
