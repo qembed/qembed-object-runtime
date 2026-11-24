@@ -363,9 +363,7 @@ struct PostgresClusterIdentity {
     postmaster_start_time: String,
 }
 
-async fn cluster_identity_from_pool(
-    pool: &PgPool,
-) -> Result<PostgresClusterIdentity, sqlx::Error> {
+async fn cluster_identity_from_pool(pool: &PgPool) -> Result<PostgresClusterIdentity, sqlx::Error> {
     let (database_name, postmaster_start_time) = sqlx::query_as(
         "SELECT current_database(), to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')",
     )
@@ -494,12 +492,10 @@ impl fmt::Display for CallerDeletionReplayError {
             Self::RuntimeDatabaseMismatch => {
                 formatter.write_str("Runtime database differs from the database used for replay")
             }
-            Self::ControlPlaneDatabaseMismatch => {
-                formatter.write_str("Control-plane database differs from the database used for replay")
-            }
-            Self::ControlPlaneNotIndependent => {
-                formatter.write_str("Runtime and Control-plane must be separate PostgreSQL clusters")
-            }
+            Self::ControlPlaneDatabaseMismatch => formatter
+                .write_str("Control-plane database differs from the database used for replay"),
+            Self::ControlPlaneNotIndependent => formatter
+                .write_str("Runtime and Control-plane must be separate PostgreSQL clusters"),
         }
     }
 }
