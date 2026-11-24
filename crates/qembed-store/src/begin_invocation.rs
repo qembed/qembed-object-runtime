@@ -110,10 +110,18 @@ impl fmt::Display for BeginInvocationError {
             }
             Self::InvalidInputMessage => formatter.write_str("input message is empty or too large"),
             Self::InvalidMessageExpiry => formatter.write_str("message expiry is invalid"),
-            Self::MissingCallerId => formatter.write_str("Principal invocation requires a Caller selection"),
-            Self::UnexpectedCallerId => formatter.write_str("Anonymous invocation must not select a Caller"),
-            Self::ObjectContextMismatch => formatter.write_str("Anonymous Object does not match invocation command"),
-            Self::InvalidInvocationPool => formatter.write_str("Anonymous invocation requires the Anonymous pool"),
+            Self::MissingCallerId => {
+                formatter.write_str("Principal invocation requires a Caller selection")
+            }
+            Self::UnexpectedCallerId => {
+                formatter.write_str("Anonymous invocation must not select a Caller")
+            }
+            Self::ObjectContextMismatch => {
+                formatter.write_str("Anonymous Object does not match invocation command")
+            }
+            Self::InvalidInvocationPool => {
+                formatter.write_str("Anonymous invocation requires the Anonymous pool")
+            }
             Self::Context(error) => write!(
                 formatter,
                 "begin-invocation signed-context initialization failed: {error}"
