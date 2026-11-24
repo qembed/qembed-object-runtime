@@ -27,8 +27,10 @@ also require matching tenant and object identity.
 
 Erasure is a terminal privacy override from any non-erased state. A document
 cannot become live until indexing is complete. Publication assigns an open
-revision interval; retirement closes it at a strictly later revision.
-Staged/indexed documents have no visibility interval.
+revision interval; retirement closes it at a strictly later revision. Retirement
+does not erase historical visibility: a retired document remains visible to pins
+inside its earlier interval, but not at or after the end revision. Staged/indexed
+documents have no visibility interval.
 
 The statuses and interval constraints match the SQL schema:
 `staged`, `indexed`, `live`, `retired`, `erased`.
