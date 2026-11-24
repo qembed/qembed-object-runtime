@@ -12,8 +12,8 @@ export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 # Pin the exact SQL candidate used for the cross-repository integration test.
-# Update only when qembed-sql PR #73 changes its canonical migration candidate.
-qsa003_sql_commit="ae823fc1b328c4c1a2a33bf3fef7721ca6fca27e"
+# Update when qembed-sql advances its canonical signed-context migration candidate.
+qsa003_sql_commit="571507f645d3cf275ae6c58ac821f9fd820b7513"
 sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-qsa003-${qsa003_sql_commit}"
 
 mkdir -p "$evidence_dir"
@@ -112,12 +112,14 @@ fi
 '
 
 # Apply the canonical fresh-install schema, verifier/key registry, deterministic
-# fixtures and signed-context RLS migration in the same order as SQL PR #73 CI.
+# fixtures, qctx1/qctx2 verifier and Object-scoped Anonymous Caller migrations.
 for sql_file in \
   qembed_m0_v2_3_3_clean_schema.sql \
   tests/qembed_context_verify_transaction_setup.sql \
   tests/qsa003_signed_context_seed.sql \
-  migrations/rt050_signed_context_rls.sql; do
+  migrations/rt050_signed_context_rls.sql \
+  migrations/rt059_anonymous_context_v2.sql \
+  migrations/rt060_anonymous_object_caller.sql; do
   "${compose[@]}" cp "$sql_repo_dir/$sql_file" "postgres:/tmp/$(basename "$sql_file")"
   psql_in_test_db -f "/tmp/$(basename "$sql_file")"
 done
