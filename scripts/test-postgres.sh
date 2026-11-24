@@ -14,7 +14,7 @@ export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 # Pin the canonical SQL revision that includes deterministic reservation expiry.
 # Update only when the Rust/SQL cross-repository contract advances.
-canonical_sql_commit="70057b853c02e0f27aba1c908945154b0a37fb18"
+canonical_sql_commit="f6e27f5814c71ec6df3a828f1ff32d2c4053c99a"
 sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rust-062-${canonical_sql_commit}"
 
 mkdir -p "$evidence_dir"
@@ -123,7 +123,8 @@ for sql_file in \
   migrations/rt060_anonymous_object_caller.sql \
   migrations/rt061_runtime_caller_erasure.sql \
   migrations/rt061b_verified_caller_erasure.sql \
-  migrations/rt061c_cancelled_tool_execution_erasure.sql; do
+  migrations/rt061c_cancelled_tool_execution_erasure.sql \
+  migrations/rt062_deterministic_reservation_sweeper.sql; do
   "${compose[@]}" cp "$sql_repo_dir/$sql_file" "postgres:/tmp/$(basename "$sql_file")"
   psql_in_test_db -f "/tmp/$(basename "$sql_file")"
 done
