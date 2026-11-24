@@ -968,7 +968,10 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
         .fetch_one(transaction.connection())
         .await
         .expect("PostgreSQL should verify the Rust qctx2 token");
-    assert_eq!(claims.as_object().expect("verified claims object").len(), 17);
+    assert_eq!(
+        claims.as_object().expect("verified claims object").len(),
+        17
+    );
     assert_eq!(claims["version"], "2");
     assert_eq!(claims["subject_kind"], "anonymous");
     assert_eq!(claims["principal_id"], serde_json::Value::Null);
