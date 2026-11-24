@@ -124,9 +124,9 @@ pub trait OwnerApiBackend: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<(), OwnerApiBackendError>> + Send + '_>>;
     fn delete_caller(
         &self,
-        tenant_id: TenantId,
-        owner_token: String,
-        caller_id: CallerId,
+        _tenant_id: TenantId,
+        _owner_token: String,
+        _caller_id: CallerId,
     ) -> Pin<
         Box<dyn Future<Output = Result<CallerDeletionResponse, OwnerApiBackendError>> + Send + '_>,
     > {
