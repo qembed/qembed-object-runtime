@@ -9,6 +9,14 @@ pub async fn connect() -> PgPool {
     connect_with_max_connections(PgPoolConfig::default().max_connections).await
 }
 
+pub async fn connect_control_plane() -> PgPool {
+    let database_url = std::env::var("CONTROL_PLANE_DATABASE_URL")
+        .expect("CONTROL_PLANE_DATABASE_URL must be set by scripts/test-postgres.sh");
+    connect_pool(&database_url, PgPoolConfig::default())
+        .await
+        .expect("the independent Control-plane test PostgreSQL should accept connections")
+}
+
 pub async fn connect_with_max_connections(max_connections: u32) -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
