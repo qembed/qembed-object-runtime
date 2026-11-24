@@ -23,9 +23,9 @@ impl<E: fmt::Display> fmt::Display for KillSwitchServiceError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store(error) => write!(formatter, "kill-switch lookup failed: {error}"),
-            Self::ContextTenantMismatch => {
-                formatter.write_str("kill-switch authority does not match the requested Tenant/Object binding")
-            }
+            Self::ContextTenantMismatch => formatter.write_str(
+                "kill-switch authority does not match the requested Tenant/Object binding",
+            ),
             Self::Disabled { scope, reason } => write!(
                 formatter,
                 "action blocked by {scope:?} kill switch: {}",
