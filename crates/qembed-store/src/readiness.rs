@@ -35,7 +35,6 @@ pub struct PgReadinessProbe {
 }
 
 impl PgReadinessProbe {
-    #[must_use]
     pub fn new(
         runtime_pool: PgPool,
         ledger: ExternalCallerDeletionLedger,
