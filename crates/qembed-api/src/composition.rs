@@ -38,10 +38,10 @@ use qembed_store::{
         PrincipalAuthenticationError as StorePrincipalAuthError, PrincipalAuthenticator,
         PrincipalCredentials,
     },
+    caller_delegation::{CallerDelegationError, PgCallerDelegationRepository},
     caller_deletion::{
         CallerDeletionJobStatus, CallerDeletionStoreError, PgCallerDeletionRepository,
     },
-    caller_delegation::{CallerDelegationError, PgCallerDelegationRepository},
     external_deletion_ledger::ExternalCallerDeletionLedger,
     invocation_query::PgInvocationQueryStore,
     invocation_start::{PgAnonymousInvocationStartStore, PgInvocationStartStore},
@@ -60,9 +60,9 @@ use crate::handlers::{
     health::{ReadinessProbe, ReadinessStatus, health_router as configure_routes},
     invocation::{InvocationResponse, get_invocation},
     owner::{
-        ObjectVersionCreationOutcome, ObjectVersionCreationResponse,
-        CallerDeletionResponse, ObjectVersionPublicationResponse, OwnerApiBackend,
-        OwnerApiBackendError, owner_router as configure_owner,
+        CallerDeletionResponse, ObjectVersionCreationOutcome, ObjectVersionCreationResponse,
+        ObjectVersionPublicationResponse, OwnerApiBackend, OwnerApiBackendError,
+        owner_router as configure_owner,
     },
     principal_invocation::{PrincipalInvocationBackend, principal_invocation_router},
 };
