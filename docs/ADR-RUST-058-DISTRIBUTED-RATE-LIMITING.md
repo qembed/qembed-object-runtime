@@ -60,6 +60,7 @@ The first stage does not claim that invocation routes are rate-limited. Each lat
 
 - The canonical Object setting is `anonymous_invocation_enabled BOOLEAN NOT NULL DEFAULT TRUE`.
 - The public route includes both tenant ID and Object ID because Object IDs are tenant-scoped, not globally unique. Tenant ID is routing context; it does not create an authenticated Principal.
+- The host must serve the Axum router with `into_make_service_with_connect_info::<SocketAddr>()`; if direct peer context is absent, the route fails closed. `AnonymousFingerprintKey` requires a secret of at least 32 bytes supplied from deployment secret management, never source control. Rotating this key intentionally creates a new fingerprint/rate/idempotency namespace.
 - qctx2 is a separate exact-claim signed-context version. Anonymous claims require `principal_id: null`, `subject_kind: "anonymous"`, Object ID and a 32-byte server fingerprint. The bootstrap token has `caller_id: null`; PostgreSQL provisions/reuses the Object's stable Anonymous Caller, then the Store issues a second token containing that resolved Caller ID.
 - The Anonymous Caller mapping is Object-scoped and does not persist per-request fingerprints. PostgreSQL locks the Object and Caller lifecycle rows through the invocation transaction. The Anonymous transaction identity is not represented by a synthetic Principal.
 - A newly created Object, and an existing Object when this column is introduced, allows Anonymous invocation by default.
