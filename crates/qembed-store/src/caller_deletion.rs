@@ -7,7 +7,6 @@ use std::fmt;
 
 use qembed_domain::{ids::CallerId, scope::Scope};
 use serde_json::json;
-use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{ContextTransactionError, PgContext};
