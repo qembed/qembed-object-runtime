@@ -222,7 +222,10 @@ where
                 .await
                 .map_err(InvocationWorkerError::Store)?;
             if !live {
-                if let Some(outcome) = self.cancelled_after_lease_loss(scope, invocation_id).await? {
+                if let Some(outcome) = self
+                    .cancelled_after_lease_loss(scope, invocation_id)
+                    .await?
+                {
                     return Ok(outcome);
                 }
                 return Err(InvocationWorkerError::Conflict);
@@ -307,7 +310,10 @@ where
                         .await
                         .map_err(InvocationWorkerError::Store)?;
                     if !may_send {
-                        if let Some(outcome) = self.cancelled_after_lease_loss(scope, invocation_id).await? {
+                        if let Some(outcome) = self
+                            .cancelled_after_lease_loss(scope, invocation_id)
+                            .await?
+                        {
                             return Ok(outcome);
                         }
                         return Err(InvocationWorkerError::Conflict);
@@ -334,7 +340,10 @@ where
                                     self.config.lease_seconds,
                                 ).await.map_err(InvocationWorkerError::Store)?;
                                 if !renewed {
-                                    if let Some(outcome) = self.cancelled_after_lease_loss(scope, invocation_id).await? {
+                                    if let Some(outcome) = self
+                                    .cancelled_after_lease_loss(scope, invocation_id)
+                                    .await?
+                                {
                                         return Ok(outcome);
                                     }
                                     return Err(InvocationWorkerError::Conflict);
@@ -954,21 +963,37 @@ mod lifecycle_tests {
             .expect("valid provider response");
         let (worker, calls, _) = worker(store, Ok(response));
 
-        let outcome = worker.process(&scope, id).await.expect("cancel is terminal");
-        assert_eq!(outcome, InvocationWorkerOutcome::Cancelled { invocation_id: id });
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("cancel is terminal");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Cancelled { invocation_id: id }
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
     async fn cancellation_between_worker_steps_stops_before_provider_call() {
         let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
-        store.0.lock().expect("fake store lock").cancel_on_context_loading_heartbeat = true;
+        store
+            .0
+            .lock()
+            .expect("fake store lock")
+            .cancel_on_context_loading_heartbeat = true;
         let response = ChatResponse::new("must not run", ChatFinishReason::Stop, None)
             .expect("valid provider response");
         let (worker, calls, _) = worker(store.clone(), Ok(response));
 
-        let outcome = worker.process(&scope, id).await.expect("cancel is observed");
-        assert_eq!(outcome, InvocationWorkerOutcome::Cancelled { invocation_id: id });
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("cancel is observed");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Cancelled { invocation_id: id }
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         let state = store.0.lock().expect("fake store lock");
         assert_eq!(state.invocation.status(), InvocationStatus::Cancelled);
@@ -978,7 +1003,11 @@ mod lifecycle_tests {
     #[tokio::test]
     async fn cancellation_during_provider_wait_drops_future_and_stops_worker() {
         let (scope, id, store) = fixture(InvocationStatus::Received, 0, None);
-        store.0.lock().expect("fake store lock").cancel_on_provider_heartbeat = true;
+        store
+            .0
+            .lock()
+            .expect("fake store lock")
+            .cancel_on_provider_heartbeat = true;
         let calls = Arc::new(AtomicUsize::new(0));
         let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let provider = PendingProvider {
@@ -990,10 +1019,19 @@ mod lifecycle_tests {
             .with_lease("cancel-test-worker", 3);
         let worker = InvocationWorker::new(store.clone(), provider, config);
 
-        let outcome = worker.process(&scope, id).await.expect("cancel is observed");
-        assert_eq!(outcome, InvocationWorkerOutcome::Cancelled { invocation_id: id });
+        let outcome = worker
+            .process(&scope, id)
+            .await
+            .expect("cancel is observed");
+        assert_eq!(
+            outcome,
+            InvocationWorkerOutcome::Cancelled { invocation_id: id }
+        );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        assert!(dropped.load(Ordering::SeqCst), "provider future must be dropped");
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "provider future must be dropped"
+        );
         let state = store.0.lock().expect("fake store lock");
         assert_eq!(state.invocation.status(), InvocationStatus::Cancelled);
         assert_eq!(state.attempt, ProviderCallAttemptState::OutcomeUnknown);
