@@ -73,6 +73,15 @@ impl PgReadinessProbe {
             _ => PgReadinessFailure::MigrationMismatch,
         })?;
 
+        // Release the session-level replay lock before acquiring a second
+        // Control-plane pool connection. This also works with max_connections=1.
+        self.replay_complete
+            .activate()
+            .await
+            .map_err(|_error: CallerDeletionReplayError| {
+                PgReadinessFailure::RestoreReplayIncomplete
+            })?;
+
         check_database_and_migrations(
             self.ledger.pool(),
             Path::new(env!("CARGO_MANIFEST_DIR")).join("control_plane_migrations"),
@@ -82,13 +91,6 @@ impl PgReadinessProbe {
             PgReadinessFailure::DatabaseUnavailable => PgReadinessFailure::ControlPlaneUnavailable,
             _ => PgReadinessFailure::ControlPlaneMigrationMismatch,
         })?;
-
-        self.replay_complete
-            .activate()
-            .await
-            .map_err(|_error: CallerDeletionReplayError| {
-                PgReadinessFailure::RestoreReplayIncomplete
-            })?;
 
         Ok(())
     }
