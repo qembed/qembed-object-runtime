@@ -70,3 +70,6 @@ GRANT USAGE, SELECT ON SEQUENCE qembed_control_plane.caller_deletion_tombstones_
 
 REVOKE ALL ON FUNCTION qembed_control_plane.reject_tombstone_row_mutation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION qembed_control_plane.reject_tombstone_truncate() FROM PUBLIC;
+
+-- Readiness verifies the complete Control-plane SQLx migration history.
+GRANT SELECT ON TABLE _sqlx_migrations TO qembed_control_plane_runtime;
