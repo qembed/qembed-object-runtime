@@ -2817,7 +2817,7 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
         .after_connect(move |connection, _| {
             let schema = schema_a.clone();
             Box::pin(async move {
-                sqlx::query(&format!("SET search_path TO \\"{schema}\\""))
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
                     .execute(connection)
                     .await?;
                 Ok(())
@@ -2832,7 +2832,7 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
         .after_connect(move |connection, _| {
             let schema = schema_b.clone();
             Box::pin(async move {
-                sqlx::query(&format!("SET search_path TO \\"{schema}\\""))
+                sqlx::query(&format!("SET search_path TO \"{schema}\""))
                     .execute(connection)
                     .await?;
                 Ok(())
