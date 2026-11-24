@@ -446,7 +446,7 @@ impl CallerDeletionReplayComplete {
 
         let unlocked = sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock($1)")
             .bind(ADVISORY_LOCK_KEY)
-            .fetch_one(&mut *connection)
+            .fetch_one(&mut connection)
             .await
             .map_err(CallerDeletionReplayError::Runtime)?;
 
@@ -664,7 +664,7 @@ async fn read_snapshot_with_lock(
     let high_water_mark = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
     )
-    .fetch_one(connection)
+    .fetch_one(&mut *connection)
     .await
     .map_err(CallerDeletionLedgerError::Database)?;
 
@@ -674,7 +674,7 @@ async fn read_snapshot_with_lock(
            WHERE sequence_id <= $1 ORDER BY sequence_id"#,
     )
     .bind(high_water_mark)
-    .fetch_all(connection)
+    .fetch_all(&mut *connection)
     .await
     .map_err(CallerDeletionLedgerError::Database)?;
 
