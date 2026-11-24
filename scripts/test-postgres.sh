@@ -97,7 +97,7 @@ if [[ ! -d "$sql_repo_dir/.git" ]]; then
   rm -rf "$sql_repo_dir"
   git clone --no-checkout https://github.com/qembed/qembed-sql.git "$sql_repo_dir"
   git -C "$sql_repo_dir" fetch --depth 1 origin "$canonical_sql_commit"
-  git -C "$sql_repo_dir" checkout --detach "$qsa003_sql_commit"
+  git -C "$sql_repo_dir" checkout --detach "$canonical_sql_commit"
 fi
 
 "${compose[@]}" exec -T --user root postgres bash -euxc '
@@ -130,7 +130,7 @@ done
 
 {
   echo "rust_commit_sha=${GITHUB_SHA:-local}"
-  echo "qsa003_sql_commit=$qsa003_sql_commit"
+  echo "canonical_sql_commit=$canonical_sql_commit"
   echo "rustc_version=$(rustc --version)"
   echo "postgres_version=$(psql_in_test_db -Atc 'SHOW server_version')"
   echo "postgres_version_num=$(psql_in_test_db -Atc 'SHOW server_version_num')"
