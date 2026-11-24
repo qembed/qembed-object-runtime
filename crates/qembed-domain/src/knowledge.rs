@@ -384,7 +384,10 @@ impl KnowledgeDocument {
     pub fn is_visible_at(&self, pinned: PinnedKnowledgeRevision) -> bool {
         self.tenant_id == pinned.tenant_id
             && self.object_id == pinned.object_id
-            && self.status == KnowledgeDocumentStatus::Live
+            && matches!(
+                self.status,
+                KnowledgeDocumentStatus::Live | KnowledgeDocumentStatus::Retired
+            )
             && self
                 .interval
                 .is_some_and(|interval| interval.contains(pinned.revision))
@@ -660,10 +663,14 @@ mod tests {
         doc.retire_at(RevisionNumber::new(4))
             .expect("retirement closes interval");
         assert_eq!(doc.status(), KnowledgeDocumentStatus::Retired);
+        assert!(doc.is_visible_at(pinned), "retirement must preserve historical visibility");
         assert!(
-            !doc.interval()
-                .expect("retired interval")
-                .contains(RevisionNumber::new(4))
+            !doc.is_visible_at(PinnedKnowledgeRevision::new(
+                doc.tenant_id(),
+                doc.object_id(),
+                RevisionNumber::new(4),
+            )),
+            "retired document is not visible at or after its end revision"
         );
     }
 
