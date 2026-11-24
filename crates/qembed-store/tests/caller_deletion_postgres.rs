@@ -7,10 +7,10 @@ use qembed_domain::{
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     caller_deletion::{CallerDeletionJobStatus, PgCallerDeletionRepository},
+    connect_pool,
     external_deletion_ledger::{
         CallerDeletionKey, ExternalCallerDeletionLedger, run_control_plane_migrations,
     },
-    connect_pool,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -91,9 +91,7 @@ async fn context_issuer(pool: &PgPool) -> ContextIssuer {
         .await
         .expect("test superuser should assume the key control-plane role");
 
-    sqlx::query(
-        "SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)",
-    )
+    sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
     .bind(&key_id)
     .bind(public_key.to_vec())
     .bind("qembed-runtime")
@@ -290,14 +288,13 @@ async fn owner_deletion_commits_external_tombstone_before_idempotent_data_erasur
     .fetch_one(&runtime)
     .await
     .expect("message count should be readable");
-    let memory_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM memories WHERE tenant_id = $1 AND caller_id = $2",
-    )
-    .bind(tenant_id.into_uuid())
-    .bind(caller_id.into_uuid())
-    .fetch_one(&runtime)
-    .await
-    .expect("memory count should be readable");
+    let memory_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM memories WHERE tenant_id = $1 AND caller_id = $2")
+            .bind(tenant_id.into_uuid())
+            .bind(caller_id.into_uuid())
+            .fetch_one(&runtime)
+            .await
+            .expect("memory count should be readable");
     let idempotency_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM invocation_idempotency WHERE tenant_id = $1 AND caller_id = $2",
     )
