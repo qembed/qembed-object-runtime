@@ -109,9 +109,7 @@ impl fmt::Display for CallerDeletionKeyError {
             Self::MissingEnvironmentVariable => {
                 formatter.write_str("CALLER_DELETION_HMAC_KEY is required")
             }
-            Self::InvalidLength => {
-                formatter.write_str("Caller deletion HMAC key must be 32 bytes")
-            }
+            Self::InvalidLength => formatter.write_str("Caller deletion HMAC key must be 32 bytes"),
             Self::InvalidEncoding => {
                 formatter.write_str("Caller deletion HMAC key must be 64 hexadecimal characters")
             }
@@ -258,7 +256,11 @@ impl ExternalCallerDeletionLedger {
     pub async fn snapshot(
         &self,
     ) -> Result<CallerDeletionLedgerSnapshot, CallerDeletionLedgerError> {
-        let mut transaction = self.pool.begin().await.map_err(CallerDeletionLedgerError::Database)?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .map_err(CallerDeletionLedgerError::Database)?;
         lock_ledger(&mut transaction).await?;
         let high_water_mark = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
@@ -393,7 +395,10 @@ impl fmt::Display for CallerDeletionReplayError {
                 formatter.write_str("restore connection must inherit qembed_restore")
             }
             Self::ActiveWorkPending { sequence_id } => {
-                write!(formatter, "Caller deletion tombstone {sequence_id} is waiting for active work")
+                write!(
+                    formatter,
+                    "Caller deletion tombstone {sequence_id} is waiting for active work"
+                )
             }
             Self::ReplayLockLost => {
                 formatter.write_str("Control-plane replay lock was lost before readiness")
@@ -444,22 +449,17 @@ impl PgCallerDeletionRestore {
             return Err(CallerDeletionReplayError::RestoreRoleRequired);
         }
 
-        let mut control_plane_connection = self
-            .ledger
-            .pool
-            .acquire()
-            .await
-            .map_err(|error| CallerDeletionReplayError::Ledger(
-                CallerDeletionLedgerError::Database(error),
-            ))?;
+        let mut control_plane_connection = self.ledger.pool.acquire().await.map_err(|error| {
+            CallerDeletionReplayError::Ledger(CallerDeletionLedgerError::Database(error))
+        })?;
 
         sqlx::query("SELECT pg_advisory_lock($1)")
             .bind(ADVISORY_LOCK_KEY)
             .execute(&mut *control_plane_connection)
             .await
-            .map_err(|error| CallerDeletionReplayError::Ledger(
-                CallerDeletionLedgerError::Database(error),
-            ))?;
+            .map_err(|error| {
+                CallerDeletionReplayError::Ledger(CallerDeletionLedgerError::Database(error))
+            })?;
 
         // With the session lock held, no ledger writer can commit until the
         // readiness probe activates the returned capability.
