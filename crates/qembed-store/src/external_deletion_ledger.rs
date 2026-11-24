@@ -120,12 +120,24 @@ impl fmt::Display for CallerDeletionKeyError {
 impl std::error::Error for CallerDeletionKeyError {}
 
 /// One immutable external deletion tombstone.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CallerDeletionTombstone {
     pub sequence_id: i64,
     pub tenant_id: TenantId,
     pub caller_hash: [u8; 32],
     pub key_version: String,
+}
+
+impl fmt::Debug for CallerDeletionTombstone {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CallerDeletionTombstone")
+            .field("sequence_id", &self.sequence_id)
+            .field("tenant_id", &self.tenant_id)
+            .field("caller_hash", &"[REDACTED]")
+            .field("key_version", &self.key_version)
+            .finish()
+    }
 }
 
 /// Consistent append-only ledger snapshot and its replay cursor.
