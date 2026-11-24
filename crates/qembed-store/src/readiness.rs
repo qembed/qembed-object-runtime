@@ -16,6 +16,8 @@ pub enum PgReadinessFailure {
     DatabaseUnavailable,
     /// Runtime migration history differs from this binary.
     MigrationMismatch,
+    /// Required RT-061 SQL functions or Runtime execution grants are missing.
+    RuntimeDeletionSchemaMismatch,
     /// The mandatory external Control-plane PostgreSQL could not be reached.
     ControlPlaneUnavailable,
     /// The Control-plane migration history differs from this binary.
@@ -79,6 +81,8 @@ impl PgReadinessProbe {
             _ => PgReadinessFailure::MigrationMismatch,
         })?;
 
+        check_runtime_caller_deletion_contract(&self.runtime_pool).await?;
+
         // Release the session-level replay lock before acquiring a second
         // Control-plane pool connection. This also works with max_connections=1.
         self.replay_complete
@@ -99,6 +103,42 @@ impl PgReadinessProbe {
         })?;
 
         Ok(())
+    }
+}
+
+async fn check_runtime_caller_deletion_contract(
+    pool: &PgPool,
+) -> Result<(), PgReadinessFailure> {
+    let contract_ready = sqlx::query_scalar::<_, bool>(
+        r#"SELECT
+            to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)') IS NOT NULL
+            AND to_regprocedure('qembed_crypto.erase_caller_data(uuid,uuid)') IS NOT NULL
+            AND to_regprocedure('qembed_crypto.erase_caller_data_verified(uuid,uuid)') IS NOT NULL
+            AND COALESCE(
+                has_function_privilege(
+                    current_user,
+                    to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)'),
+                    'EXECUTE'
+                ),
+                FALSE
+            )
+            AND COALESCE(
+                has_function_privilege(
+                    current_user,
+                    to_regprocedure('qembed_crypto.erase_caller_data(uuid,uuid)'),
+                    'EXECUTE'
+                ),
+                FALSE
+            )"#,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
+
+    if contract_ready {
+        Ok(())
+    } else {
+        Err(PgReadinessFailure::RuntimeDeletionSchemaMismatch)
     }
 }
 
