@@ -479,9 +479,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: тесты запускаются в CI и воспроизводят гонки на независимых PostgreSQL sessions и реальном JetStream, а не используют один connection или broker mocks.
   - Evidence: Rust PR [#136](https://github.com/qembed/qembed-object-runtime/pull/136), merge `aa582a9`; CI run [#2921](https://github.com/qembed/qembed-object-runtime/actions/runs/45480902051) — все jobs зелёные, включая PostgreSQL + JetStream workspace tests.
 
-- [ ] **RUST-064 (S)** Добавить M1b failure-injection matrix.
+- [x] **RUST-064 (S)** Добавить M1b failure-injection matrix.
   - Тесты: crash до NATS connect, после claim до publish, после publish до PubAck, после PubAck до PostgreSQL publication receipt, после DB commit до JetStream ACK, broker message loss до/после consumer delivery, worker restart и PostgreSQL recovery replay.
   - DoD: для каждого crash point зафиксирован ожидаемый PostgreSQL state, broker state и доказуемый recovery path; Unknown не переисполняется автоматически.
+  - Evidence: Rust PR [#137](https://github.com/qembed/qembed-object-runtime/pull/137), merge `0abd208`; CI run [#2941](https://github.com/qembed/qembed-object-runtime/actions/runs/45486649589) — все jobs зелёные, включая destructive NATS storage-loss recovery test.
 
 **M1b Gate:** Outbox → JetStream publication, durable pull consumers, explicit ACK-after-commit, idempotent redelivery, PostgreSQL-driven recovery, leases/fencing, cancellation, budgets, rate limits и failure-injection matrix подтверждены автоматическими PostgreSQL + JetStream tests. NATS availability/loss не может уничтожить единственную копию задания или бизнес-состояния.
 
