@@ -1140,7 +1140,7 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
     .expect("other Anonymous idempotency namespace should be valid");
     let other_command = AnonymousInvocationStartCommand {
         idempotency_key: other_request_id.as_str().to_owned(),
-        payload_hash,
+        payload_hash: payload_hash.clone(),
         input_message: r#"{"message":"hello"}"#.to_owned(),
         message_expires_at: SystemTime::now() + Duration::from_secs(86_400),
         idempotency_expires_at: SystemTime::now() + Duration::from_secs(86_400),
