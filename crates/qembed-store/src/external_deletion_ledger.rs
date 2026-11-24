@@ -381,7 +381,7 @@ async fn cluster_identity_from_connection(
     let (database_name, postmaster_start_time) = sqlx::query_as(
         "SELECT current_database(), to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')",
     )
-    .fetch_one(&mut *connection)
+    .fetch_one(connection)
     .await?;
     Ok(PostgresClusterIdentity {
         database_name,
@@ -590,7 +590,7 @@ impl PgCallerDeletionRestore {
 
         sqlx::query("SELECT pg_advisory_lock($1)")
             .bind(ADVISORY_LOCK_KEY)
-            .execute(&mut *control_plane_connection)
+            .execute(&mut control_plane_connection)
             .await
             .map_err(|error| {
                 CallerDeletionReplayError::Ledger(CallerDeletionLedgerError::Database(error))
@@ -637,7 +637,7 @@ impl PgCallerDeletionRestore {
         let high_water_mark = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
         )
-        .fetch_one(&mut *control_plane_connection)
+        .fetch_one(&mut control_plane_connection)
         .await
         .map_err(|error| CallerDeletionReplayError::Ledger(
             CallerDeletionLedgerError::Database(error),
@@ -664,7 +664,7 @@ async fn read_snapshot_with_lock(
     let high_water_mark = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
     )
-    .fetch_one(&mut **connection)
+    .fetch_one(connection)
     .await
     .map_err(CallerDeletionLedgerError::Database)?;
 
@@ -674,7 +674,7 @@ async fn read_snapshot_with_lock(
            WHERE sequence_id <= $1 ORDER BY sequence_id"#,
     )
     .bind(high_water_mark)
-    .fetch_all(&mut **connection)
+    .fetch_all(connection)
     .await
     .map_err(CallerDeletionLedgerError::Database)?;
 
