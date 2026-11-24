@@ -3,7 +3,8 @@
 //! A `PgContext` is constructed once at the composition root from the pool and
 //! the deployment's ContextIssuer. Store adapters receive this capability
 //! instead of a bare PgPool, so production repository entry points can choose
-//! only an explicit Principal-only or Caller-scoped signed transaction.
+//! an explicit qctx1 Principal, qctx2 Anonymous read, qctx2 Anonymous invocation,
+//! or Caller-scoped signed transaction.
 //!
 //! The wrapped pool is private: external callers cannot obtain an unscoped
 //! connection or silently fall back to legacy identity GUCs.
