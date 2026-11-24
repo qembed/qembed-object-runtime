@@ -275,10 +275,11 @@ fn backend_error(error: OwnerApiBackendError) -> Response {
                 "rate_limited",
                 "The request rate limit has been reached.",
             );
-            if let Some(delay) = retry_after
-                && let Ok(value) = HeaderValue::from_str(&delay.as_secs().max(1).to_string())
-            {
-                response.headers_mut().insert(header::RETRY_AFTER, value);
+            if let Some(delay) = retry_after {
+                let retry_after = delay.as_secs().max(1).to_string();
+                if let Ok(value) = HeaderValue::from_bytes(retry_after.as_bytes()) {
+                    response.headers_mut().insert(header::RETRY_AFTER, value);
+                }
             }
             response
         }
