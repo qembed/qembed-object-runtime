@@ -393,7 +393,7 @@ async fn begin_invocation_in_transaction(
         tenant_id,
         BudgetReservationRequest {
             object_id: command.object_id,
-            caller_id: caller_id,
+            caller_id,
             invocation_id,
             pool: command.invocation_pool,
             snapshot_limit,
@@ -458,8 +458,8 @@ async fn begin_invocation_in_transaction(
 
     Ok(BeginInvocationOutcome::Created {
         invocation_id,
-        caller_id: caller_id,
-        caller_kind: caller_kind,
+        caller_id,
+        caller_kind,
         snapshot_id,
         knowledge_revision,
         invocation_pool: command.invocation_pool,
