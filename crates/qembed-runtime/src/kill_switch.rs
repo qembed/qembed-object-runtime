@@ -82,11 +82,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::Infallible, future::ready, sync::atomic::{AtomicUsize, Ordering}};
+    use std::{convert::Infallible, future::{ready, Future}, sync::atomic::{AtomicUsize, Ordering}};
 
     use qembed_domain::{
         ids::{ObjectId, TenantId, ToolId},
         kill_switch::{KillSwitch, KillSwitchContext, KillSwitchScope, KillSwitchStore},
+        scope::Scope,
         test_support::scope_for_tenant,
     };
 
