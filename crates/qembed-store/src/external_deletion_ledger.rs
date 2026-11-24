@@ -15,7 +15,7 @@ use std::{
 use qembed_domain::ids::{CallerId, TenantId};
 use ring::hmac;
 use sqlx::{
-    Acquire, PgPool, Postgres,
+    PgPool, Postgres,
     migrate::{MigrateError, Migrator},
     pool::PoolConnection,
 };
