@@ -5,7 +5,8 @@ use std::future::Future;
 
 use qembed_domain::{
     kill_switch::{
-        KillSwitchContext, KillSwitchDecision, KillSwitchScope, KillSwitchStore,
+        KillSwitchAuthority, KillSwitchContext, KillSwitchDecision, KillSwitchScope,
+        KillSwitchStore,
         evaluate_kill_switches,
     },
     scope::Scope,
@@ -63,15 +64,24 @@ where
 
     pub async fn ensure_enabled(
         &self,
-        scope: &Scope,
+        authority: KillSwitchAuthority<'_>,
         context: KillSwitchContext,
     ) -> Result<(), KillSwitchServiceError<S::Error>> {
-        if scope.tenant_id() != context.tenant_id() {
+        let authority_matches = match authority {
+            KillSwitchAuthority::Principal(scope) => {
+                scope.tenant_id() == context.tenant_id()
+            }
+            KillSwitchAuthority::Anonymous(anonymous) => {
+                anonymous.tenant_id() == context.tenant_id()
+                    && anonymous.object_id() == context.object_id()
+            }
+        };
+        if !authority_matches {
             return Err(KillSwitchServiceError::ContextTenantMismatch);
         }
         let switches = self
             .store
-            .load_matching_kill_switches(scope, context)
+            .load_matching_kill_switches(authority, context)
             .await
             .map_err(KillSwitchServiceError::Store)?;
         match evaluate_kill_switches(context, &switches) {
@@ -85,7 +95,7 @@ where
     /// The closure is invoked only after the latest Store snapshot allows the action.
     pub async fn run_if_enabled<T, F, Fut>(
         &self,
-        scope: &Scope,
+        authority: KillSwitchAuthority<'_>,
         context: KillSwitchContext,
         side_effect: F,
     ) -> Result<T, KillSwitchServiceError<S::Error>>
@@ -94,7 +104,7 @@ where
         Fut: Future<Output = T> + Send,
         T: Send,
     {
-        self.ensure_enabled(scope, context).await?;
+        self.ensure_enabled(authority, context).await?;
         Ok(side_effect().await)
     }
 }
@@ -109,7 +119,10 @@ mod tests {
 
     use qembed_domain::{
         ids::{ObjectId, TenantId, ToolId},
-        kill_switch::{KillSwitch, KillSwitchContext, KillSwitchScope, KillSwitchStore},
+        anonymous::AnonymousContext,
+        kill_switch::{
+            KillSwitch, KillSwitchAuthority, KillSwitchContext, KillSwitchScope, KillSwitchStore,
+        },
         scope::Scope,
         test_support::scope_for_tenant,
     };
@@ -123,7 +136,7 @@ mod tests {
 
         fn load_matching_kill_switches(
             &self,
-            _scope: &Scope,
+            _authority: KillSwitchAuthority<'_>,
             _context: KillSwitchContext,
         ) -> impl Future<Output = Result<Vec<KillSwitch>, Self::Error>> + Send {
             ready(Ok(self.0.clone()))
@@ -146,7 +159,7 @@ mod tests {
         let calls = AtomicUsize::new(0);
 
         let result = service
-            .run_if_enabled(&scope, context, || async {
+            .run_if_enabled(KillSwitchAuthority::Principal(&scope), context, || async {
                 calls.fetch_add(1, Ordering::SeqCst);
             })
             .await;
@@ -186,7 +199,7 @@ mod tests {
         let calls = AtomicUsize::new(0);
 
         service
-            .run_if_enabled(&scope, context, || async {
+            .run_if_enabled(KillSwitchAuthority::Principal(&scope), context, || async {
                 calls.fetch_add(1, Ordering::SeqCst);
             })
             .await
@@ -203,7 +216,7 @@ mod tests {
         let calls = AtomicUsize::new(0);
 
         let result = service
-            .run_if_enabled(&scope, context, || async {
+            .run_if_enabled(KillSwitchAuthority::Principal(&scope), context, || async {
                 calls.fetch_add(1, Ordering::SeqCst);
             })
             .await;
