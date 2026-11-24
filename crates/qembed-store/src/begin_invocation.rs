@@ -509,7 +509,7 @@ async fn append_invocation_received(
         sqlx::query(
             "INSERT INTO outbox_messages (tenant_id, delivery_id, event_id, topic, payload) SELECT tenant_id, event_id, event_id, event_type, payload FROM events WHERE tenant_id = $1::uuid AND event_id = $2::uuid",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(event_id.to_string()),
     )
     .await?;
