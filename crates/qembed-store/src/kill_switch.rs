@@ -102,8 +102,7 @@ impl KillSwitchStore for PgKillSwitchStore {
                 {
                     return Err(KillSwitchStoreError::TenantMismatch);
                 }
-                let (transaction, _caller) = self.context.begin_anonymous(anonymous).await?;
-                transaction
+                self.context.begin_anonymous_read(anonymous).await?
             }
         };
         let rows = fetch_all(
