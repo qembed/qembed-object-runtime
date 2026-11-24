@@ -23,10 +23,10 @@ use crate::{ContextTransactionError, PgContext, TenantTransaction, execute, fetc
 
 /// All caller-controlled inputs needed to start an invocation.
 ///
-/// requested_caller_id is only a selection request. It becomes an effective
-/// Caller after resolve_delegated_caller verifies the exact Principal/Caller
-/// delegation and holds row locks through commit. InvocationPool is explicit
-/// and is never inferred from CallerKind.
+/// requested_caller_id is only a Principal-path selection request. It becomes
+/// effective only after PostgreSQL verifies delegation. Anonymous commands must
+/// leave it None; their Caller is resolved from qctx2 inside PostgreSQL. The
+/// invocation pool is explicit and never inferred from CallerKind.
 #[derive(Clone, Debug)]
 pub struct BeginInvocationCommand {
     pub object_id: ObjectId,
@@ -120,7 +120,7 @@ impl fmt::Display for BeginInvocationError {
                 formatter.write_str("Anonymous Object does not match invocation command")
             }
             Self::InvalidInvocationPool => {
-                formatter.write_str("Anonymous invocation requires the Anonymous pool")
+                formatter.write_str("invocation pool does not match the invocation subject")
             }
             Self::Context(error) => write!(
                 formatter,
@@ -227,6 +227,9 @@ pub async fn begin_invocation(
     let requested_caller_id = command
         .requested_caller_id
         .ok_or(BeginInvocationError::MissingCallerId)?;
+    if command.invocation_pool == InvocationPool::Anonymous {
+        return Err(BeginInvocationError::InvalidInvocationPool);
+    }
     let (transaction, caller) = context.begin_caller(scope, requested_caller_id).await?;
     begin_invocation_in_transaction(
         transaction,
