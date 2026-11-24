@@ -1,3 +1,4 @@
+pub mod anonymous_invocation;
 //! HTTP handlers.
 //!
 //! Keep transport handlers limited to qembed-domain contracts and
