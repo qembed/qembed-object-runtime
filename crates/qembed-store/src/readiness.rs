@@ -104,9 +104,7 @@ impl PgReadinessProbe {
     }
 }
 
-async fn check_runtime_caller_deletion_contract(
-    pool: &PgPool,
-) -> Result<(), PgReadinessFailure> {
+async fn check_runtime_caller_deletion_contract(pool: &PgPool) -> Result<(), PgReadinessFailure> {
     let contract_ready = sqlx::query_scalar::<_, bool>(
         r#"SELECT
             to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)') IS NOT NULL
