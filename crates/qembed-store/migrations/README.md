@@ -89,3 +89,12 @@ delegation together. The migration also adds
 setting is per Object and does not grant access to an entire Tenant. HTTP
 admission and replay-aware Valkey integration are separate implementation
 steps and are not implied by this schema migration alone.
+
+
+The Anonymous public-invocation adapter depends on the canonical qctx2 verifier
+and Object-scoped Anonymous Caller functions from `qembed/qembed-sql`
+(RT-059 and RT-060). Those security-definer functions are deliberately not
+copied into this Rust migration chain: the SQL repository remains their single
+source of truth. `scripts/test-postgres.sh` pins the merged SQL revision and
+applies RT-059/RT-060 to the canonical integration database before running the
+qctx2 PostgreSQL tests.
