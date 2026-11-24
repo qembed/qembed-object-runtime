@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, time::Duration};
+use std::{future::Future, pin::Pin, process::Command, time::Duration};
 
 use async_nats::jetstream::{
     self,
@@ -316,44 +316,28 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
     assert_eq!(first.acknowledged, 0);
     assert_eq!(first.retry_scheduled, 1);
 
-    // Simulate a worker process restart: discard the original consumer handle
-    // and reconnect to the same durable consumer before its delayed redelivery.
+    // The first worker committed PostgreSQL but exited before ACK. A separate
+    // test process now reconnects to the same durable consumer and handles redelivery.
     drop(consumer);
-    let restarted_durable = stream
-        .get_or_create_consumer(
-            &durable_name,
-            consumer::pull::Config {
-                durable_name: Some(durable_name.clone()),
-                ack_policy: AckPolicy::Explicit,
-                ack_wait: Duration::from_secs(2),
-                max_deliver: 5,
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("the durable consumer survives worker restart");
-    let consumer = NatsJetStreamConsumer::new(
-        restarted_durable,
-        context,
-        NatsJetStreamConsumerConfig::new(
-            "qembed.dlq.rust063",
-            5,
-            Duration::from_millis(100),
-            Duration::from_secs(2),
-            2,
-        )
-        .expect("valid retry policy"),
-    );
-
     tokio::time::sleep(Duration::from_millis(150)).await;
-    let second = consumer
-        .process_batch(&handler, 1, Duration::from_secs(2))
-        .await
-        .expect("restarted worker processes JetStream redelivery idempotently");
-    assert_eq!(second.received, 1);
-    assert_eq!(second.acknowledged, 1);
-    assert_eq!(second.handler_failed, 0);
-    assert_eq!(handler.calls.load(Ordering::SeqCst), 2);
+    let child = Command::new(std::env::current_exe().expect("test executable path is available"))
+        .args([
+            "--exact",
+            "consumer_worker_process_entrypoint",
+            "--nocapture",
+        ])
+        .env("RUST_064_CONSUMER_SUBJECT", &subject)
+        .env("RUST_064_CONSUMER_STREAM", &stream_name)
+        .env("RUST_064_CONSUMER_DURABLE", &durable_name)
+        .output()
+        .expect("replacement consumer worker process starts");
+    assert!(
+        child.status.success(),
+        "replacement consumer worker failed: {}{}",
+        String::from_utf8_lossy(&child.stdout),
+        String::from_utf8_lossy(&child.stderr)
+    );
+    assert_eq!(handler.calls.load(Ordering::SeqCst), 1);
 
     let count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM rust_052a_ack_probe WHERE delivery_id = $1")
@@ -371,4 +355,71 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
         .execute(&pool)
         .await
         .expect("test marker is cleaned up");
+}
+
+
+#[tokio::test]
+async fn consumer_worker_process_entrypoint() {
+    let Ok(subject) = std::env::var("RUST_064_CONSUMER_SUBJECT") else {
+        return;
+    };
+    let stream_name =
+        std::env::var("RUST_064_CONSUMER_STREAM").expect("child stream name is provided");
+    let durable_name =
+        std::env::var("RUST_064_CONSUMER_DURABLE").expect("child durable name is provided");
+    let nats_url = std::env::var("NATS_URL").expect("NATS_URL is set by test-postgres.sh");
+    let database_url =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL is set by test-postgres.sh");
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&database_url)
+        .await
+        .expect("replacement worker connects to PostgreSQL");
+    let context = jetstream::new(
+        async_nats::connect(&nats_url)
+            .await
+            .expect("replacement worker reconnects to NATS"),
+    );
+    let stream = context
+        .get_or_create_stream(StreamConfig {
+            name: stream_name,
+            subjects: vec![subject],
+            max_messages: 100,
+            ..Default::default()
+        })
+        .await
+        .expect("replacement worker resolves the existing stream");
+    let durable = stream
+        .get_or_create_consumer(
+            &durable_name,
+            consumer::pull::Config {
+                durable_name: Some(durable_name),
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_secs(2),
+                max_deliver: 5,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("replacement worker resumes the existing durable consumer");
+    let consumer = NatsJetStreamConsumer::new(
+        durable,
+        context,
+        NatsJetStreamConsumerConfig::new(
+            "qembed.dlq.rust063",
+            5,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            2,
+        )
+        .expect("valid retry policy"),
+    );
+    let outcome = consumer
+        .process_batch(&CommitHandler { pool: pool.clone() }, 1, Duration::from_secs(2))
+        .await
+        .expect("replacement worker processes the unacknowledged delivery");
+    assert_eq!(outcome.received, 1);
+    assert_eq!(outcome.acknowledged, 1);
+    assert_eq!(outcome.handler_failed, 0);
+    pool.close().await;
 }
