@@ -81,7 +81,8 @@ impl ReadinessProbe for StoreReadinessProbe {
                 | Err(PgReadinessFailure::ControlPlaneMigrationMismatch) => {
                     ReadinessStatus::MigrationMismatch
                 }
-                Err(PgReadinessFailure::ControlPlaneUnavailable) => {
+                Err(PgReadinessFailure::ControlPlaneUnavailable)
+                | Err(PgReadinessFailure::RestoreReplayIncomplete) => {
                     ReadinessStatus::DatabaseUnavailable
                 }
             }
