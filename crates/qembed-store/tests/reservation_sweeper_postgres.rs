@@ -270,6 +270,17 @@ async fn parallel_sweepers_release_one_safe_reservation_once_and_preserve_unknow
     .await
     .expect("object counters after repeated sweep");
     assert_eq!(counters_after_replay, (20, 8));
+    let caller_counter_after_replay: i64 = sqlx::query_scalar(
+        "SELECT reserved_tokens FROM caller_usage_counters \
+         WHERE tenant_id=$1 AND object_id=$2 AND caller_id=$3 AND usage_date=CURRENT_DATE",
+    )
+    .bind(tenant_id)
+    .bind(object_id)
+    .bind(caller_id)
+    .fetch_one(&admin)
+    .await
+    .expect("Caller counter after repeated sweep");
+    assert_eq!(caller_counter_after_replay, 20);
 
     first_worker.close().await;
     second_worker.close().await;
