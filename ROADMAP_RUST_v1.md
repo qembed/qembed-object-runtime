@@ -474,9 +474,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - Evidence/design: `docs/RUST-062_RESERVATION_SWEEPER.md`; SQL PRs [#95](https://github.com/qembed/qembed-sql/pull/95) и [#96](https://github.com/qembed/qembed-sql/pull/96); Rust PR [#135](https://github.com/qembed/qembed-object-runtime/pull/135), CI run [#2911](https://github.com/qembed/qembed-object-runtime/actions/runs/45478611692).
   - DoD: sweeper идемпотентен и не освобождает reservation при неоднозначном provider outcome.
 
-- [ ] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions и relay/consumer instances.
+- [x] **RUST-063 (M)** Добавить concurrency suite на независимых PostgreSQL sessions и relay/consumer instances.
   - Тесты: stale CAS, lease reclaim, concurrent budget reservation, competing state transition, competing relay claims и duplicate JetStream deliveries.
   - DoD: тесты запускаются в CI и воспроизводят гонки на независимых PostgreSQL sessions и реальном JetStream, а не используют один connection или broker mocks.
+  - Evidence: Rust PR [#136](https://github.com/qembed/qembed-object-runtime/pull/136), merge `aa582a9`; CI run [#2921](https://github.com/qembed/qembed-object-runtime/actions/runs/45480902051) — все jobs зелёные, включая PostgreSQL + JetStream workspace tests.
 
 - [ ] **RUST-064 (S)** Добавить M1b failure-injection matrix.
   - Тесты: crash до NATS connect, после claim до publish, после publish до PubAck, после PubAck до PostgreSQL publication receipt, после DB commit до JetStream ACK, broker message loss до/после consumer delivery, worker restart и PostgreSQL recovery replay.
