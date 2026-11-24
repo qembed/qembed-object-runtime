@@ -443,3 +443,50 @@ async fn independent_relay_processes_claim_disjoint_rows_and_publish_both() {
     assert_eq!(stream_message_count(&stream).await, 2);
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn nats_connect_failure_before_claim_leaves_outbox_unclaimed() {
+    let pool = database().await;
+    let (publisher, stream, subject) = jetstream().await;
+    let (tenant_id, delivery_id) = enqueue(&pool, &subject).await;
+
+    let unavailable = NatsJetStreamPublisher::connect("nats://127.0.0.1:1").await;
+    assert!(
+        unavailable.is_err(),
+        "an unavailable NATS endpoint must fail before the relay claims PostgreSQL work"
+    );
+
+    let state: (bool, Option<String>, bool, i32) = sqlx::query_as(
+        "SELECT delivered_at IS NOT NULL, lease_owner, lease_expires_at IS NOT NULL, attempts FROM outbox_messages WHERE tenant_id = $1::uuid AND delivery_id = $2::uuid",
+    )
+    .bind(&tenant_id)
+    .bind(&delivery_id)
+    .fetch_one(&pool)
+    .await
+    .expect("outbox state is readable after failed NATS connection");
+    assert_eq!(
+        state,
+        (false, None, false, 0),
+        "connection failure before relay startup must not claim or mutate the Outbox row"
+    );
+    assert_eq!(stream_message_count(&stream).await, 0);
+
+    let relay = OutboxRelay::new(
+        PgOutboxDispatcher::new(pool.clone()),
+        publisher,
+        relay_config("relay-after-connect-recovery", &subject, 10, 30),
+    );
+    let outcome = relay
+        .run_once()
+        .await
+        .expect("the restarted relay publishes the still-pending delivery");
+    assert_eq!(outcome.claimed, 1);
+    assert_eq!(outcome.published, 1);
+    assert_eq!(stream_message_count(&stream).await, 1);
+    assert_eq!(
+        publication_state(&pool, &tenant_id, &delivery_id).await,
+        (true, Some(1), 1)
+    );
+    pool.close().await;
+}
