@@ -279,7 +279,6 @@ fn api_error(status: StatusCode, code: &'static str, message: &'static str) -> R
     (status, Json(crate::errors::ApiErrorBody { code, message })).into_response()
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
