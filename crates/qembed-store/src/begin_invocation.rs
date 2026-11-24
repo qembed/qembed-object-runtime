@@ -227,9 +227,6 @@ pub async fn begin_invocation(
     let requested_caller_id = command
         .requested_caller_id
         .ok_or(BeginInvocationError::MissingCallerId)?;
-    if command.invocation_pool == InvocationPool::Anonymous {
-        return Err(BeginInvocationError::InvalidInvocationPool);
-    }
     let (transaction, caller) = context.begin_caller(scope, requested_caller_id).await?;
     begin_invocation_in_transaction(
         transaction,
