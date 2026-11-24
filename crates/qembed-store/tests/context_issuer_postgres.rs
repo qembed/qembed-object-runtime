@@ -330,7 +330,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     let kill_switch_store = PgKillSwitchStore::new(PgContext::new(pool.clone(), issuer.clone()));
     let kill_switch_context = KillSwitchContext::new(tenant_id, object_id, tool_id);
     let switches = kill_switch_store
-.load_matching_kill_switches(KillSwitchAuthority::Principal(&scope), kill_switch_context)
+        .load_matching_kill_switches(KillSwitchAuthority::Principal(&scope), kill_switch_context)
         .await
         .expect("signed-context Store should read the matching canonical switches");
     let decision = evaluate_kill_switches(kill_switch_context, &switches);
@@ -344,12 +344,8 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
 
     // Anonymous reads use qctx2's bootstrap token without provisioning
     // an Anonymous Caller before the policy decision.
-    let anonymous = AnonymousContext::from_server_fingerprint(
-        tenant_id,
-        object_id,
-        [0x44; 32],
-    )
-    .expect("server-derived Anonymous context should be valid");
+    let anonymous = AnonymousContext::from_server_fingerprint(tenant_id, object_id, [0x44; 32])
+        .expect("server-derived Anonymous context should be valid");
     let anonymous_switches = kill_switch_store
         .load_matching_kill_switches(
             KillSwitchAuthority::Anonymous(&anonymous),
@@ -357,8 +353,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         )
         .await
         .expect("qctx2 Store context should read the same canonical switches");
-    let anonymous_decision =
-        evaluate_kill_switches(kill_switch_context, &anonymous_switches);
+    let anonymous_decision = evaluate_kill_switches(kill_switch_context, &anonymous_switches);
     assert!(matches!(
         &anonymous_decision,
         KillSwitchDecision::Blocked {
