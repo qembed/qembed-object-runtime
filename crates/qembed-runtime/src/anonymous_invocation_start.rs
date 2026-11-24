@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use qembed_domain::{
     anonymous::AnonymousContext,
-    ids::{InvocationId, TraceId},
+    ids::TraceId,
     jcs::{JcsError, canonicalize_json},
     ports::{
         AnonymousInvocationStartCommand, AnonymousInvocationStartStore,
