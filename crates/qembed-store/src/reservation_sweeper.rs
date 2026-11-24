@@ -144,7 +144,10 @@ mod tests {
     #[test]
     fn cutoff_conversion_preserves_microseconds() {
         let cutoff = UNIX_EPOCH + Duration::from_micros(1_767_398_400_123_456);
-        assert_eq!(system_time_to_micros(cutoff), Ok(1_767_398_400_123_456));
+        assert_eq!(
+            system_time_to_micros(cutoff).expect("representable cutoff"),
+            1_767_398_400_123_456
+        );
     }
 
     #[test]
