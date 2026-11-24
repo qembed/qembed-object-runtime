@@ -14,7 +14,7 @@ use serde::Serialize;
 
 pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
-use crate::caller::CallerResolutionError;
+use crate::caller::{CallerResolutionError, ResolvedInvocationCaller};
 use crate::idempotency::{
     IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
     reserve_invocation_idempotency,
@@ -234,8 +234,7 @@ pub async fn begin_invocation(
     begin_invocation_in_transaction(
         transaction,
         scope.tenant_id(),
-        caller.caller_id(),
-        caller.kind(),
+        ResolvedInvocationCaller::Principal(caller),
         command,
     )
     .await
@@ -261,8 +260,7 @@ pub async fn begin_anonymous_invocation(
     begin_invocation_in_transaction(
         transaction,
         anonymous.tenant_id(),
-        caller.caller_id(),
-        caller.kind(),
+        ResolvedInvocationCaller::Anonymous(caller),
         command,
     )
     .await
@@ -271,10 +269,11 @@ pub async fn begin_anonymous_invocation(
 async fn begin_invocation_in_transaction(
     mut transaction: TenantTransaction,
     tenant_id: TenantId,
-    caller_id: CallerId,
-    caller_kind: CallerKind,
+    caller: ResolvedInvocationCaller,
     command: BeginInvocationCommand,
 ) -> Result<BeginInvocationOutcome, BeginInvocationError> {
+    let caller_id = caller.caller_id();
+    let caller_kind = caller.kind();
     let proposed_invocation_id = InvocationId::new();
     let claim = IdempotencyClaim::new(
         command.object_id,
@@ -284,7 +283,7 @@ async fn begin_invocation_in_transaction(
         command.idempotency_expires_at,
     );
     let reservation =
-        reserve_invocation_idempotency(&mut transaction, tenant_id, caller_id, &claim).await?;
+        reserve_invocation_idempotency(&mut transaction, &caller, &claim).await?;
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
