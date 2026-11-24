@@ -6,23 +6,29 @@ The API exposes two unauthenticated operational endpoints:
   `{"status":"ok"}` and does not query PostgreSQL. A database outage must not
   cause an orchestrator to restart an otherwise healthy process.
 - `GET /health/ready` — service readiness. It returns HTTP 200 with
-  `{"status":"ready"}` only when PostgreSQL answers and the database migration
-  history exactly matches the migrations bundled with this binary. Otherwise
-  it returns HTTP 503 with the fixed body `{"status":"not_ready"}`.
+  `{"status":"ready"}` only when both Runtime PostgreSQL and the mandatory,
+  independently operated Control-plane PostgreSQL answer and each database's
+  migration history exactly matches the corresponding migrations bundled with
+  this binary. Otherwise it returns HTTP 503 with the fixed body
+  `{"status":"not_ready"}`.
 
 ## Readiness checks
 
 The store adapter performs read-only checks in this order:
 
-1. Execute `SELECT 1` against the configured PostgreSQL pool.
-2. Load the migration set bundled with this binary.
-3. Read `_sqlx_migrations` and compare the complete ordered version/checksum
-   set with the bundled migrations. Every applied row must have
-   `success = true`.
+1. Execute `SELECT 1` against Runtime PostgreSQL.
+2. Compare Runtime `_sqlx_migrations` with the Runtime migration set bundled
+   with this binary (complete ordered version/checksum set; every applied row
+   must have `success = true`).
+3. Execute `SELECT 1` against the mandatory external Control-plane PostgreSQL.
+4. Compare Control-plane `_sqlx_migrations` with the separate Control-plane
+   migration set bundled with this binary using the same exact-match rule.
 
 A missing migration table, pending migration, unknown extra migration, failed
-migration row, or checksum mismatch makes the service not ready. A connection
-or query failure is classified as database unavailable. The probe never runs
+migration row, or checksum mismatch in either database makes the service not
+ready. A connection or query failure in either database is classified as
+unavailable. Control-plane absence is never treated as a supported local-only
+mode. The probe never runs
 or repairs migrations; schema changes remain an explicit deployment operation.
 
 ## Public response and security
