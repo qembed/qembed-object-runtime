@@ -8,22 +8,30 @@ use sqlx::migrate::Migrator;
 /// Why the database is not ready. This type is intentionally diagnostic-free.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PgReadinessFailure {
-    /// PostgreSQL could not be reached or queried.
+    /// Runtime PostgreSQL could not be reached or queried.
     DatabaseUnavailable,
-    /// The applied migration set is missing, extra, failed, or has changed checksums.
+    /// Runtime migration history differs from this binary.
     MigrationMismatch,
+    /// The mandatory external Control-plane PostgreSQL could not be reached.
+    ControlPlaneUnavailable,
+    /// The Control-plane migration history differs from this binary.
+    ControlPlaneMigrationMismatch,
 }
 
 /// Read-only probe for the database dependency required by the runtime.
 #[derive(Clone)]
 pub struct PgReadinessProbe {
-    pool: PgPool,
+    runtime_pool: PgPool,
+    control_plane_pool: PgPool,
 }
 
 impl PgReadinessProbe {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(runtime_pool: PgPool, control_plane_pool: PgPool) -> Self {
+        Self {
+            runtime_pool,
+            control_plane_pool,
+        }
     }
 
     /// Returns ready only when PostgreSQL answers and its applied migration
@@ -32,13 +40,40 @@ impl PgReadinessProbe {
     /// The probe does not run migrations, acquire tenant context, or expose
     /// connection details and SQL diagnostics in its result.
     pub async fn check(&self) -> Result<(), PgReadinessFailure> {
+        check_database_and_migrations(
+            &self.runtime_pool,
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"),
+        )
+        .await
+        .map_err(|failure| match failure {
+            PgReadinessFailure::DatabaseUnavailable => PgReadinessFailure::DatabaseUnavailable,
+            _ => PgReadinessFailure::MigrationMismatch,
+        })?;
+
+        check_database_and_migrations(
+            &self.control_plane_pool,
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("control_plane_migrations"),
+        )
+        .await
+        .map_err(|failure| match failure {
+            PgReadinessFailure::DatabaseUnavailable => PgReadinessFailure::ControlPlaneUnavailable,
+            _ => PgReadinessFailure::ControlPlaneMigrationMismatch,
+        })?;
+
+        Ok(())
+    }
+}
+
+async fn check_database_and_migrations(
+    pool: &PgPool,
+    migrations_path: std::path::PathBuf,
+) -> Result<(), PgReadinessFailure> {
         sqlx::query_scalar::<_, i32>("SELECT 1")
-            .fetch_one(&self.pool)
+            .fetch_one(pool)
             .await
             .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
 
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-        let migrator = Migrator::new(path)
+        let migrator = Migrator::new(migrations_path)
             .await
             .map_err(|_| PgReadinessFailure::MigrationMismatch)?;
 
@@ -65,7 +100,6 @@ impl PgReadinessProbe {
         } else {
             Err(PgReadinessFailure::MigrationMismatch)
         }
-    }
 }
 
 fn migration_state_matches(expected: &[(i64, Vec<u8>)], applied: &[(i64, Vec<u8>, bool)]) -> bool {
