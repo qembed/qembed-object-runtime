@@ -6,7 +6,7 @@ use qembed_store::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let database_url = env::var("CONTROL_PLANE_DATABASE_URL")?;
+    let database_url = env::var("CONTROL_PLANE_MIGRATION_DATABASE_URL")?;
     let pool = connect_pool(&database_url, PgPoolConfig::default()).await?;
 
     run_control_plane_migrations(&pool).await?;
