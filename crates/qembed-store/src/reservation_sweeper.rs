@@ -66,11 +66,14 @@ impl PgReservationSweeper {
     }
 
     /// Sweeps up to `batch_size` reservations using the current application clock.
-    pub async fn sweep(
-        &self,
-        batch_size: u16,
-    ) -> Result<u32, ReservationSweepError> {
-        self.sweep_before(SystemTime::now(), batch_size).await
+    pub async fn sweep(&self, batch_size: u16) -> Result<u32, ReservationSweepError> {
+        validate_batch_size(batch_size)?;
+        let expired: i32 = sqlx::query_scalar("SELECT sweep_expired_reservations($1)")
+            .bind(i32::from(batch_size))
+            .fetch_one(&self.pool)
+            .await
+            .map_err(ReservationSweepError::Database)?;
+        validate_expired_count(expired, batch_size)
     }
 
     /// Deterministic-clock entry point for tests and controlled maintenance.
@@ -95,8 +98,26 @@ impl PgReservationSweeper {
         .await
         .map_err(ReservationSweepError::Database)?;
 
-        u32::try_from(expired).map_err(|_| ReservationSweepError::InvalidPersistedCount)
+        validate_expired_count(expired, batch_size)
     }
+}
+
+fn validate_batch_size(batch_size: u16) -> Result<(), ReservationSweepError> {
+    if (1..=500).contains(&batch_size) {
+        Ok(())
+    } else {
+        Err(ReservationSweepError::InvalidBatchSize)
+    }
+}
+
+fn validate_expired_count(
+    expired: i32,
+    batch_size: u16,
+) -> Result<u32, ReservationSweepError> {
+    if expired < 0 || expired > i32::from(batch_size) {
+        return Err(ReservationSweepError::InvalidPersistedCount);
+    }
+    u32::try_from(expired).map_err(|_| ReservationSweepError::InvalidPersistedCount)
 }
 
 fn system_time_to_micros(value: SystemTime) -> Result<i64, ReservationSweepError> {
@@ -111,6 +132,20 @@ fn system_time_to_micros(value: SystemTime) -> Result<i64, ReservationSweepError
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn batch_size_must_be_between_one_and_five_hundred() {
+        assert!(validate_batch_size(1).is_ok());
+        assert!(validate_batch_size(500).is_ok());
+        assert!(matches!(
+            validate_batch_size(0),
+            Err(ReservationSweepError::InvalidBatchSize)
+        ));
+        assert!(matches!(
+            validate_batch_size(501),
+            Err(ReservationSweepError::InvalidBatchSize)
+        ));
+    }
 
     #[test]
     fn cutoff_conversion_preserves_microseconds() {
@@ -129,7 +164,7 @@ mod tests {
 
     #[test]
     fn cutoff_outside_postgres_microsecond_range_is_rejected() {
-        let cutoff = UNIX_EPOCH + Duration::from_secs(u64::MAX);
+        let cutoff = UNIX_EPOCH + Duration::from_secs(10_000_000_000_000);
         assert!(matches!(
             system_time_to_micros(cutoff),
             Err(ReservationSweepError::InvalidCutoff)
