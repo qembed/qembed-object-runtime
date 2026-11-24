@@ -132,7 +132,6 @@ pub trait KillSwitchStore: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ids::{ObjectId, TenantId, ToolId};
 
     fn context() -> KillSwitchContext {
         KillSwitchContext::new(TenantId::new(), ObjectId::new(), ToolId::new())
