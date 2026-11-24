@@ -138,6 +138,21 @@ docker compose --project-name qembed-rust-test --file compose.test.yaml down --v
 
 The migration runner is deliberately separate from normal application startup.
 
+## Run Control-plane migrations explicitly
+
+The mandatory external deletion ledger has its own migration history and must
+be migrated independently from Runtime PostgreSQL:
+
+```bash
+CONTROL_PLANE_DATABASE_URL=postgres://... cargo run -p qembed-store --bin qembed-control-plane-migrate
+```
+
+This command applies only the Control-plane SQLx migration set. It does not
+apply Runtime schema changes or the qembed-sql Runtime erasure functions. The
+Control-plane URL must target the dedicated PostgreSQL cluster and use a
+migration identity with the privileges required to create the schema, role,
+table, sequence, and triggers.
+
 
 ## Invocation identity and atomic begin
 
