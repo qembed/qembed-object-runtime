@@ -49,3 +49,8 @@ The CI PostgreSQL harness starts the nats:2.11-alpine JetStream service in compo
 - The concurrent budget reservation case now provisions two separate one-connection pools and asserts distinct pg_backend_pid() values before releasing both transactions through the barrier.
 
 The RUST-063 changes are validated with the repository's pinned Rust 1.100.0 toolchain and the PostgreSQL 19 + JetStream CI environment.
+
+
+## RUST-064 failure-injection evidence
+
+See [RUST-064 M1b failure-injection matrix](RUST-064_FAILURE_INJECTION.md) for the crash-point matrix, expected PostgreSQL/JetStream states and recovery paths. The duplicate-delivery test now recreates the same durable consumer after the first PostgreSQL commit and before redelivery, explicitly covering worker restart at the ACK boundary.
