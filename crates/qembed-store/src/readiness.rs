@@ -53,11 +53,6 @@ impl PgReadinessProbe {
         })
     }
 
-    /// Returns ready only when both databases and their migration histories
-    /// match this binary, and the completed replay lock can be safely released.
-    ///
-    /// The probe does not run migrations, acquire tenant context, or expose
-    /// connection details and SQL diagnostics in its result.
     /// Returns the exact authoritative ledger used by restore and readiness.
     #[must_use]
     pub fn deletion_ledger(&self) -> ExternalCallerDeletionLedger {
@@ -70,6 +65,9 @@ impl PgReadinessProbe {
         self.runtime_pool.clone()
     }
 
+    /// Returns ready only when both databases and their migration histories
+    /// match this binary, the RT-061 SQL contract is installed, and replay is
+    /// complete. The probe never runs migrations or exposes SQL diagnostics.
     pub async fn check(&self) -> Result<(), PgReadinessFailure> {
         check_database_and_migrations(
             &self.runtime_pool,
