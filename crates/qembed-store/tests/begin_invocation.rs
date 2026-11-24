@@ -2852,7 +2852,10 @@ async fn concurrent_budget_reservations_cannot_overspend_object_daily_limit() {
         .fetch_one(&mut *connection_b)
         .await
         .expect("second PostgreSQL backend PID is readable");
-    assert_ne!(pid_a, pid_b, "budget race must use independent PostgreSQL sessions");
+    assert_ne!(
+        pid_a, pid_b,
+        "budget race must use independent PostgreSQL sessions"
+    );
     drop(connection_a);
     drop(connection_b);
 
