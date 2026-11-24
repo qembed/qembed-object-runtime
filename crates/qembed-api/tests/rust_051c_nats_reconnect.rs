@@ -16,6 +16,7 @@ use qembed_domain::{
     ids::{
         CallerId, EventId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId,
     },
+    ports::{MessagePublisher, OutboundMessage},
     test_support::scope_for_tenant,
 };
 use qembed_runtime::outbox_relay::{OutboxRelay, OutboxRelayConfig};
@@ -410,7 +411,7 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
         .get_or_create_consumer(
             &durable_name,
             consumer::pull::Config {
-                durable_name: Some(durable_name),
+                durable_name: Some(durable_name.clone()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(30),
                 max_deliver: 5,
