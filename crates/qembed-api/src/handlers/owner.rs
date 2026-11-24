@@ -122,6 +122,16 @@ pub trait OwnerApiBackend: Send + Sync {
         owner_token: String,
         delegation_id: DelegationId,
     ) -> Pin<Box<dyn Future<Output = Result<(), OwnerApiBackendError>> + Send + '_>>;
+    fn delete_caller(
+        &self,
+        tenant_id: TenantId,
+        owner_token: String,
+        caller_id: CallerId,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<CallerDeletionResponse, OwnerApiBackendError>> + Send + '_>,
+    > {
+        Box::pin(async { Err(OwnerApiBackendError::Internal) })
+    }
 }
 
 #[derive(Clone)]
@@ -166,6 +176,7 @@ pub fn owner_router(backend: impl OwnerApiBackend + 'static) -> Router {
             "/owner/delegations/{delegation_id}",
             delete(revoke_caller_delegation),
         )
+        .route("/owner/callers/{caller_id}", delete(delete_caller))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(OwnerApiState::new(backend))
 }
@@ -433,6 +444,12 @@ struct CallerDelegationResponse {
     status: &'static str,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct CallerDeletionResponse {
+    pub deletion_job_id: String,
+    pub status: &'static str,
+}
+
 async fn grant_caller_delegation(
     State(state): State<OwnerApiState>,
     Path((principal_id, caller_id)): Path<(String, String)>,
@@ -511,6 +528,42 @@ async fn revoke_caller_delegation(
             }),
         )
             .into_response(),
+        Err(error) => backend_error(error, BackendErrorContext::Ordinary),
+    }
+}
+
+async fn delete_caller(
+    State(state): State<OwnerApiState>,
+    Path(caller_id): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if !body.is_empty() {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "This endpoint does not accept a request body.",
+        );
+    }
+    let caller_id = match caller_id.parse::<CallerId>() {
+        Ok(id) => id,
+        Err(_) => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "The Caller ID is invalid.",
+            );
+        }
+    };
+    let (tenant_id, token) = match owner_credentials(&headers) {
+        Ok(v) => v,
+        Err(error) => return credential_error(error),
+    };
+    match state.backend.delete_caller(tenant_id, token, caller_id).await {
+        Ok(response) if response.status == "done" => {
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Ok(response) => (StatusCode::ACCEPTED, Json(response)).into_response(),
         Err(error) => backend_error(error, BackendErrorContext::Ordinary),
     }
 }
