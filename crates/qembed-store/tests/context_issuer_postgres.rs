@@ -381,7 +381,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("test should be able to re-enable its Tenant switch");
     let switches = kill_switch_store
-        .load_matching_kill_switches(&scope, kill_switch_context)
+        .load_matching_kill_switches(KillSwitchAuthority::Principal(&scope), kill_switch_context)
         .await
         .expect("enabled switches should remain readable");
     let decision = evaluate_kill_switches(kill_switch_context, &switches);
