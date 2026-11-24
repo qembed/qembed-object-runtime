@@ -968,7 +968,7 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
         .fetch_one(transaction.connection())
         .await
         .expect("PostgreSQL should verify the Rust qctx2 token");
-    assert_eq!(claims.as_object().map(serde_json::Map::len), Some(17));
+    assert_eq!(claims.as_object().expect("verified claims object").len(), 17);
     assert_eq!(claims["version"], "2");
     assert_eq!(claims["subject_kind"], "anonymous");
     assert_eq!(claims["principal_id"], serde_json::Value::Null);
@@ -1004,6 +1004,15 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
         .commit()
         .await
         .expect("Anonymous invocation context transaction should commit");
+
+    // Transaction-local signed context must not leak when the pooled backend
+    // is reused for the next request.
+    let leaked_context: Option<String> =
+        sqlx::query_scalar("SELECT NULLIF(current_setting('app.context_token', true), '')")
+            .fetch_one(&pool)
+            .await
+            .expect("post-commit context setting should be readable");
+    assert_eq!(leaked_context, None);
 
     // The Object owns one stable Caller; the fingerprint remains per-subject.
     let other_fingerprint = [0x6b; 32];
