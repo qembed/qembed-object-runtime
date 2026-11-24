@@ -84,6 +84,8 @@ else
   cargo test --workspace 2>&1 | tee "$evidence_dir/cargo-test.log"
 fi
 
+# RUST-064: serial, destructive JetStream restart tests. The loss test removes
+# only the NATS container; its PostgreSQL recovery source remains untouched.
 cargo test -p qembed-api --test rust_051c_nats_reconnect -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/nats-reconnect.log"
 
