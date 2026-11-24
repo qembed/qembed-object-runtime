@@ -10,6 +10,7 @@ PostgreSQL is the source of truth for work and business state. JetStream is a du
 
 | Failure point | Expected PostgreSQL state immediately after failure | Expected JetStream state | Recovery and executable evidence |
 |---|---|---|---|
+| Worker exits before NATS connect | Outbox remains pending; no lease, no attempt increment, no publication receipt | No message | Replacement worker connects, claims and publishes the unchanged row. `worker_exit_before_nats_connect_leaves_outbox_pending` |
 | NATS connection fails before relay claim | Outbox remains pending; no lease, no attempt increment, no publication receipt | No message | Reconnect, then claim and publish the unchanged row. `nats_connect_failure_before_claim_leaves_outbox_unclaimed` |
 | Relay process exits after claim, before publish | Claim lease and fencing token are committed; `delivered_at` remains NULL | No message | Lease expires; another relay claims with a newer fencing token and publishes the same ID. `crash_after_claim_before_publish_reclaims_same_delivery` |
 | Server accepts publish, client loses PubAck | Outbox remains unacknowledged; lease is released for retry | One accepted message | Retry with the same `Nats-Msg-Id`; JetStream deduplicates within its configured window. `publish_accepted_but_puback_lost_retries_with_same_id_and_jetstream_deduplicates` |
