@@ -62,6 +62,12 @@ impl PgReadinessProbe {
         self.ledger.clone()
     }
 
+    /// Returns the exact Runtime pool whose database was replayed and checked.
+    #[must_use]
+    pub fn runtime_pool(&self) -> PgPool {
+        self.runtime_pool.clone()
+    }
+
     pub async fn check(&self) -> Result<(), PgReadinessFailure> {
         check_database_and_migrations(
             &self.runtime_pool,
