@@ -10,9 +10,9 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use qembed_domain::ids::{CallerId, InvocationId, ObjectId, TenantId};
+use qembed_domain::ids::{InvocationId, ObjectId};
 
-use crate::{TenantTransaction, fetch_optional};
+use crate::{TenantTransaction, caller::ResolvedInvocationCaller, fetch_optional};
 
 /// Inputs for one caller-scoped idempotency reservation.
 #[derive(Clone, Copy, Debug)]
@@ -65,7 +65,7 @@ pub enum IdempotencyReservation {
 pub enum IdempotencyReservationError {
     /// The key already exists but belongs to a different request payload.
     PayloadMismatch,
-    /// The resolved Caller does not belong to this tenant/Principal transaction.
+    /// The resolved Caller does not belong to this Principal/Anonymous transaction.
     CallerContextMismatch,
     /// The supplied expiration cannot be represented by PostgreSQL's timestamp.
     ExpiryOutOfRange,
@@ -141,13 +141,14 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// transaction reads and returns the winning invocation ID after it commits.
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
-    tenant_id: TenantId,
-    caller_id: CallerId,
+    caller: &ResolvedInvocationCaller,
     claim: &IdempotencyClaim<'_>,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
-    if transaction.tenant_id() != tenant_id {
+    if !caller.is_bound_to_transaction(transaction) {
         return Err(IdempotencyReservationError::CallerContextMismatch);
     }
+    let tenant_id = transaction.tenant_id();
+    let caller_id = caller.caller_id();
     let expiry_micros = expiry_unix_micros(claim.expires_at)?;
 
     loop {
