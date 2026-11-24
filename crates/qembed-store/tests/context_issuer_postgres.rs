@@ -11,12 +11,11 @@ use qembed_domain::{
     },
     rate_limit::RateLimitRequestId,
 };
-use qembed_runtime::{kill_switch::{KillSwitchService, KillSwitchServiceError}};
+use qembed_runtime::kill_switch::{KillSwitchService, KillSwitchServiceError};
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     begin_context_transaction, begin_principal_context_transaction, connect_pool,
-    invocation_start::PgAnonymousInvocationStartStore,
-    kill_switch::PgKillSwitchStore,
+    invocation_start::PgAnonymousInvocationStartStore, kill_switch::PgKillSwitchStore,
 };
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -326,9 +325,10 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     .await
     .expect("enabled tenant Tool switch should be inserted");
 
-    let kill_switch_service = KillSwitchService::new(PgKillSwitchStore::new(
-        PgContext::new(pool.clone(), issuer.clone()),
-    ));
+    let kill_switch_service = KillSwitchService::new(PgKillSwitchStore::new(PgContext::new(
+        pool.clone(),
+        issuer.clone(),
+    )));
     let kill_switch_context = KillSwitchContext::new(tenant_id, object_id, tool_id);
     let side_effects = std::sync::atomic::AtomicUsize::new(0);
     let blocked = kill_switch_service
@@ -363,10 +363,7 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
         })
         .await
         .expect("enabled hierarchy should permit the side effect");
-    assert_eq!(
-        side_effects.load(std::sync::atomic::Ordering::SeqCst),
-        1
-    );
+    assert_eq!(side_effects.load(std::sync::atomic::Ordering::SeqCst), 1);
 
     let mut transaction = begin_context_transaction(&pool, &scope, caller_id, &issuer)
         .await
