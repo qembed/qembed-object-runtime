@@ -373,7 +373,10 @@ where
                                 .await
                                 .map_err(InvocationWorkerError::Store)?;
                             if !persisted {
-                                if let Some(outcome) = self.cancelled_after_lease_loss(scope, invocation_id).await? {
+                                if let Some(outcome) = self
+                                    .cancelled_after_lease_loss(scope, invocation_id)
+                                    .await?
+                                {
                                     return Ok(outcome);
                                 }
                                 return Err(InvocationWorkerError::Conflict);
