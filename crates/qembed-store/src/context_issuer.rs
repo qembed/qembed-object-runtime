@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use qembed_domain::anonymous::AnonymousContext;
-use qembed_domain::ids::CallerId;
+use qembed_domain::ids::{CallerId, TenantId};
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::Serialize;
@@ -17,8 +17,14 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
-use crate::{TenantTransaction, begin_context_tenant_transaction};
+use crate::caller::{
+    AnonymousCallerResolutionError, CallerResolutionError, ResolvedAnonymousCaller,
+    ResolvedCaller, resolve_anonymous_caller, resolve_delegated_caller,
+};
+use crate::{
+    TenantTransaction, begin_anonymous_context_tenant_transaction,
+    begin_context_tenant_transaction,
+};
 
 const TOKEN_PREFIX: &str = "qctx1";
 const ANONYMOUS_TOKEN_PREFIX: &str = "qctx2";
@@ -404,6 +410,69 @@ pub async fn begin_principal_context_transaction(
         .map(|(transaction, _)| transaction)
 }
 
+/// Begins a qctx2 transaction for one public Anonymous Object invocation.
+///
+/// PostgreSQL provisions or reuses the Object's stable Anonymous Caller under
+/// a bootstrap token with a null Caller claim. A second token binds that Caller
+/// to the same transaction, Object and server-derived fingerprint before the
+/// resolver locks the Caller lifecycle row.
+pub async fn begin_anonymous_context_transaction(
+    pool: &sqlx::PgPool,
+    context: &AnonymousContext,
+    issuer: &ContextIssuer,
+) -> Result<(ContextTransaction, ResolvedAnonymousCaller), ContextTransactionError> {
+    let mut transaction = begin_anonymous_context_tenant_transaction(pool, context)
+        .await
+        .map_err(ContextTransactionError::Database)?;
+    let binding = PgContextBinding::read(&mut transaction).await?;
+
+    let bootstrap_token = issuer
+        .issue_anonymous(context, None, &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(bootstrap_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+
+    let caller_uuid = sqlx::query_scalar::<_, Uuid>(
+        "SELECT qembed_crypto.get_or_create_anonymous_caller($1::uuid, $2::uuid)",
+    )
+    .bind(context.tenant_id().to_string())
+    .bind(context.object_id().to_string())
+    .fetch_one(transaction.connection())
+    .await
+    .map_err(|error| match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("42501") =>
+        {
+            ContextTransactionError::AnonymousCallerResolution(
+                AnonymousCallerResolutionError::NotPubliclyInvokable,
+            )
+        }
+        _ => ContextTransactionError::Database(error),
+    })?;
+    let caller_id = CallerId::from_uuid(caller_uuid);
+
+    let invocation_token = issuer
+        .issue_anonymous(context, Some(caller_id), &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(invocation_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+
+    let caller = resolve_anonymous_caller(&mut transaction, context, caller_id)
+        .await
+        .map_err(ContextTransactionError::AnonymousCallerResolution)?;
+    if !caller.is_bound_to(&transaction, context) {
+        return Err(ContextTransactionError::CallerTransactionMismatch);
+    }
+
+    Ok((transaction, caller))
+}
+
 async fn begin_context_transaction_inner(
     pool: &sqlx::PgPool,
     scope: &Scope,
@@ -489,6 +558,7 @@ impl std::error::Error for ContextIssuerError {}
 #[derive(Debug)]
 pub enum ContextTransactionError {
     CallerResolution(CallerResolutionError),
+    AnonymousCallerResolution(AnonymousCallerResolutionError),
     CallerTransactionMismatch,
     Issuer(ContextIssuerError),
     Database(sqlx::Error),
@@ -498,6 +568,7 @@ impl fmt::Display for ContextTransactionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
+            Self::AnonymousCallerResolution(error) => write!(formatter, "Anonymous Caller resolution failed: {error}"),
             Self::CallerTransactionMismatch => {
                 formatter.write_str("resolved Caller is not bound to this transaction and Scope")
             }
@@ -513,6 +584,7 @@ impl std::error::Error for ContextTransactionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::CallerResolution(error) => Some(error),
+            Self::AnonymousCallerResolution(error) => Some(error),
             Self::Issuer(error) => Some(error),
             Self::Database(error) => Some(error),
             Self::CallerTransactionMismatch => None,
