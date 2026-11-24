@@ -18,6 +18,8 @@ pub enum PgReadinessFailure {
     ControlPlaneMigrationMismatch,
     /// External tombstone replay has not been completed or its lock was lost.
     RestoreReplayIncomplete,
+    /// The replay capability belongs to a different Control-plane ledger instance.
+    ReplayLedgerMismatch,
 }
 
 /// Read-only probe for the database dependency required by the runtime.
@@ -34,12 +36,16 @@ impl PgReadinessProbe {
         runtime_pool: PgPool,
         ledger: ExternalCallerDeletionLedger,
         replay_complete: CallerDeletionReplayComplete,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, PgReadinessFailure> {
+        if !replay_complete.belongs_to(&ledger) {
+            return Err(PgReadinessFailure::ReplayLedgerMismatch);
+        }
+
+        Ok(Self {
             runtime_pool,
             ledger,
             replay_complete,
-        }
+        })
     }
 
     /// Returns ready only when PostgreSQL answers and its applied migration
