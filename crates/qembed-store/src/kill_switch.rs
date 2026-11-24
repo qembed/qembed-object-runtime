@@ -2,12 +2,12 @@
 
 use std::{fmt, str::FromStr};
 
+use crate::{PgContext, fetch_all};
 use qembed_domain::{
     ids::{ObjectId, TenantId, ToolId},
     kill_switch::{KillSwitch, KillSwitchContext, KillSwitchScope, KillSwitchStore},
     scope::Scope,
 };
-use crate::{PgContext, fetch_all};
 
 type KillSwitchRow = (
     String,
