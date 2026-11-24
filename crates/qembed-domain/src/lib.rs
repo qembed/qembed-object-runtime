@@ -118,6 +118,7 @@ pub mod invocation_lease;
 pub mod invocation_read;
 pub mod jcs;
 pub mod kill_switch;
+pub mod knowledge;
 pub mod object;
 pub mod object_validation;
 pub mod object_version;
