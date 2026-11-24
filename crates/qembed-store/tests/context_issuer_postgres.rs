@@ -1,10 +1,10 @@
 use std::time::Duration;
 
+use qembed_domain::test_support::scope_for_tenant;
 use qembed_domain::{
     anonymous::AnonymousContext,
     ids::{CallerId, ObjectId, ObjectVersionId, TenantId},
 };
-use qembed_domain::test_support::scope_for_tenant;
 use qembed_store::{
     ContextIssuer, ContextIssuerConfig, PgContext, PgPoolConfig, RingEd25519SigningKey,
     begin_context_transaction, begin_principal_context_transaction, connect_pool,
@@ -797,7 +797,6 @@ async fn rust_context_issuer_token_is_verified_by_postgres_and_bound_to_pool_tra
     pool.close().await;
 }
 
-
 async fn seed_public_object(pool: &PgPool, tenant_id: TenantId, object_id: ObjectId) {
     let version_id = ObjectVersionId::new();
     sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
@@ -919,13 +918,9 @@ async fn stage_anonymous_test_issuer(
         .expect("control-plane authorization should be reset before pool reuse");
     drop(admin_connection);
 
-    let config = ContextIssuerConfig::with_default_lifetime(
-        issuer_name,
-        audience,
-        deployment_id,
-        key_id,
-    )
-    .expect("Anonymous test issuer configuration should be valid");
+    let config =
+        ContextIssuerConfig::with_default_lifetime(issuer_name, audience, deployment_id, key_id)
+            .expect("Anonymous test issuer configuration should be valid");
     ContextIssuer::new(config, signing_key).expect("Anonymous test issuer should be valid")
 }
 
@@ -968,12 +963,11 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
         .expect("qctx2 token should be installed");
     assert!(token.starts_with("qctx2:"));
 
-    let claims: serde_json::Value =
-        sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
-            .bind(&token)
-            .fetch_one(transaction.connection())
-            .await
-            .expect("PostgreSQL should verify the Rust qctx2 token");
+    let claims: serde_json::Value = sqlx::query_scalar("SELECT qembed_crypto.verified_context($1)")
+        .bind(&token)
+        .fetch_one(transaction.connection())
+        .await
+        .expect("PostgreSQL should verify the Rust qctx2 token");
     assert_eq!(claims.as_object().map(serde_json::Map::len), Some(17));
     assert_eq!(claims["version"], "2");
     assert_eq!(claims["subject_kind"], "anonymous");
@@ -1038,9 +1032,11 @@ async fn rust_context_issuer_qctx2_resolves_object_anonymous_caller_without_prin
     let disabled = context.begin_anonymous(&anonymous).await;
     assert!(matches!(
         disabled,
-        Err(qembed_store::ContextTransactionError::AnonymousCallerResolution(
-            qembed_store::caller::AnonymousCallerResolutionError::NotPubliclyInvokable
-        ))
+        Err(
+            qembed_store::ContextTransactionError::AnonymousCallerResolution(
+                qembed_store::caller::AnonymousCallerResolutionError::NotPubliclyInvokable
+            )
+        )
     ));
 
     admin_pool.close().await;
