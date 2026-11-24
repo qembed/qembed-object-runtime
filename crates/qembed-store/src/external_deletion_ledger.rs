@@ -626,7 +626,7 @@ impl PgCallerDeletionRestore {
 }
 
 async fn read_snapshot_with_lock(
-    connection: &mut PoolConnection<Postgres>,
+    connection: &mut PgConnection,
 ) -> Result<CallerDeletionLedgerSnapshot, CallerDeletionLedgerError> {
     let high_water_mark = sqlx::query_scalar::<_, i64>(
         "SELECT COALESCE(MAX(sequence_id), 0) FROM qembed_control_plane.caller_deletion_tombstones",
