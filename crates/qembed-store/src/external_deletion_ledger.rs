@@ -182,6 +182,7 @@ impl std::error::Error for CallerDeletionLedgerError {
 pub struct ExternalCallerDeletionLedger {
     pool: PgPool,
     key: std::sync::Arc<CallerDeletionKey>,
+    identity: Arc<()>,
 }
 
 impl ExternalCallerDeletionLedger {
@@ -190,11 +191,16 @@ impl ExternalCallerDeletionLedger {
         Self {
             pool,
             key: std::sync::Arc::new(key),
+            identity: Arc::new(()),
         }
     }
 
     pub(crate) fn pool(&self) -> &PgPool {
         &self.pool
+    }
+
+    pub(crate) fn shares_identity(&self, identity: &Arc<()>) -> bool {
+        Arc::ptr_eq(&self.identity, identity)
     }
 
     /// Writes a durable tombstone before Runtime physical cleanup. Repeated
@@ -343,6 +349,7 @@ pub struct CallerDeletionReplayComplete {
     connection: Arc<tokio::sync::Mutex<Option<PoolConnection<Postgres>>>>,
     activated: Arc<AtomicBool>,
     high_water_mark: i64,
+    ledger_identity: Arc<()>,
 }
 
 impl CallerDeletionReplayComplete {
@@ -503,6 +510,7 @@ impl PgCallerDeletionRestore {
             connection: Arc::new(tokio::sync::Mutex::new(Some(control_plane_connection))),
             activated: Arc::new(AtomicBool::new(false)),
             high_water_mark,
+            ledger_identity: Arc::clone(&self.ledger.identity),
         })
     }
 }
