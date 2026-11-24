@@ -14,7 +14,7 @@ export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 # Pin the exact SQL candidate used for the cross-repository integration test.
 # Update when qembed-sql advances its canonical signed-context migration candidate.
-qsa003_sql_commit="88b9f75547c5723f63a355416b6b32c5de96feeb"
+qsa003_sql_commit="ecc9a9ace27736a4d7ddbac682ac40dbaf74cfdd"
 sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-qsa003-${qsa003_sql_commit}"
 
 mkdir -p "$evidence_dir"
