@@ -9,7 +9,6 @@ use qembed_domain::{
         KillSwitchStore,
         evaluate_kill_switches,
     },
-    scope::Scope,
 };
 
 /// Error returned when a switch prevents an action or its state cannot be read.
@@ -123,7 +122,6 @@ mod tests {
         kill_switch::{
             KillSwitch, KillSwitchAuthority, KillSwitchContext, KillSwitchScope, KillSwitchStore,
         },
-        scope::Scope,
         test_support::scope_for_tenant,
     };
 
@@ -205,6 +203,37 @@ mod tests {
             .await
             .expect("enabled hierarchy should permit the side effect");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn anonymous_qctx2_authority_is_supported_without_synthetic_principal() {
+        let tenant_id = TenantId::new();
+        let object_id = ObjectId::new();
+        let anonymous = AnonymousContext::from_server_fingerprint(
+            tenant_id,
+            object_id,
+            [0x5a; 32],
+        )
+        .expect("server-derived Anonymous context should be valid");
+        let context = KillSwitchContext::new(tenant_id, object_id, ToolId::new());
+        let service = KillSwitchService::new(MemorySwitchStore(vec![KillSwitch::new(
+            KillSwitchScope::Tenant { tenant_id },
+            false,
+            None,
+        )]));
+        let calls = AtomicUsize::new(0);
+
+        let result = service
+            .run_if_enabled(KillSwitchAuthority::Anonymous(&anonymous), context, || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+            })
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(KillSwitchServiceError::Disabled { .. })
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
