@@ -76,7 +76,7 @@ impl PgReadinessProbe {
         // Release the session-level replay lock before acquiring a second
         // Control-plane pool connection. This also works with max_connections=1.
         self.replay_complete
-            .activate()
+            .activate(&self.runtime_pool)
             .await
             .map_err(|_error: CallerDeletionReplayError| {
                 PgReadinessFailure::RestoreReplayIncomplete
