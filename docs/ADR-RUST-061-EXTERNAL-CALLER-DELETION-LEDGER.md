@@ -61,7 +61,7 @@ A Runtime restore is a maintenance operation, not a normal service start:
 5. Re-check the Control-plane high-water mark while holding a session-level advisory lock that blocks all tombstone writers. A mismatch is a replay failure; it must never be ignored.
 6. Return a private replay-complete capability that retains this lock. The first successful readiness check releases it. The API composition root cannot construct a readiness probe without this capability.
 
-The restore/replay implementation uses a separate Runtime-database login that inherits only the `qembed_restore` role. That role can execute the HMAC replay function but has no direct table access. It must not weaken ordinary tenant RLS or grant the normal Runtime application role unrestricted cross-tenant access. If an invocation or tool execution is still non-terminal, replay requests cancellation and fails closed; startup remains not ready until the work reaches a terminal state and replay is retried.
+The restore/replay implementation uses a separate Runtime-database login that inherits only the `qembed_restore` role. That role can execute the HMAC replay function but has no direct table access. It must not weaken ordinary tenant RLS or grant the normal Runtime application role unrestricted cross-tenant access. The replay function verifies that revocation is present and that messages, episodic memories, idempotency rows, encrypted tool payloads, and terminal tool outputs/expiry metadata are absent before it reports success. If an invocation or tool execution is still non-terminal, replay requests cancellation and fails closed; startup remains not ready until the work reaches a terminal state and replay is retried.
 
 ## Availability and readiness
 
@@ -69,6 +69,8 @@ The restore/replay implementation uses a separate Runtime-database login that in
 - Liveness remains independent of database availability.
 - No automatic downgrade to local storage is permitted.
 - Control-plane requires independent HA, backups/PITR, restricted credentials, and tested recovery. Replication alone is not a backup.
+- Startup rejects Runtime and Control-plane connections that identify the same PostgreSQL server instance; a second database/schema on the Runtime cluster is insufficient.
+- The Control-plane connection must support session-level advisory locks. Direct PostgreSQL connections or session-pooling proxies are supported; transaction-pooling proxies are not.
 - If both the Control-plane and all of its recoverable backups are lost, the anti-resurrection guarantee cannot be established. This is an explicit infrastructure-level critical dependency.
 
 ## Consequences
