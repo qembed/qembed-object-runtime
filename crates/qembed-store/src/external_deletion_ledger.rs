@@ -465,6 +465,7 @@ pub enum CallerDeletionReplayError {
     Ledger(CallerDeletionLedgerError),
     Runtime(sqlx::Error),
     RestoreRoleRequired,
+    RestoreFunctionUnavailable,
     ActiveWorkPending { sequence_id: i64 },
     ReplayLockLost,
     RuntimeDatabaseMismatch,
@@ -479,6 +480,9 @@ impl fmt::Display for CallerDeletionReplayError {
             Self::Runtime(error) => write!(formatter, "Runtime restore database error: {error}"),
             Self::RestoreRoleRequired => {
                 formatter.write_str("restore connection must inherit qembed_restore")
+            }
+            Self::RestoreFunctionUnavailable => {
+                formatter.write_str("qembed_restore cannot execute the RT-061 replay function")
             }
             Self::ActiveWorkPending { sequence_id } => {
                 write!(
@@ -540,6 +544,25 @@ impl PgCallerDeletionRestore {
 
         if !has_restore_role {
             return Err(CallerDeletionReplayError::RestoreRoleRequired);
+        }
+
+        let has_replay_function = sqlx::query_scalar::<_, bool>(
+            r#"SELECT
+                to_regprocedure('qembed_crypto.replay_caller_deletion(uuid,bytea,text,bytea)') IS NOT NULL
+                AND COALESCE(
+                    has_function_privilege(
+                        current_user,
+                        to_regprocedure('qembed_crypto.replay_caller_deletion(uuid,bytea,text,bytea)'),
+                        'EXECUTE'
+                    ),
+                    FALSE
+                )"#,
+        )
+        .fetch_one(&self.runtime_restore_pool)
+        .await
+        .map_err(CallerDeletionReplayError::Runtime)?;
+        if !has_replay_function {
+            return Err(CallerDeletionReplayError::RestoreFunctionUnavailable);
         }
 
         // Detach the session from the pool. Dropping the replay capability must
