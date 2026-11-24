@@ -36,6 +36,14 @@ async fn reports_ready_only_when_both_databases_and_restore_replay_are_ready() {
     let runtime_pool = common::connect().await;
     let control_plane_pool = common::connect_control_plane().await;
     let (ledger, replay) = prepare_replay(&runtime_pool, &control_plane_pool).await;
+    let other_ledger = ExternalCallerDeletionLedger::new(
+        control_plane_pool.clone(),
+        CallerDeletionKey::new(&[0x22; 32]).expect("32-byte HMAC key"),
+    );
+    assert!(matches!(
+        PgReadinessProbe::new(runtime_pool.clone(), other_ledger, replay.clone()),
+        Err(PgReadinessFailure::ReplayLedgerMismatch)
+    ));
 
     let probe = PgReadinessProbe::new(runtime_pool.clone(), ledger, replay)
         .expect("readiness must use the same ledger instance as replay");
