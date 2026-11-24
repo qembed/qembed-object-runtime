@@ -116,7 +116,11 @@ pub fn map_begin_invocation_error(error: &BeginInvocationError) -> ApiError {
         | BeginInvocationError::KnowledgeRevisionNotFound
         | BeginInvocationError::KnowledgeRevisionOutOfRange
         | BeginInvocationError::Database(_)
-        | BeginInvocationError::Context(_) => RuntimeError::Internal,
+        | BeginInvocationError::Context(_)
+        | BeginInvocationError::MissingCallerId
+        | BeginInvocationError::UnexpectedCallerId
+        | BeginInvocationError::ObjectContextMismatch
+        | BeginInvocationError::InvalidInvocationPool => RuntimeError::Internal,
     };
     map_runtime_error(runtime_error)
 }
