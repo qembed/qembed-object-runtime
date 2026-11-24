@@ -496,14 +496,14 @@ async fn nats_connect_failure_before_claim_leaves_outbox_unclaimed() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn worker_exit_before_nats_connect_leaves_outbox_pending() {
     let pool = database().await;
     let (publisher, stream, subject) = jetstream().await;
     let (tenant_id, delivery_id) = enqueue(&pool, &subject).await;
 
-    let child = run_child_process(&subject, "relay-before-nats-connect", "before_nats_connect");
+    let child =
+        run_child_process(&subject, "relay-before-nats-connect", "before_nats_connect");
     assert!(
         child.status.success(),
         "worker process failed before NATS connect: {}{}",
