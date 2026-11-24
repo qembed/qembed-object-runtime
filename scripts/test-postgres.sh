@@ -133,8 +133,8 @@ done
   echo "pgvector_version=$(psql_in_test_db -Atc "SELECT extversion FROM pg_extension WHERE extname = 'vector'")"
 } > "$evidence_dir/qsa003-canonical-database-metadata.txt"
 
-# This is the real Rust ContextIssuer test, not the independent Python probe:
-# Rust creates/signs qctx1 tokens; PostgreSQL verifies them through the
-# candidate C/libsodium extension and canonical RLS policies.
+# These are real Rust ContextIssuer tests, not an independent Python probe:
+# Rust creates/signs qctx1 and qctx2 tokens; PostgreSQL verifies them through
+# the C/libsodium extension and canonical RLS/Anonymous Caller policies.
 cargo test -p qembed-store --test context_issuer_postgres -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/qsa003-rust-contextissuer-canonical.log"
