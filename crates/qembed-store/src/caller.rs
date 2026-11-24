@@ -194,7 +194,7 @@ impl std::error::Error for AnonymousCallerResolutionError {
 ///
 /// The variants contain private-field capabilities produced only by the
 /// corresponding PostgreSQL resolver; transport DTOs cannot construct them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedInvocationCaller {
     Principal(ResolvedCaller),
     Anonymous(ResolvedAnonymousCaller),
