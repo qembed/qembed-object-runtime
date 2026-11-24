@@ -10,7 +10,7 @@ use qembed_domain::ids::{CallerId, TenantId};
 use ring::hmac;
 use sqlx::{Acquire, PgPool, migrate::MigrateError, migrate::Migrator};
 
-const HMAC_DOMAIN: &[u8] = b"qembed/caller-deletion/v1\\0";
+const HMAC_DOMAIN: &[u8] = b"qembed/caller-deletion/v1\0";
 const KEY_VERSION: &str = "v1";
 const ADVISORY_LOCK_KEY: i64 = 61_061;
 
@@ -170,9 +170,9 @@ impl ExternalCallerDeletionLedger {
         lock_ledger(&mut transaction).await?;
 
         let inserted = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO qembed_control_plane.caller_deletion_tombstones \\
-             (tenant_id, caller_hash, key_version) VALUES ($1, $2, $3) \\
-             ON CONFLICT (tenant_id, caller_hash) DO NOTHING RETURNING sequence_id",
+            r#"INSERT INTO qembed_control_plane.caller_deletion_tombstones
+               (tenant_id, caller_hash, key_version) VALUES ($1, $2, $3)
+               ON CONFLICT (tenant_id, caller_hash) DO NOTHING RETURNING sequence_id"#,
         )
         .bind(tenant_id.into_uuid())
         .bind(caller_hash.as_slice())
@@ -185,8 +185,8 @@ impl ExternalCallerDeletionLedger {
             Some(sequence_id) => (sequence_id, true),
             None => {
                 let sequence_id = sqlx::query_scalar::<_, i64>(
-                    "SELECT sequence_id FROM qembed_control_plane.caller_deletion_tombstones \\
-                     WHERE tenant_id = $1 AND caller_hash = $2",
+                    r#"SELECT sequence_id FROM qembed_control_plane.caller_deletion_tombstones
+                       WHERE tenant_id = $1 AND caller_hash = $2"#,
                 )
                 .bind(tenant_id.into_uuid())
                 .bind(caller_hash.as_slice())
@@ -214,9 +214,9 @@ impl ExternalCallerDeletionLedger {
         .await
         .map_err(CallerDeletionLedgerError::Database)?;
         let rows = sqlx::query_as::<_, (i64, uuid::Uuid, Vec<u8>, String)>(
-            "SELECT sequence_id, tenant_id, caller_hash, key_version \\
-             FROM qembed_control_plane.caller_deletion_tombstones \\
-             WHERE sequence_id <= $1 ORDER BY sequence_id",
+            r#"SELECT sequence_id, tenant_id, caller_hash, key_version
+               FROM qembed_control_plane.caller_deletion_tombstones
+               WHERE sequence_id <= $1 ORDER BY sequence_id"#,
         )
         .bind(high_water_mark)
         .fetch_all(&mut *transaction)
