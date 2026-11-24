@@ -198,9 +198,13 @@ check and traffic admission.
 
 The application readiness probe requires both Runtime and Control-plane
 PostgreSQL to be reachable, both migration histories to match exactly, and the
-replay capability to be successfully activated. Liveness remains independent.
-A missing Control-plane pool or missing replay capability is not a supported
-configuration.
+replay capability to be successfully activated. Startup rejects Runtime and
+Control-plane connections that identify the same PostgreSQL server instance.
+The Control-plane URL must use a direct PostgreSQL connection or a
+session-pooling proxy: transaction-pooling proxies do not preserve the
+session-level advisory lock used to close the replay/write race. Liveness
+remains independent. A missing Control-plane pool or missing replay
+capability is not a supported configuration.
 
 The SQL contract is maintained in
 [`qembed/qembed-sql`](https://github.com/qembed/qembed-sql):
