@@ -88,7 +88,7 @@ impl PgReservationSweeper {
         validate_batch_size(batch_size)?;
         let cutoff_micros = system_time_to_micros(cutoff)?;
         let expired: i32 = sqlx::query_scalar(
-            "SELECT sweep_expired_reservations(\u00241, to_timestamp(\u00242::double precision / 1000000.0))",
+            "SELECT sweep_expired_reservations($1, to_timestamp($2::double precision / 1000000.0))",
         )
         .bind(i32::from(batch_size))
         .bind(cutoff_micros)
