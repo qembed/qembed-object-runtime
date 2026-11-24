@@ -68,38 +68,38 @@ async fn check_database_and_migrations(
     pool: &PgPool,
     migrations_path: std::path::PathBuf,
 ) -> Result<(), PgReadinessFailure> {
-        sqlx::query_scalar::<_, i32>("SELECT 1")
-            .fetch_one(pool)
-            .await
-            .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
-
-        let migrator = Migrator::new(migrations_path)
-            .await
-            .map_err(|_| PgReadinessFailure::MigrationMismatch)?;
-
-        let applied: Vec<(i64, Vec<u8>, bool)> = match sqlx::query_as(
-            "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version",
-        )
-        .fetch_all(pool)
+    sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(pool)
         .await
-        {
-            Ok(rows) => rows,
-            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42P01") => {
-                return Err(PgReadinessFailure::MigrationMismatch);
-            }
-            Err(_) => return Err(PgReadinessFailure::DatabaseUnavailable),
-        };
+        .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
 
-        let expected = migrator
-            .iter()
-            .map(|migration| (migration.version, migration.checksum.as_ref().to_vec()))
-            .collect::<Vec<_>>();
+    let migrator = Migrator::new(migrations_path)
+        .await
+        .map_err(|_| PgReadinessFailure::MigrationMismatch)?;
 
-        if migration_state_matches(&expected, &applied) {
-            Ok(())
-        } else {
-            Err(PgReadinessFailure::MigrationMismatch)
+    let applied: Vec<(i64, Vec<u8>, bool)> = match sqlx::query_as(
+        "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42P01") => {
+            return Err(PgReadinessFailure::MigrationMismatch);
         }
+        Err(_) => return Err(PgReadinessFailure::DatabaseUnavailable),
+    };
+
+    let expected = migrator
+        .iter()
+        .map(|migration| (migration.version, migration.checksum.as_ref().to_vec()))
+        .collect::<Vec<_>>();
+
+    if migration_state_matches(&expected, &applied) {
+        Ok(())
+    } else {
+        Err(PgReadinessFailure::MigrationMismatch)
+    }
 }
 
 fn migration_state_matches(expected: &[(i64, Vec<u8>)], applied: &[(i64, Vec<u8>, bool)]) -> bool {
