@@ -336,10 +336,10 @@ async fn jetstream_storage_loss_before_and_after_delivery_replays_from_postgres(
     drop(stream);
     drop(context);
 
-    // Removing the container discards its writable-layer JetStream store.
-    // PostgreSQL remains untouched and is the recovery source of truth.
+    // Remove the container and any anonymous volumes so JetStream storage is
+    // definitely lost. PostgreSQL remains untouched and is the recovery source.
     let _restore = RestoreNatsContainer;
-    compose(&["rm", "--force", "--stop", "nats"]);
+    compose(&["rm", "--force", "--stop", "--volumes", "nats"]);
     compose(&["up", "--detach", "--wait", "nats"]);
     wait_for_nats("127.0.0.1:4222".parse().expect("valid NATS address"));
 
