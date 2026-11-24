@@ -45,3 +45,5 @@ The CI suite combines the existing PostgreSQL integration cases with the new rea
 - duplicate_jetstream_delivery_after_commit_has_one_postgres_effect commits a PostgreSQL business marker before deliberately returning a retryable handler error. Real JetStream redelivers the same delivery; the second processing attempt ACKs, while the durable business marker remains unique.
 
 The CI PostgreSQL harness starts the nats:2.11-alpine JetStream service in compose.test.yaml; the workspace integration suite runs against that service. No broker mock is used for these delivery and relay scenarios.
+
+- The concurrent budget reservation case now provisions two separate one-connection pools and asserts distinct pg_backend_pid() values before releasing both transactions through the barrier.
