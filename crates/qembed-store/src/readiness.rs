@@ -110,10 +110,20 @@ async fn check_runtime_caller_deletion_contract(pool: &PgPool) -> Result<(), PgR
             to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)') IS NOT NULL
             AND to_regprocedure('qembed_crypto.erase_caller_data(uuid,uuid)') IS NOT NULL
             AND to_regprocedure('qembed_crypto.erase_caller_data_verified(uuid,uuid)') IS NOT NULL
+            AND to_regprocedure('qembed_crypto.caller_deletion_schema_version()') IS NOT NULL
+            AND qembed_crypto.caller_deletion_schema_version() = 3
             AND COALESCE(
                 has_function_privilege(
                     current_user,
                     to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)'),
+                    'EXECUTE'
+                ),
+                FALSE
+            )
+            AND COALESCE(
+                has_function_privilege(
+                    current_user,
+                    to_regprocedure('qembed_crypto.caller_deletion_schema_version()'),
                     'EXECUTE'
                 ),
                 FALSE
