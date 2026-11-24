@@ -3,17 +3,18 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use qembed_domain::anonymous::AnonymousContext;
 use qembed_domain::budget::estimate_input_tokens;
 use qembed_domain::caller::{CallerKind, InvocationPool};
 use qembed_domain::ids::{
-    CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TraceId,
+    CallerId, EventId, InvocationId, MessageId, ObjectId, SnapshotId, TenantId, TraceId,
 };
 use qembed_domain::scope::Scope;
 use serde::Serialize;
 
 pub use crate::budget_reservation::{BudgetRejection, BudgetReservationError};
 use crate::budget_reservation::{BudgetReservationRequest, reserve_invocation_budget};
-use crate::caller::{CallerResolutionError, ResolvedCaller};
+use crate::caller::{CallerResolutionError, ResolvedInvocationCaller};
 use crate::idempotency::{
     IdempotencyClaim, IdempotencyReservation, IdempotencyReservationError,
     reserve_invocation_idempotency,
@@ -22,14 +23,14 @@ use crate::{ContextTransactionError, PgContext, TenantTransaction, execute, fetc
 
 /// All caller-controlled inputs needed to start an invocation.
 ///
-/// requested_caller_id is only a selection request. It becomes an effective
-/// Caller after resolve_delegated_caller verifies the exact Principal/Caller
-/// delegation and holds row locks through commit. InvocationPool is explicit
-/// and is never inferred from CallerKind.
+/// requested_caller_id is only a Principal-path selection request. It becomes
+/// effective only after PostgreSQL verifies delegation. Anonymous commands must
+/// leave it None; their Caller is resolved from qctx2 inside PostgreSQL. The
+/// invocation pool is explicit and never inferred from CallerKind.
 #[derive(Clone, Debug)]
 pub struct BeginInvocationCommand {
     pub object_id: ObjectId,
-    pub requested_caller_id: CallerId,
+    pub requested_caller_id: Option<CallerId>,
     pub invocation_pool: InvocationPool,
     pub idempotency_key: String,
     pub payload_hash: Vec<u8>,
@@ -73,6 +74,10 @@ pub enum BeginInvocationError {
     KnowledgeRevisionOutOfRange,
     InvalidInputMessage,
     InvalidMessageExpiry,
+    MissingCallerId,
+    UnexpectedCallerId,
+    ObjectContextMismatch,
+    InvalidInvocationPool,
     Context(crate::ContextTransactionError),
     Database(sqlx::Error),
 }
@@ -105,6 +110,18 @@ impl fmt::Display for BeginInvocationError {
             }
             Self::InvalidInputMessage => formatter.write_str("input message is empty or too large"),
             Self::InvalidMessageExpiry => formatter.write_str("message expiry is invalid"),
+            Self::MissingCallerId => {
+                formatter.write_str("Principal invocation requires a Caller selection")
+            }
+            Self::UnexpectedCallerId => {
+                formatter.write_str("Anonymous invocation must not select a Caller")
+            }
+            Self::ObjectContextMismatch => {
+                formatter.write_str("Anonymous Object does not match invocation command")
+            }
+            Self::InvalidInvocationPool => {
+                formatter.write_str("invocation pool does not match the invocation subject")
+            }
             Self::Context(error) => write!(
                 formatter,
                 "begin-invocation signed-context initialization failed: {error}"
@@ -171,7 +188,8 @@ impl InvocationReceivedPayload {
     fn new(
         invocation_id: InvocationId,
         object_id: ObjectId,
-        caller: ResolvedCaller,
+        caller_id: CallerId,
+        caller_kind: CallerKind,
         snapshot_id: SnapshotId,
         knowledge_revision: u64,
         invocation_pool: InvocationPool,
@@ -180,8 +198,8 @@ impl InvocationReceivedPayload {
             event_type: "invocation_received",
             invocation_id,
             object_id,
-            caller_id: caller.caller_id(),
-            caller_kind: caller.kind().as_sql(),
+            caller_id,
+            caller_kind: caller_kind.as_sql(),
             snapshot_id,
             knowledge_revision,
             invocation_pool: invocation_pool.as_sql(),
@@ -200,15 +218,59 @@ impl InvocationReceivedPayload {
 /// ID defines the key namespace. The claim is the first invocation write; all
 /// later reads/writes remain in the same transaction. Any error before commit
 /// drops the SQLx transaction and rolls back the claim and every subsequent row.
+/// Atomically begins a Principal-backed invocation after resolving its selected Caller.
 pub async fn begin_invocation(
     context: &PgContext,
     scope: &Scope,
     command: BeginInvocationCommand,
 ) -> Result<BeginInvocationOutcome, BeginInvocationError> {
-    let (mut transaction, caller) = context
-        .begin_caller(scope, command.requested_caller_id)
-        .await?;
+    let requested_caller_id = command
+        .requested_caller_id
+        .ok_or(BeginInvocationError::MissingCallerId)?;
+    let (transaction, caller) = context.begin_caller(scope, requested_caller_id).await?;
+    begin_invocation_in_transaction(
+        transaction,
+        scope.tenant_id(),
+        ResolvedInvocationCaller::Principal(caller),
+        command,
+    )
+    .await
+}
 
+/// Atomically begins a public Anonymous invocation. Caller identity is resolved
+/// from qctx2 by PostgreSQL; the command cannot supply a Principal or Caller ID.
+pub async fn begin_anonymous_invocation(
+    context: &PgContext,
+    anonymous: &AnonymousContext,
+    command: BeginInvocationCommand,
+) -> Result<BeginInvocationOutcome, BeginInvocationError> {
+    if command.requested_caller_id.is_some() {
+        return Err(BeginInvocationError::UnexpectedCallerId);
+    }
+    if command.object_id != anonymous.object_id() {
+        return Err(BeginInvocationError::ObjectContextMismatch);
+    }
+    if command.invocation_pool != InvocationPool::Anonymous {
+        return Err(BeginInvocationError::InvalidInvocationPool);
+    }
+    let (transaction, caller) = context.begin_anonymous(anonymous).await?;
+    begin_invocation_in_transaction(
+        transaction,
+        anonymous.tenant_id(),
+        ResolvedInvocationCaller::Anonymous(caller),
+        command,
+    )
+    .await
+}
+
+async fn begin_invocation_in_transaction(
+    mut transaction: TenantTransaction,
+    tenant_id: TenantId,
+    caller: ResolvedInvocationCaller,
+    command: BeginInvocationCommand,
+) -> Result<BeginInvocationOutcome, BeginInvocationError> {
+    let caller_id = caller.caller_id();
+    let caller_kind = caller.kind();
     let proposed_invocation_id = InvocationId::new();
     let claim = IdempotencyClaim::new(
         command.object_id,
@@ -217,8 +279,7 @@ pub async fn begin_invocation(
         proposed_invocation_id,
         command.idempotency_expires_at,
     );
-    let reservation =
-        reserve_invocation_idempotency(&mut transaction, scope, &caller, &claim).await?;
+    let reservation = reserve_invocation_idempotency(&mut transaction, &caller, &claim).await?;
 
     let invocation_id = match reservation {
         IdempotencyReservation::Replay { invocation_id } => {
@@ -252,7 +313,7 @@ pub async fn begin_invocation(
         sqlx::query_as::<_, (String, Option<String>)>(
             "SELECT state, published_version_id::text FROM objects WHERE tenant_id = $1::uuid AND object_id = $2::uuid FOR SHARE",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string()),
     )
     .await
@@ -273,7 +334,7 @@ pub async fn begin_invocation(
         sqlx::query_as::<_, (String, String)>(
             "SELECT snapshot.snapshot_id::text, version.status FROM snapshots AS snapshot INNER JOIN object_versions AS version ON version.tenant_id = snapshot.tenant_id AND version.object_id = snapshot.object_id AND version.object_version_id = snapshot.object_version_id WHERE snapshot.tenant_id = $1::uuid AND snapshot.object_id = $2::uuid AND snapshot.object_version_id = $3::uuid",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string())
         .bind(published_version_id),
     )
@@ -296,7 +357,7 @@ pub async fn begin_invocation(
         sqlx::query_as::<_, (i64,)>(
             "SELECT current_revision FROM knowledge_revisions WHERE tenant_id = $1::uuid AND object_id = $2::uuid FOR SHARE",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string()),
     )
     .await
@@ -310,7 +371,7 @@ pub async fn begin_invocation(
     let snapshot_projection = sqlx::query_scalar::<_, serde_json::Value>(
         "SELECT json_projection FROM snapshots WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND snapshot_id=$3::uuid",
     )
-    .bind(scope.tenant_id().to_string())
+    .bind(tenant_id.to_string())
     .bind(command.object_id.to_string())
     .bind(snapshot_id.to_string())
     .fetch_one(transaction.connection())
@@ -326,10 +387,10 @@ pub async fn begin_invocation(
         .map_err(|_| BeginInvocationError::SnapshotBudgetInvalid)?;
     reserve_invocation_budget(
         &mut transaction,
-        scope,
+        tenant_id,
         BudgetReservationRequest {
             object_id: command.object_id,
-            caller_id: caller.caller_id(),
+            caller_id,
             invocation_id,
             pool: command.invocation_pool,
             snapshot_limit,
@@ -344,9 +405,9 @@ pub async fn begin_invocation(
             "INSERT INTO object_invocations (id, tenant_id, object_id, caller_id, snapshot_id, knowledge_revision, pool, status, trace_id) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, 'Received', $8::uuid)",
         )
         .bind(invocation_id.to_string())
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string())
-        .bind(caller.caller_id().to_string())
+        .bind(caller_id.to_string())
         .bind(snapshot_id.to_string())
         .bind(i64::try_from(knowledge_revision).map_err(|_| BeginInvocationError::KnowledgeRevisionOutOfRange)?)
         .bind(command.invocation_pool.as_sql())
@@ -361,9 +422,9 @@ pub async fn begin_invocation(
             "INSERT INTO interaction_messages (id, tenant_id, object_id, caller_id, invocation_id, role, content, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'user', $6, to_timestamp($7::double precision / 1000000.0))",
         )
         .bind(MessageId::new().to_string())
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(command.object_id.to_string())
-        .bind(caller.caller_id().to_string())
+        .bind(caller_id.to_string())
         .bind(invocation_id.to_string())
         .bind(&command.input_message)
         .bind(message_expiry_micros as f64),
@@ -374,12 +435,13 @@ pub async fn begin_invocation(
     append_invocation_received(
         &mut transaction,
         InvocationReceivedContext {
-            scope,
+            tenant_id,
             event_id: EventId::new(),
             invocation_id,
             command: &command,
             snapshot_id,
-            caller,
+            caller_id,
+            caller_kind,
             knowledge_revision,
         },
     )
@@ -393,21 +455,21 @@ pub async fn begin_invocation(
 
     Ok(BeginInvocationOutcome::Created {
         invocation_id,
-        caller_id: caller.caller_id(),
-        caller_kind: caller.kind(),
+        caller_id,
+        caller_kind,
         snapshot_id,
         knowledge_revision,
         invocation_pool: command.invocation_pool,
     })
 }
-
 struct InvocationReceivedContext<'a> {
-    scope: &'a Scope,
+    tenant_id: TenantId,
     event_id: EventId,
     invocation_id: InvocationId,
     command: &'a BeginInvocationCommand,
     snapshot_id: SnapshotId,
-    caller: ResolvedCaller,
+    caller_id: CallerId,
+    caller_kind: CallerKind,
     knowledge_revision: u64,
 }
 
@@ -416,18 +478,20 @@ async fn append_invocation_received(
     context: InvocationReceivedContext<'_>,
 ) -> Result<(), sqlx::Error> {
     let InvocationReceivedContext {
-        scope,
+        tenant_id,
         event_id,
         invocation_id,
         command,
         snapshot_id,
-        caller,
+        caller_id,
+        caller_kind,
         knowledge_revision,
     } = context;
     let payload = serde_json::to_string(&InvocationReceivedPayload::new(
         invocation_id,
         command.object_id,
-        caller,
+        caller_id,
+        caller_kind,
         snapshot_id,
         knowledge_revision,
         command.invocation_pool,
@@ -439,7 +503,7 @@ async fn append_invocation_received(
         sqlx::query(
             "INSERT INTO events (tenant_id, event_id, aggregate_type, aggregate_id, event_type, payload) VALUES ($1::uuid, $2::uuid, 'invocation', $3::uuid, 'invocation.received', $4::jsonb)",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(event_id.to_string())
         .bind(invocation_id.to_string())
         .bind(payload),
@@ -451,7 +515,7 @@ async fn append_invocation_received(
         sqlx::query(
             "INSERT INTO outbox_messages (tenant_id, delivery_id, event_id, topic, payload) SELECT tenant_id, event_id, event_id, event_type, payload FROM events WHERE tenant_id = $1::uuid AND event_id = $2::uuid",
         )
-        .bind(scope.tenant_id().to_string())
+        .bind(tenant_id.to_string())
         .bind(event_id.to_string()),
     )
     .await?;

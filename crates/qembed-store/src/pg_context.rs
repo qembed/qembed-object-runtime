@@ -8,12 +8,13 @@
 //! The wrapped pool is private: external callers cannot obtain an unscoped
 //! connection or silently fall back to legacy identity GUCs.
 
-use qembed_domain::{ids::CallerId, scope::Scope};
+use qembed_domain::{anonymous::AnonymousContext, ids::CallerId, scope::Scope};
 use sqlx::PgPool;
 
-use crate::caller::ResolvedCaller;
+use crate::caller::{ResolvedAnonymousCaller, ResolvedCaller};
 use crate::{
-    ContextIssuer, ContextTransaction, ContextTransactionError, begin_caller_context_transaction,
+    ContextIssuer, ContextTransaction, ContextTransactionError,
+    begin_anonymous_context_transaction, begin_caller_context_transaction,
     begin_principal_context_transaction,
 };
 
@@ -55,6 +56,17 @@ impl PgContext {
         caller_id: CallerId,
     ) -> Result<(ContextTransaction, ResolvedCaller), ContextTransactionError> {
         begin_caller_context_transaction(&self.pool, scope, caller_id, &self.issuer).await
+    }
+
+    /// Begins a signed qctx2 transaction for a public Anonymous invocation.
+    ///
+    /// The Object's stable Anonymous Caller is resolved by PostgreSQL. No
+    /// Principal or Caller identity is accepted from the HTTP request.
+    pub async fn begin_anonymous(
+        &self,
+        context: &AnonymousContext,
+    ) -> Result<(ContextTransaction, ResolvedAnonymousCaller), ContextTransactionError> {
+        begin_anonymous_context_transaction(&self.pool, context, &self.issuer).await
     }
 }
 

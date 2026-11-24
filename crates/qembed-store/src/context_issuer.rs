@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use qembed_domain::anonymous::AnonymousContext;
 use qembed_domain::ids::CallerId;
 use qembed_domain::scope::Scope;
 use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -16,10 +17,16 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-use crate::caller::{CallerResolutionError, ResolvedCaller, resolve_delegated_caller};
-use crate::{TenantTransaction, begin_context_tenant_transaction};
+use crate::caller::{
+    AnonymousCallerResolutionError, CallerResolutionError, ResolvedAnonymousCaller, ResolvedCaller,
+    resolve_anonymous_caller, resolve_delegated_caller,
+};
+use crate::{
+    TenantTransaction, begin_anonymous_context_tenant_transaction, begin_context_tenant_transaction,
+};
 
 const TOKEN_PREFIX: &str = "qctx1";
+const ANONYMOUS_TOKEN_PREFIX: &str = "qctx2";
 const MAX_PAYLOAD_BYTES: usize = 8 * 1024;
 const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(30);
 const MAX_TOKEN_LIFETIME: Duration = Duration::from_secs(60);
@@ -228,6 +235,59 @@ impl ContextIssuer {
             lowercase_hex(&signature)
         ))
     }
+
+    /// Issues a version-2 Anonymous context. The exact claim set is distinct
+    /// from qctx1: Principal is explicitly JSON null and Object/fingerprint/
+    /// subject-kind are mandatory. No synthetic Principal ID is accepted.
+    fn issue_anonymous(
+        &self,
+        context: &AnonymousContext,
+        caller_id: Option<CallerId>,
+        binding: &PgContextBinding,
+    ) -> Result<String, ContextIssuerError> {
+        let now = OffsetDateTime::now_utc();
+        let lifetime = time::Duration::try_from(self.config.token_lifetime)
+            .map_err(|_| ContextIssuerError::InvalidConfiguration)?;
+        let expires_at = now
+            .checked_add(lifetime)
+            .ok_or(ContextIssuerError::InvalidConfiguration)?;
+
+        let claims = AnonymousContextClaims {
+            version: "2".to_owned(),
+            tenant_id: context.tenant_id().to_string(),
+            principal_id: None,
+            caller_id: caller_id.map(|id| id.to_string()),
+            subject_kind: "anonymous".to_owned(),
+            object_id: context.object_id().to_string(),
+            subject_fingerprint: lowercase_hex(&context.subject_fingerprint()),
+            backend_pid: binding.backend_pid.to_string(),
+            transaction_id: binding.transaction_id.clone(),
+            database_oid: binding.database_oid.clone(),
+            deployment_id: self.config.deployment_id.clone(),
+            issuer: self.config.issuer.clone(),
+            audience: self.config.audience.clone(),
+            key_id: self.config.key_id.clone(),
+            issued_at: now
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            expires_at: expires_at
+                .format(&Rfc3339)
+                .map_err(|_| ContextIssuerError::TimestampFormat)?,
+            nonce: Uuid::new_v4().to_string(),
+        };
+
+        let payload =
+            serde_jcs::to_vec(&claims).map_err(|_| ContextIssuerError::Canonicalization)?;
+        if payload.len() > MAX_PAYLOAD_BYTES {
+            return Err(ContextIssuerError::PayloadTooLarge);
+        }
+        let signature = self.signing_key.sign(&payload)?;
+        Ok(format!(
+            "{ANONYMOUS_TOKEN_PREFIX}:{}:{}",
+            lowercase_hex(&payload),
+            lowercase_hex(&signature)
+        ))
+    }
 }
 
 impl fmt::Debug for ContextIssuer {
@@ -246,6 +306,27 @@ struct ContextClaims {
     tenant_id: String,
     principal_id: String,
     caller_id: Option<String>,
+    backend_pid: String,
+    transaction_id: String,
+    database_oid: String,
+    deployment_id: String,
+    issuer: String,
+    audience: String,
+    key_id: String,
+    issued_at: String,
+    expires_at: String,
+    nonce: String,
+}
+
+#[derive(Serialize)]
+struct AnonymousContextClaims {
+    version: String,
+    tenant_id: String,
+    principal_id: Option<String>,
+    caller_id: Option<String>,
+    subject_kind: String,
+    object_id: String,
+    subject_fingerprint: String,
     backend_pid: String,
     transaction_id: String,
     database_oid: String,
@@ -326,6 +407,69 @@ pub async fn begin_principal_context_transaction(
     begin_context_transaction_inner(pool, scope, None, issuer)
         .await
         .map(|(transaction, _)| transaction)
+}
+
+/// Begins a qctx2 transaction for one public Anonymous Object invocation.
+///
+/// PostgreSQL provisions or reuses the Object's stable Anonymous Caller under
+/// a bootstrap token with a null Caller claim. A second token binds that Caller
+/// to the same transaction, Object and server-derived fingerprint before the
+/// resolver locks the Caller lifecycle row.
+pub async fn begin_anonymous_context_transaction(
+    pool: &sqlx::PgPool,
+    context: &AnonymousContext,
+    issuer: &ContextIssuer,
+) -> Result<(ContextTransaction, ResolvedAnonymousCaller), ContextTransactionError> {
+    let mut transaction = begin_anonymous_context_tenant_transaction(pool, context)
+        .await
+        .map_err(ContextTransactionError::Database)?;
+    let binding = PgContextBinding::read(&mut transaction).await?;
+
+    let bootstrap_token = issuer
+        .issue_anonymous(context, None, &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(bootstrap_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+
+    let caller_uuid = sqlx::query_scalar::<_, Uuid>(
+        "SELECT qembed_crypto.get_or_create_anonymous_caller($1::uuid, $2::uuid)",
+    )
+    .bind(context.tenant_id().to_string())
+    .bind(context.object_id().to_string())
+    .fetch_one(transaction.connection())
+    .await
+    .map_err(|error| match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("42501") =>
+        {
+            ContextTransactionError::AnonymousCallerResolution(
+                AnonymousCallerResolutionError::NotPubliclyInvokable,
+            )
+        }
+        _ => ContextTransactionError::Database(error),
+    })?;
+    let caller_id = CallerId::from_uuid(caller_uuid);
+
+    let invocation_token = issuer
+        .issue_anonymous(context, Some(caller_id), &binding)
+        .map_err(ContextTransactionError::Issuer)?;
+    sqlx::query("SELECT set_config('app.context_token', $1, true)")
+        .bind(invocation_token)
+        .execute(transaction.connection())
+        .await
+        .map_err(ContextTransactionError::Database)?;
+
+    let caller = resolve_anonymous_caller(&mut transaction, context, caller_id)
+        .await
+        .map_err(ContextTransactionError::AnonymousCallerResolution)?;
+    if !caller.is_bound_to(&transaction, context) {
+        return Err(ContextTransactionError::CallerTransactionMismatch);
+    }
+
+    Ok((transaction, caller))
 }
 
 async fn begin_context_transaction_inner(
@@ -413,6 +557,7 @@ impl std::error::Error for ContextIssuerError {}
 #[derive(Debug)]
 pub enum ContextTransactionError {
     CallerResolution(CallerResolutionError),
+    AnonymousCallerResolution(AnonymousCallerResolutionError),
     CallerTransactionMismatch,
     Issuer(ContextIssuerError),
     Database(sqlx::Error),
@@ -422,6 +567,9 @@ impl fmt::Display for ContextTransactionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CallerResolution(error) => write!(formatter, "Caller resolution failed: {error}"),
+            Self::AnonymousCallerResolution(error) => {
+                write!(formatter, "Anonymous Caller resolution failed: {error}")
+            }
             Self::CallerTransactionMismatch => {
                 formatter.write_str("resolved Caller is not bound to this transaction and Scope")
             }
@@ -437,6 +585,7 @@ impl std::error::Error for ContextTransactionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::CallerResolution(error) => Some(error),
+            Self::AnonymousCallerResolution(error) => Some(error),
             Self::Issuer(error) => Some(error),
             Self::Database(error) => Some(error),
             Self::CallerTransactionMismatch => None,
@@ -517,19 +666,73 @@ mod tests {
     }
 
     #[test]
-    fn issuer_rejects_a_mismatched_key_id() {
-        let signer =
-            RingEd25519SigningKey::from_seed("key-a", &[3_u8; 32]).expect("seed must be accepted");
+    fn qctx2_anonymous_claims_have_exact_shape_and_never_mint_a_principal() {
+        use qembed_domain::ids::{ObjectId, TenantId};
+
+        let signer = RingEd25519SigningKey::from_seed("key-v2", &[11_u8; 32])
+            .expect("seed must be accepted");
         let config = ContextIssuerConfig::with_default_lifetime(
             "qembed-runtime",
             "postgres://deployment/db",
-            "deployment-a",
-            "key-b",
+            "deployment-v2",
+            "key-v2",
         )
         .expect("config must be valid");
-        assert!(matches!(
-            ContextIssuer::new(config, signer),
-            Err(ContextIssuerError::KeyIdMismatch)
-        ));
+        let issuer = ContextIssuer::new(config, signer).expect("issuer should be valid");
+        let fingerprint = [0x5a; 32];
+        let context = AnonymousContext::from_server_fingerprint(
+            TenantId::new(),
+            ObjectId::new(),
+            fingerprint,
+        )
+        .expect("trusted context should be valid");
+        let binding = PgContextBinding {
+            backend_pid: 123,
+            transaction_id: "456".to_owned(),
+            database_oid: "789".to_owned(),
+        };
+
+        for caller_id in [None, Some(CallerId::new())] {
+            let token = issuer
+                .issue_anonymous(&context, caller_id, &binding)
+                .expect("qctx2 token should be issued");
+            assert!(token.starts_with("qctx2:"));
+
+            let payload_hex = token.split(':').nth(1).expect("payload segment exists");
+            let payload = decode_test_hex(payload_hex);
+            let claims: serde_json::Value =
+                serde_json::from_slice(&payload).expect("payload should be JSON");
+            let object = claims.as_object().expect("claims should be an object");
+
+            assert_eq!(object.len(), 17, "qctx2 must use its exact claim set");
+            assert_eq!(claims["version"], "2");
+            assert_eq!(claims["tenant_id"], context.tenant_id().to_string());
+            assert_eq!(claims["principal_id"], serde_json::Value::Null);
+            assert_eq!(
+                claims["caller_id"],
+                caller_id
+                    .map(|id| serde_json::Value::String(id.to_string()))
+                    .unwrap_or(serde_json::Value::Null)
+            );
+            assert_eq!(claims["subject_kind"], "anonymous");
+            assert_eq!(claims["object_id"], context.object_id().to_string());
+            assert_eq!(claims["subject_fingerprint"], lowercase_hex(&fingerprint));
+            assert_eq!(claims["backend_pid"], "123");
+            assert_eq!(claims["transaction_id"], "456");
+            assert_eq!(claims["database_oid"], "789");
+        }
+    }
+
+    fn decode_test_hex(value: &str) -> Vec<u8> {
+        let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+        assert!(remainder.is_empty(), "hex input must have an even length");
+        pairs
+            .iter()
+            .map(|pair| {
+                let high = (pair[0] as char).to_digit(16).expect("hex digit") as u8;
+                let low = (pair[1] as char).to_digit(16).expect("hex digit") as u8;
+                (high << 4) | low
+            })
+            .collect()
     }
 }

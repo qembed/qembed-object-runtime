@@ -9,6 +9,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
+use crate::anonymous::AnonymousContext;
 use crate::caller::InvocationPool;
 use crate::chat::{
     ChatCapabilities, ChatProviderError, ChatRequest, ChatResponse, ProviderRequestContext,
@@ -293,6 +294,7 @@ pub enum InvocationIdempotencyPreflight {
     ObjectNotFound,
     ObjectNotActive,
     NoPublishedVersion,
+    NotPubliclyInvokable,
 }
 
 /// Persistence boundary for the atomic begin-invocation transaction.
@@ -318,6 +320,41 @@ pub trait InvocationStartStore: Send + Sync {
         &self,
         scope: &Scope,
         command: InvocationStartCommand,
+    ) -> impl Future<Output = Result<InvocationStartOutcome, Self::Error>> + Send;
+}
+
+/// Server-prepared inputs for an Anonymous invocation. Caller identity and
+/// execution pool are intentionally absent: PostgreSQL resolves the stable
+/// Object-scoped Anonymous Caller and the Store fixes the pool to Anonymous.
+#[derive(Clone, Debug)]
+pub struct AnonymousInvocationStartCommand {
+    pub idempotency_key: String,
+    pub payload_hash: Vec<u8>,
+    pub input_message: String,
+    pub message_expires_at: std::time::SystemTime,
+    pub idempotency_expires_at: std::time::SystemTime,
+    pub trace_id: TraceId,
+}
+
+/// Persistence boundary for the public Anonymous invocation path.
+///
+/// The supplied context must contain a server-derived fingerprint. Implementors
+/// must verify public Object eligibility and idempotency before rate admission,
+/// then repeat all authorization and idempotency checks in the write transaction.
+pub trait AnonymousInvocationStartStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn inspect_anonymous_invocation_idempotency(
+        &self,
+        context: &AnonymousContext,
+        idempotency_key: String,
+        payload_hash: Vec<u8>,
+    ) -> impl Future<Output = Result<InvocationIdempotencyPreflight, Self::Error>> + Send;
+
+    fn begin_anonymous_invocation(
+        &self,
+        context: &AnonymousContext,
+        command: AnonymousInvocationStartCommand,
     ) -> impl Future<Output = Result<InvocationStartOutcome, Self::Error>> + Send;
 }
 

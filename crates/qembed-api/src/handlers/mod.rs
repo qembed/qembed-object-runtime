@@ -3,6 +3,8 @@
 //! Keep transport handlers limited to qembed-domain contracts and
 //! qembed-runtime services. Concrete adapters belong in composition.
 
+pub mod anonymous_invocation;
+
 pub mod health;
 pub mod invocation;
 pub mod owner;

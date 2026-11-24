@@ -8,6 +8,7 @@ use std::pin::Pin;
 
 use axum::Router;
 use qembed_domain::{
+    anonymous::AnonymousContext,
     auth::{
         OwnerAuthenticationError, PrincipalAuthenticationError as DomainPrincipalAuthError,
         authenticate_owner, authenticate_principal,
@@ -18,6 +19,10 @@ use qembed_domain::{
     rate_limit::{RateLimitClass, RateLimitKey, RateLimitPolicies},
 };
 use qembed_runtime::{
+    anonymous_invocation_start::{
+        AnonymousInvocationStartError, AnonymousInvocationStartRequest,
+        AnonymousInvocationStartService,
+    },
     invocation_query::InvocationQueryService,
     invocation_start::{InvocationStartError, InvocationStartRequest, InvocationStartService},
     object_creation::ObjectCreationService,
@@ -35,7 +40,7 @@ use qembed_store::{
     },
     caller_delegation::{CallerDelegationError, PgCallerDelegationRepository},
     invocation_query::PgInvocationQueryStore,
-    invocation_start::PgInvocationStartStore,
+    invocation_start::{PgAnonymousInvocationStartStore, PgInvocationStartStore},
     object_repository::ObjectRepository,
     outbox_dispatcher::PgOutboxDispatcher,
     valkey_rate_limit::ValkeyRateLimitStore,
@@ -45,6 +50,9 @@ use sqlx::PgPool;
 use crate::adapters::nats_jetstream_publisher::NatsJetStreamPublisher;
 
 use crate::handlers::{
+    anonymous_invocation::{
+        AnonymousFingerprintKey, AnonymousInvocationBackend, anonymous_invocation_router,
+    },
     health::{ReadinessProbe, ReadinessStatus, health_router as configure_routes},
     invocation::{InvocationResponse, get_invocation},
     owner::{
@@ -111,6 +119,103 @@ struct PgPrincipalApiBackend {
     context: PgContext,
     rate_limit: RateLimitService<ValkeyRateLimitStore>,
     rate_limit_policies: RateLimitPolicies,
+}
+
+#[derive(Clone)]
+struct PgAnonymousInvocationBackend {
+    context: PgContext,
+    rate_limit: RateLimitService<ValkeyRateLimitStore>,
+    rate_limit_policies: RateLimitPolicies,
+}
+
+impl AnonymousInvocationBackend for PgAnonymousInvocationBackend {
+    fn invoke(
+        &self,
+        tenant_id: TenantId,
+        object_id: ObjectId,
+        subject_fingerprint: [u8; 32],
+        idempotency_key: String,
+        input: serde_json::Value,
+    ) -> Pin<Box<dyn Future<Output = Result<InvocationId, OwnerApiBackendError>> + Send + '_>> {
+        Box::pin(async move {
+            let anonymous = AnonymousContext::from_server_fingerprint(
+                tenant_id,
+                object_id,
+                subject_fingerprint,
+            )
+            .map_err(|_| OwnerApiBackendError::InvalidRequest)?;
+            let service = AnonymousInvocationStartService::new(
+                PgAnonymousInvocationStartStore::new(self.context.clone()),
+            );
+            let policy = self
+                .rate_limit_policies
+                .for_class(RateLimitClass::Anonymous);
+            match service
+                .start_rate_limited(
+                    &anonymous,
+                    AnonymousInvocationStartRequest {
+                        idempotency_key,
+                        input,
+                    },
+                    &self.rate_limit,
+                    policy,
+                    1,
+                )
+                .await
+            {
+                Ok(qembed_runtime::invocation_start::InvocationStartResult::Accepted {
+                    invocation_id,
+                    rate_limit_degraded,
+                }) => {
+                    if rate_limit_degraded {
+                        eprintln!(
+                            "event=rate_limit_fail_open class=anonymous tenant_id={tenant_id} object_id={object_id}"
+                        );
+                    }
+                    Ok(invocation_id)
+                }
+                Ok(qembed_runtime::invocation_start::InvocationStartResult::Replayed {
+                    invocation_id,
+                }) => Ok(invocation_id),
+                Err(AnonymousInvocationStartError::RateLimited { retry_after }) => {
+                    Err(OwnerApiBackendError::RateLimited { retry_after })
+                }
+                Err(AnonymousInvocationStartError::IdempotencyConflict) => {
+                    Err(OwnerApiBackendError::Conflict)
+                }
+                Err(AnonymousInvocationStartError::InvalidIdempotencyKey(_)
+                    | AnonymousInvocationStartError::InvalidInput(_)
+                    | AnonymousInvocationStartError::InputSerialization) =>
+                {
+                    Err(OwnerApiBackendError::InvalidRequest)
+                }
+                Err(
+                    AnonymousInvocationStartError::ObjectNotFound
+                    | AnonymousInvocationStartError::ObjectNotActive
+                    | AnonymousInvocationStartError::NoPublishedVersion
+                    | AnonymousInvocationStartError::NotPubliclyInvokable,
+                ) => Err(OwnerApiBackendError::NotFound),
+                Err(AnonymousInvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::Context(
+                        qembed_store::ContextTransactionError::AnonymousCallerResolution(
+                            qembed_store::caller::AnonymousCallerResolutionError::NotPubliclyInvokable,
+                        ),
+                    ),
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(AnonymousInvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::Idempotency(
+                        qembed_store::idempotency::IdempotencyReservationError::PayloadMismatch,
+                    ),
+                )) => Err(OwnerApiBackendError::Conflict),
+                Err(AnonymousInvocationStartError::Store(
+                    qembed_store::begin_invocation::BeginInvocationError::ObjectNotFound
+                    | qembed_store::begin_invocation::BeginInvocationError::ObjectNotActive
+                    | qembed_store::begin_invocation::BeginInvocationError::NoPublishedVersion,
+                )) => Err(OwnerApiBackendError::NotFound),
+                Err(_) => Err(OwnerApiBackendError::Internal),
+            }
+        })
+    }
 }
 
 impl PrincipalInvocationBackend for PgPrincipalApiBackend {
@@ -509,9 +614,15 @@ pub fn api_router(
     probe: PgReadinessProbe,
     rate_limit_store: ValkeyRateLimitStore,
     rate_limit_policies: RateLimitPolicies,
+    anonymous_fingerprint_key: AnonymousFingerprintKey,
 ) -> Router {
     let principal_backend = PgPrincipalApiBackend {
         pool: pool.clone(),
+        context: context.clone(),
+        rate_limit: RateLimitService::new(rate_limit_store.clone()),
+        rate_limit_policies,
+    };
+    let anonymous_backend = PgAnonymousInvocationBackend {
         context: context.clone(),
         rate_limit: RateLimitService::new(rate_limit_store.clone()),
         rate_limit_policies,
@@ -524,6 +635,10 @@ pub fn api_router(
             rate_limit_policies,
         ))
         .merge(principal_invocation_router(principal_backend))
+        .merge(anonymous_invocation_router(
+            anonymous_backend,
+            anonymous_fingerprint_key,
+        ))
 }
 
 /// Composes the PostgreSQL Outbox Relay with its JetStream publisher.

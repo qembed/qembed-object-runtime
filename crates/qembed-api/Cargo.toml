@@ -15,6 +15,7 @@ qembed-runtime = { path = "../qembed-runtime" }
 qembed-store = { path = "../qembed-store" }
 qembed-llm = { path = "../qembed-llm" }
 qembed-tools = { path = "../qembed-tools" }
+ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

@@ -61,6 +61,35 @@ impl RateLimitRequestId {
         Ok(Self { digest, valkey_key })
     }
 
+    /// Creates an Anonymous request marker and database idempotency namespace.
+    ///
+    /// Anonymous callers share one stable Object-scoped Caller ID, so the
+    /// server-derived fingerprint must be part of the request identity. Only
+    /// the resulting digest is exposed to Valkey or PostgreSQL.
+    pub fn for_anonymous_invocation(
+        tenant_id: TenantId,
+        object_id: ObjectId,
+        subject_fingerprint: [u8; 32],
+        idempotency_key: &str,
+    ) -> Result<Self, RateLimitRequestIdError> {
+        if idempotency_key.trim().is_empty() {
+            return Err(RateLimitRequestIdError::EmptyIdempotencyKey);
+        }
+        if idempotency_key.len() > 256 {
+            return Err(RateLimitRequestIdError::IdempotencyKeyTooLong);
+        }
+        let fingerprint_digest = Sha256::digest(subject_fingerprint);
+        let digest = Sha256::digest(
+            format!(
+                "qembed:anonymous-invocation-idempotency:{tenant_id}:{object_id}:{fingerprint_digest:x}:{idempotency_key}"
+            )
+            .as_bytes(),
+        );
+        let digest = format!("{digest:x}");
+        let valkey_key = format!("qembed:rl:{{{tenant_id}:{object_id}}}:request:{digest}");
+        Ok(Self { digest, valkey_key })
+    }
+
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.digest
@@ -465,5 +494,36 @@ mod tests {
         );
         let other = RateLimitKey::for_anonymous(tenant, object, [8_u8; 32]).unwrap();
         assert_ne!(key, other);
+    }
+
+    #[test]
+    fn anonymous_idempotency_namespace_isolated_by_fingerprint() {
+        let tenant = TenantId::new();
+        let object = ObjectId::new();
+        let first = RateLimitRequestId::for_anonymous_invocation(
+            tenant,
+            object,
+            [7_u8; 32],
+            "same-client-key",
+        )
+        .unwrap();
+        let replay = RateLimitRequestId::for_anonymous_invocation(
+            tenant,
+            object,
+            [7_u8; 32],
+            "same-client-key",
+        )
+        .unwrap();
+        let other_subject = RateLimitRequestId::for_anonymous_invocation(
+            tenant,
+            object,
+            [8_u8; 32],
+            "same-client-key",
+        )
+        .unwrap();
+
+        assert_eq!(first, replay);
+        assert_ne!(first, other_subject);
+        assert!(!first.as_str().contains("same-client-key"));
     }
 }

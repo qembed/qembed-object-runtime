@@ -2,8 +2,9 @@
 
 use std::fmt;
 
+use qembed_domain::anonymous::AnonymousContext;
 use qembed_domain::caller::CallerKind;
-use qembed_domain::ids::{CallerId, PrincipalId, TenantId};
+use qembed_domain::ids::{CallerId, ObjectId, PrincipalId, TenantId};
 
 use crate::{TenantTransaction, TransactionToken, fetch_optional};
 
@@ -40,9 +41,187 @@ impl ResolvedCaller {
         scope: &qembed_domain::scope::Scope,
     ) -> bool {
         self.tenant_id == scope.tenant_id()
-            && self.principal_id == scope.principal().principal_id()
+            && Some(self.principal_id) == transaction.principal_id()
             && self.transaction_token == transaction.transaction_token()
             && transaction.matches_scope(scope)
+    }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        self.tenant_id == transaction.tenant_id()
+            && Some(self.principal_id) == transaction.principal_id()
+            && self.transaction_token == transaction.transaction_token()
+    }
+}
+
+/// A database-resolved Anonymous Caller bound to one signed Object transaction.
+///
+/// The stable Caller ID belongs to the public Object. The per-request
+/// fingerprint remains separate and is used for rate-limit and idempotency
+/// namespaces; it is never treated as a Principal identity.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedAnonymousCaller {
+    caller_id: CallerId,
+    kind: CallerKind,
+    tenant_id: TenantId,
+    object_id: ObjectId,
+    subject_fingerprint: [u8; 32],
+    transaction_token: TransactionToken,
+}
+
+impl ResolvedAnonymousCaller {
+    #[must_use]
+    pub const fn caller_id(self) -> CallerId {
+        self.caller_id
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> CallerKind {
+        self.kind
+    }
+
+    pub(crate) fn is_bound_to(
+        &self,
+        transaction: &TenantTransaction,
+        context: &AnonymousContext,
+    ) -> bool {
+        self.tenant_id == context.tenant_id()
+            && self.object_id == context.object_id()
+            && self.subject_fingerprint == context.subject_fingerprint()
+            && self.transaction_token == transaction.transaction_token()
+            && transaction.matches_anonymous_context(context)
+    }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        self.tenant_id == transaction.tenant_id()
+            && self.transaction_token == transaction.transaction_token()
+            && transaction.matches_anonymous_binding(self.object_id, self.subject_fingerprint)
+    }
+}
+
+/// Resolves the Object-scoped Anonymous Caller under a signed qctx2 invocation
+/// context. The SQL function locks Object and Caller lifecycle rows until the
+/// enclosing transaction commits.
+pub async fn resolve_anonymous_caller(
+    transaction: &mut TenantTransaction,
+    context: &AnonymousContext,
+    caller_id: CallerId,
+) -> Result<ResolvedAnonymousCaller, AnonymousCallerResolutionError> {
+    if !transaction.matches_anonymous_context(context) {
+        return Err(AnonymousCallerResolutionError::ContextMismatch);
+    }
+    let row = sqlx::query_as::<_, (String, String)>(
+        "SELECT caller_id::text, caller_kind FROM qembed_crypto.resolve_anonymous_caller($1::uuid, $2::uuid, $3::uuid)",
+    )
+    .bind(context.tenant_id().to_string())
+    .bind(context.object_id().to_string())
+    .bind(caller_id.to_string())
+    .fetch_optional(transaction.connection())
+    .await
+    .map_err(|error| match &error {
+        sqlx::Error::Database(database_error)
+            if database_error.code().as_deref() == Some("42501") =>
+        {
+            AnonymousCallerResolutionError::NotPubliclyInvokable
+        }
+        _ => AnonymousCallerResolutionError::Database(error),
+    })?
+    .ok_or(AnonymousCallerResolutionError::NotPubliclyInvokable)?;
+
+    let resolved_id = row
+        .0
+        .parse::<CallerId>()
+        .map_err(|_| AnonymousCallerResolutionError::InvalidCallerId)?;
+    if resolved_id != caller_id {
+        return Err(AnonymousCallerResolutionError::ContextMismatch);
+    }
+    let kind =
+        CallerKind::parse(&row.1).ok_or(AnonymousCallerResolutionError::UnknownCallerKind)?;
+    if kind != CallerKind::Anonymous {
+        return Err(AnonymousCallerResolutionError::UnexpectedCallerKind);
+    }
+
+    Ok(ResolvedAnonymousCaller {
+        caller_id: resolved_id,
+        kind,
+        tenant_id: context.tenant_id(),
+        object_id: context.object_id(),
+        subject_fingerprint: context.subject_fingerprint(),
+        transaction_token: transaction.transaction_token(),
+    })
+}
+
+/// Failure to resolve an Object-scoped Anonymous Caller.
+#[derive(Debug)]
+pub enum AnonymousCallerResolutionError {
+    ContextMismatch,
+    NotPubliclyInvokable,
+    InvalidCallerId,
+    UnknownCallerKind,
+    UnexpectedCallerKind,
+    Database(sqlx::Error),
+}
+
+impl fmt::Display for AnonymousCallerResolutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ContextMismatch => formatter.write_str("Anonymous Caller context mismatch"),
+            Self::NotPubliclyInvokable => formatter.write_str("Object is not publicly invokable"),
+            Self::InvalidCallerId => {
+                formatter.write_str("Anonymous Caller resolver returned an invalid ID")
+            }
+            Self::UnknownCallerKind => {
+                formatter.write_str("Anonymous Caller resolver returned an unknown kind")
+            }
+            Self::UnexpectedCallerKind => formatter.write_str("resolved Caller is not Anonymous"),
+            Self::Database(error) => write!(
+                formatter,
+                "Anonymous Caller resolution database error: {error}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AnonymousCallerResolutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+/// A database-resolved invocation Caller bound to the current SQL transaction.
+///
+/// The variants contain private-field capabilities produced only by the
+/// corresponding PostgreSQL resolver; transport DTOs cannot construct them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedInvocationCaller {
+    Principal(ResolvedCaller),
+    Anonymous(ResolvedAnonymousCaller),
+}
+
+impl ResolvedInvocationCaller {
+    #[must_use]
+    pub const fn caller_id(self) -> CallerId {
+        match self {
+            Self::Principal(caller) => caller.caller_id(),
+            Self::Anonymous(caller) => caller.caller_id(),
+        }
+    }
+
+    #[must_use]
+    pub const fn kind(self) -> CallerKind {
+        match self {
+            Self::Principal(caller) => caller.kind(),
+            Self::Anonymous(caller) => caller.kind(),
+        }
+    }
+
+    pub(crate) fn is_bound_to_transaction(&self, transaction: &TenantTransaction) -> bool {
+        match self {
+            Self::Principal(caller) => caller.is_bound_to_transaction(transaction),
+            Self::Anonymous(caller) => caller.is_bound_to_transaction(transaction),
+        }
     }
 }
 
@@ -57,6 +236,9 @@ pub async fn resolve_delegated_caller(
     transaction: &mut TenantTransaction,
     requested_caller_id: CallerId,
 ) -> Result<ResolvedCaller, CallerResolutionError> {
+    let principal_id = transaction
+        .principal_id()
+        .ok_or(CallerResolutionError::PrincipalContextRequired)?;
     let row = fetch_optional(
         transaction,
         sqlx::query_as::<_, (String, String)>(
@@ -64,7 +246,7 @@ pub async fn resolve_delegated_caller(
              FROM resolve_delegated_caller($1::uuid, $2::uuid, $3::uuid)",
         )
         .bind(transaction.tenant_id().to_string())
-        .bind(transaction.principal_id().to_string())
+        .bind(principal_id.to_string())
         .bind(requested_caller_id.to_string()),
     )
     .await
@@ -88,7 +270,7 @@ pub async fn resolve_delegated_caller(
         caller_id,
         kind,
         tenant_id: transaction.tenant_id(),
-        principal_id: transaction.principal_id(),
+        principal_id,
         transaction_token: transaction.transaction_token(),
     })
 }
@@ -98,6 +280,8 @@ pub async fn resolve_delegated_caller(
 pub enum CallerResolutionError {
     /// The requested Caller is not actively delegated to this Principal.
     NotDelegated,
+    /// Delegation resolution was attempted from an Anonymous transaction.
+    PrincipalContextRequired,
     /// The database returned a malformed Caller identifier.
     InvalidCallerId,
     /// The database returned a Caller kind unknown to this Rust version.
@@ -111,6 +295,9 @@ impl fmt::Display for CallerResolutionError {
         match self {
             Self::NotDelegated => {
                 formatter.write_str("Caller is not actively delegated to this Principal")
+            }
+            Self::PrincipalContextRequired => {
+                formatter.write_str("delegated Caller resolution requires a Principal transaction")
             }
             Self::InvalidCallerId => {
                 formatter.write_str("delegation resolver returned an invalid Caller ID")

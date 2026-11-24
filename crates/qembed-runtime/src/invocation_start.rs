@@ -55,6 +55,7 @@ pub enum InvocationStartError<E> {
     ObjectNotFound,
     ObjectNotActive,
     NoPublishedVersion,
+    NotPubliclyInvokable,
     RateLimited { retry_after: Option<Duration> },
     RateLimitConfiguration,
     Store(E),
@@ -127,6 +128,9 @@ impl<S: InvocationStartStore> InvocationStartService<S> {
             }
             InvocationIdempotencyPreflight::NoPublishedVersion => {
                 return Err(InvocationStartError::NoPublishedVersion);
+            }
+            InvocationIdempotencyPreflight::NotPubliclyInvokable => {
+                return Err(InvocationStartError::NotPubliclyInvokable);
             }
             InvocationIdempotencyPreflight::Replay { .. } => {
                 // Still call begin_invocation below: it revalidates Caller

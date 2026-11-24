@@ -1,5 +1,6 @@
 //! Provider-neutral orchestration for durable invocation execution.
 
+pub mod anonymous_invocation_start;
 pub mod error;
 pub mod invocation_cancellation;
 pub mod invocation_query;

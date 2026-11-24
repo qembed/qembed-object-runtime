@@ -249,7 +249,7 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
 fn command(fixture: &Fixture, key: &str) -> BeginInvocationCommand {
     BeginInvocationCommand {
         object_id: fixture.object_id,
-        requested_caller_id: fixture.caller_id,
+        requested_caller_id: Some(fixture.caller_id),
         invocation_pool: InvocationPool::Authenticated,
         idempotency_key: key.to_owned(),
         payload_hash: b"request-digest".to_vec(),
@@ -473,8 +473,9 @@ async fn outbox_insert_failure_rolls_back_invocation_idempotency_and_event() {
 async fn principal_uuid_is_not_an_implicit_caller_mapping() {
     let fixture = setup(None).await;
     let mut invalid = command(&fixture, "principal-is-not-caller");
-    invalid.requested_caller_id =
-        CallerId::from_uuid(fixture.scope.principal().principal_id().into_uuid());
+    invalid.requested_caller_id = Some(CallerId::from_uuid(
+        fixture.scope.principal().principal_id().into_uuid(),
+    ));
     let error = begin_invocation(&fixture.context, &fixture.scope, invalid)
         .await
         .expect_err("Principal UUID equality must not authorize a Caller");

@@ -10,11 +10,9 @@
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::caller::ResolvedCaller;
 use qembed_domain::ids::{InvocationId, ObjectId};
-use qembed_domain::scope::Scope;
 
-use crate::{TenantTransaction, fetch_optional};
+use crate::{TenantTransaction, caller::ResolvedInvocationCaller, fetch_optional};
 
 /// Inputs for one caller-scoped idempotency reservation.
 #[derive(Clone, Copy, Debug)]
@@ -67,7 +65,7 @@ pub enum IdempotencyReservation {
 pub enum IdempotencyReservationError {
     /// The key already exists but belongs to a different request payload.
     PayloadMismatch,
-    /// The resolved Caller does not belong to this tenant/Principal transaction.
+    /// The resolved Caller does not belong to this Principal/Anonymous transaction.
     CallerContextMismatch,
     /// The supplied expiration cannot be represented by PostgreSQL's timestamp.
     ExpiryOutOfRange,
@@ -143,15 +141,15 @@ fn expiry_unix_micros(expires_at: SystemTime) -> Result<i64, IdempotencyReservat
 /// transaction reads and returns the winning invocation ID after it commits.
 pub async fn reserve_invocation_idempotency(
     transaction: &mut TenantTransaction,
-    scope: &Scope,
-    caller: &ResolvedCaller,
+    caller: &ResolvedInvocationCaller,
     claim: &IdempotencyClaim<'_>,
 ) -> Result<IdempotencyReservation, IdempotencyReservationError> {
-    if !caller.is_bound_to(transaction, scope) {
+    if !caller.is_bound_to_transaction(transaction) {
         return Err(IdempotencyReservationError::CallerContextMismatch);
     }
-    let expiry_micros = expiry_unix_micros(claim.expires_at)?;
+    let tenant_id = transaction.tenant_id();
     let caller_id = caller.caller_id();
+    let expiry_micros = expiry_unix_micros(claim.expires_at)?;
 
     loop {
         let inserted = fetch_optional(
@@ -159,7 +157,7 @@ pub async fn reserve_invocation_idempotency(
             sqlx::query_as::<_, (String,)>(
                 "INSERT INTO invocation_idempotency (tenant_id, object_id, caller_id, idempotency_key, payload_hash, invocation_id, expires_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, to_timestamp($7::double precision / 1000000.0)) ON CONFLICT (tenant_id, object_id, caller_id, idempotency_key) DO NOTHING RETURNING invocation_id::text",
             )
-            .bind(scope.tenant_id().to_string())
+            .bind(tenant_id.to_string())
             .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
             .bind(claim.idempotency_key)
@@ -181,7 +179,7 @@ pub async fn reserve_invocation_idempotency(
             sqlx::query_as::<_, (Vec<u8>, String)>(
                 "SELECT payload_hash, invocation_id::text FROM invocation_idempotency WHERE tenant_id = $1::uuid AND object_id = $2::uuid AND caller_id = $3::uuid AND idempotency_key = $4 FOR UPDATE",
             )
-            .bind(scope.tenant_id().to_string())
+            .bind(tenant_id.to_string())
             .bind(claim.object_id.to_string())
             .bind(caller_id.to_string())
             .bind(claim.idempotency_key),
