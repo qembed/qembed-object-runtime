@@ -265,7 +265,7 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
         .get_or_create_consumer(
             &durable_name,
             consumer::pull::Config {
-                durable_name: Some(durable_name),
+                durable_name: Some(durable_name.clone()),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(2),
                 max_deliver: 5,
