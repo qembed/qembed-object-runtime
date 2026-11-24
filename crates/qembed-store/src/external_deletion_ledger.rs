@@ -54,7 +54,7 @@ impl CallerDeletionKey {
             return Err(CallerDeletionKeyError::InvalidEncoding);
         }
         let mut bytes = [0_u8; 32];
-        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let high = (pair[0] as char)
                 .to_digit(16)
                 .ok_or(CallerDeletionKeyError::InvalidEncoding)?;
