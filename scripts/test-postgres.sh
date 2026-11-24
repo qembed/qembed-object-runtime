@@ -14,7 +14,7 @@ export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 # Pin the canonical SQL revision that includes deterministic reservation expiry.
 # Update only when the Rust/SQL cross-repository contract advances.
-canonical_sql_commit="7818054824264ac557fff5bae09bf36320e4acbb"
+canonical_sql_commit="573a54a56797e713131e74c4830b3bcb6181abaf"
 sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-rust-062-${canonical_sql_commit}"
 
 mkdir -p "$evidence_dir"
