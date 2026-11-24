@@ -14,6 +14,21 @@ services:
       retries: 30
       start_period: 2s
 
+  postgres-control-plane:
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:0.8.7-pg19-bookworm}
+    environment:
+      POSTGRES_DB: qembed_control_plane_test
+      POSTGRES_USER: qembed_test
+      POSTGRES_PASSWORD: qembed_test
+    ports:
+      - "127.0.0.1:55433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qembed_test -d qembed_control_plane_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+
   nats:
     image: nats:2.11-alpine
     command: ["-js", "-sd", "/data", "-m", "8222"]

@@ -5,66 +5,184 @@ use std::path::Path;
 use sqlx::PgPool;
 use sqlx::migrate::Migrator;
 
+use crate::external_deletion_ledger::{
+    CallerDeletionReplayComplete, CallerDeletionReplayError, ExternalCallerDeletionLedger,
+};
+
 /// Why the database is not ready. This type is intentionally diagnostic-free.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PgReadinessFailure {
-    /// PostgreSQL could not be reached or queried.
+    /// Runtime PostgreSQL could not be reached or queried.
     DatabaseUnavailable,
-    /// The applied migration set is missing, extra, failed, or has changed checksums.
+    /// Runtime migration history differs from this binary.
     MigrationMismatch,
+    /// Required RT-061 SQL functions or Runtime execution grants are missing.
+    RuntimeDeletionSchemaMismatch,
+    /// The mandatory external Control-plane PostgreSQL could not be reached.
+    ControlPlaneUnavailable,
+    /// The Control-plane migration history differs from this binary.
+    ControlPlaneMigrationMismatch,
+    /// External tombstone replay has not been completed or its lock was lost.
+    RestoreReplayIncomplete,
+    /// The replay capability belongs to a different Control-plane ledger instance.
+    ReplayLedgerMismatch,
 }
 
 /// Read-only probe for the database dependency required by the runtime.
 #[derive(Clone)]
 pub struct PgReadinessProbe {
-    pool: PgPool,
+    runtime_pool: PgPool,
+    ledger: ExternalCallerDeletionLedger,
+    replay_complete: CallerDeletionReplayComplete,
 }
 
 impl PgReadinessProbe {
-    #[must_use]
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(
+        runtime_pool: PgPool,
+        ledger: ExternalCallerDeletionLedger,
+        replay_complete: CallerDeletionReplayComplete,
+    ) -> Result<Self, PgReadinessFailure> {
+        if !replay_complete.belongs_to(&ledger) {
+            return Err(PgReadinessFailure::ReplayLedgerMismatch);
+        }
+
+        Ok(Self {
+            runtime_pool,
+            ledger,
+            replay_complete,
+        })
     }
 
-    /// Returns ready only when PostgreSQL answers and its applied migration
-    /// history exactly matches this binary's embedded migration files.
-    ///
-    /// The probe does not run migrations, acquire tenant context, or expose
-    /// connection details and SQL diagnostics in its result.
+    /// Returns the exact authoritative ledger used by restore and readiness.
+    #[must_use]
+    pub fn deletion_ledger(&self) -> ExternalCallerDeletionLedger {
+        self.ledger.clone()
+    }
+
+    /// Returns the exact Runtime pool whose database was replayed and checked.
+    #[must_use]
+    pub fn runtime_pool(&self) -> PgPool {
+        self.runtime_pool.clone()
+    }
+
+    /// Returns ready only when both databases and their migration histories
+    /// match this binary, the RT-061 SQL contract is installed, and replay is
+    /// complete. The probe never runs migrations or exposes SQL diagnostics.
     pub async fn check(&self) -> Result<(), PgReadinessFailure> {
-        sqlx::query_scalar::<_, i32>("SELECT 1")
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
-
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
-        let migrator = Migrator::new(path)
-            .await
-            .map_err(|_| PgReadinessFailure::MigrationMismatch)?;
-
-        let applied: Vec<(i64, Vec<u8>, bool)> = match sqlx::query_as(
-            "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version",
+        check_database_and_migrations(
+            &self.runtime_pool,
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations"),
         )
-        .fetch_all(&self.pool)
         .await
-        {
-            Ok(rows) => rows,
-            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42P01") => {
-                return Err(PgReadinessFailure::MigrationMismatch);
-            }
-            Err(_) => return Err(PgReadinessFailure::DatabaseUnavailable),
-        };
+        .map_err(|failure| match failure {
+            PgReadinessFailure::DatabaseUnavailable => PgReadinessFailure::DatabaseUnavailable,
+            _ => PgReadinessFailure::MigrationMismatch,
+        })?;
 
-        let expected = migrator
-            .iter()
-            .map(|migration| (migration.version, migration.checksum.as_ref().to_vec()))
-            .collect::<Vec<_>>();
+        check_runtime_caller_deletion_contract(&self.runtime_pool).await?;
 
-        if migration_state_matches(&expected, &applied) {
-            Ok(())
-        } else {
-            Err(PgReadinessFailure::MigrationMismatch)
+        // Release the session-level replay lock before acquiring a second
+        // Control-plane pool connection. This also works with max_connections=1.
+        self.replay_complete
+            .activate(&self.runtime_pool)
+            .await
+            .map_err(|_error: CallerDeletionReplayError| {
+                PgReadinessFailure::RestoreReplayIncomplete
+            })?;
+
+        check_database_and_migrations(
+            self.ledger.pool(),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("control_plane_migrations"),
+        )
+        .await
+        .map_err(|failure| match failure {
+            PgReadinessFailure::DatabaseUnavailable => PgReadinessFailure::ControlPlaneUnavailable,
+            _ => PgReadinessFailure::ControlPlaneMigrationMismatch,
+        })?;
+
+        Ok(())
+    }
+}
+
+async fn check_runtime_caller_deletion_contract(pool: &PgPool) -> Result<(), PgReadinessFailure> {
+    let contract_ready = sqlx::query_scalar::<_, bool>(
+        r#"SELECT
+            to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)') IS NOT NULL
+            AND to_regprocedure('qembed_crypto.erase_caller_data(uuid,uuid)') IS NOT NULL
+            AND to_regprocedure('qembed_crypto.erase_caller_data_verified(uuid,uuid)') IS NOT NULL
+            AND to_regprocedure('qembed_crypto.caller_deletion_schema_version()') IS NOT NULL
+            AND qembed_crypto.caller_deletion_schema_version() = 3
+            AND COALESCE(
+                has_function_privilege(
+                    current_user,
+                    to_regprocedure('qembed_crypto.request_caller_deletion(uuid,uuid)'),
+                    'EXECUTE'
+                ),
+                FALSE
+            )
+            AND COALESCE(
+                has_function_privilege(
+                    current_user,
+                    to_regprocedure('qembed_crypto.caller_deletion_schema_version()'),
+                    'EXECUTE'
+                ),
+                FALSE
+            )
+            AND COALESCE(
+                has_function_privilege(
+                    current_user,
+                    to_regprocedure('qembed_crypto.erase_caller_data(uuid,uuid)'),
+                    'EXECUTE'
+                ),
+                FALSE
+            )"#,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
+
+    if contract_ready {
+        Ok(())
+    } else {
+        Err(PgReadinessFailure::RuntimeDeletionSchemaMismatch)
+    }
+}
+
+async fn check_database_and_migrations(
+    pool: &PgPool,
+    migrations_path: std::path::PathBuf,
+) -> Result<(), PgReadinessFailure> {
+    sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(pool)
+        .await
+        .map_err(|_| PgReadinessFailure::DatabaseUnavailable)?;
+
+    let migrator = Migrator::new(migrations_path)
+        .await
+        .map_err(|_| PgReadinessFailure::MigrationMismatch)?;
+
+    let applied: Vec<(i64, Vec<u8>, bool)> = match sqlx::query_as(
+        "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42P01") => {
+            return Err(PgReadinessFailure::MigrationMismatch);
         }
+        Err(_) => return Err(PgReadinessFailure::DatabaseUnavailable),
+    };
+
+    let expected = migrator
+        .iter()
+        .map(|migration| (migration.version, migration.checksum.as_ref().to_vec()))
+        .collect::<Vec<_>>();
+
+    if migration_state_matches(&expected, &applied) {
+        Ok(())
+    } else {
+        Err(PgReadinessFailure::MigrationMismatch)
     }
 }
 

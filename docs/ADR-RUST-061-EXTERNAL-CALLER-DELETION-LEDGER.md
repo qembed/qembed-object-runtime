@@ -32,7 +32,7 @@ It must not store Caller tokens, credentials, names, messages, memories, tool pa
 
 The digest input is domain-separated and tenant-bound:
 
-`HMAC-SHA-256(K_v1, "qembed/caller-deletion/v1" || tenant_uuid_bytes || caller_uuid_bytes)`.
+`HMAC-SHA-256(K_v1, "qembed/caller-deletion/v1" || 0x00 || tenant_uuid_bytes || caller_uuid_bytes)`.
 
 The HMAC key is supplied through deployment secret management, never stored in either PostgreSQL database or in a database backup. The key is required for normal deletion and restore replay. Loss of the key makes the ledger unusable and is therefore a critical recovery failure. Key rotation requires retaining old verification keys and a separate migration/ADR; RUST-061 initially supports the v1 key only.
 
@@ -58,10 +58,10 @@ A Runtime restore is a maintenance operation, not a normal service start:
 2. Connect to the mandatory Control-plane and read a consistent snapshot of the complete append-only tombstone set (including its high-water mark).
 3. Reconcile every tombstone against Caller identities in the restored Runtime database using the retained HMAC key. For each match, re-apply Caller revocation and idempotently erase all Caller-derived rows.
 4. Verify that every tombstone in the snapshot has been processed and that no matching Caller-derived rows remain.
-5. Re-check the Control-plane high-water mark. If it advanced during replay, repeat until caught up.
-6. Record the completed replay watermark in Runtime restore state and only then allow readiness to become true.
+5. Re-check the Control-plane high-water mark while holding a session-level advisory lock that blocks all tombstone writers. A mismatch is a replay failure; it must never be ignored.
+6. Return a private replay-complete capability that retains this lock. The first successful readiness check releases it. The API composition root cannot construct a readiness probe without this capability.
 
-The restore/replay implementation must use a narrowly privileged database capability for cross-tenant reconciliation. It must not weaken ordinary tenant RLS or grant the normal Runtime application role unrestricted cross-tenant access.
+The restore/replay implementation uses a separate Runtime-database login that inherits only the `qembed_restore` role. That role can execute the HMAC replay function but has no direct table access. It must not weaken ordinary tenant RLS or grant the normal Runtime application role unrestricted cross-tenant access. The replay function verifies that revocation is present and that messages, episodic memories, idempotency rows, encrypted tool payloads, and terminal tool outputs/expiry metadata are absent before it reports success. If an invocation or tool execution is still non-terminal, replay requests cancellation and fails closed; startup remains not ready until the work reaches a terminal state and replay is retried.
 
 ## Availability and readiness
 
@@ -69,12 +69,14 @@ The restore/replay implementation must use a narrowly privileged database capabi
 - Liveness remains independent of database availability.
 - No automatic downgrade to local storage is permitted.
 - Control-plane requires independent HA, backups/PITR, restricted credentials, and tested recovery. Replication alone is not a backup.
+- Startup rejects Runtime and Control-plane connections that identify the same PostgreSQL server instance; a second database/schema on the Runtime cluster is insufficient.
+- The Control-plane connection must support session-level advisory locks. Direct PostgreSQL connections or session-pooling proxies are supported; transaction-pooling proxies are not.
 - If both the Control-plane and all of its recoverable backups are lost, the anti-resurrection guarantee cannot be established. This is an explicit infrastructure-level critical dependency.
 
 ## Consequences
 
 - The service needs a second PostgreSQL pool and a dedicated Control-plane schema/migration lifecycle.
-- Deployment configuration must provide `CONTROL_PLANE_DATABASE_URL` and the v1 HMAC secret.
+- Deployment configuration must provide `CONTROL_PLANE_DATABASE_URL`, `RESTORE_DATABASE_URL` (a restricted Runtime login), and the v1 HMAC secret.
 - Runtime readiness includes both databases and the restore replay barrier.
 - Caller deletion and restore replay become explicitly fail-closed operations.
 - The canonical SQL repository must define the external ledger schema and the narrowly privileged Runtime reconciliation capability; the Rust repository implements the adapters and orchestration.

@@ -8,12 +8,13 @@ fi
 
 compose=(docker compose --project-name qembed-rust-test --file compose.test.yaml)
 export DATABASE_URL="${DATABASE_URL:-postgres://qembed_test:qembed_test@127.0.0.1:55432/qembed_test}"
+export CONTROL_PLANE_DATABASE_URL="${CONTROL_PLANE_DATABASE_URL:-postgres://qembed_test:qembed_test@127.0.0.1:55433/qembed_control_plane_test}"
 export NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 export VALKEY_URL="${VALKEY_URL:-redis://127.0.0.1:56379/}"
 evidence_dir="${TEST_EVIDENCE_DIR:-target/test-evidence}"
 # Pin the exact SQL candidate used for the cross-repository integration test.
 # Update when qembed-sql advances its canonical signed-context migration candidate.
-qsa003_sql_commit="571507f645d3cf275ae6c58ac821f9fd820b7513"
+qsa003_sql_commit="a8f5158f5afab7cf465c9bbe5e7ff1dc59e8daf0"
 sql_repo_dir="${TMPDIR:-/tmp}/qembed-sql-qsa003-${qsa003_sql_commit}"
 
 mkdir -p "$evidence_dir"
@@ -119,7 +120,10 @@ for sql_file in \
   tests/qsa003_signed_context_seed.sql \
   migrations/rt050_signed_context_rls.sql \
   migrations/rt059_anonymous_context_v2.sql \
-  migrations/rt060_anonymous_object_caller.sql; do
+  migrations/rt060_anonymous_object_caller.sql \
+  migrations/rt061_runtime_caller_erasure.sql \
+  migrations/rt061b_verified_caller_erasure.sql \
+  migrations/rt061c_cancelled_tool_execution_erasure.sql; do
   "${compose[@]}" cp "$sql_repo_dir/$sql_file" "postgres:/tmp/$(basename "$sql_file")"
   psql_in_test_db -f "/tmp/$(basename "$sql_file")"
 done
@@ -138,3 +142,9 @@ done
 # the C/libsodium extension and canonical RLS/Anonymous Caller policies.
 cargo test -p qembed-store --test context_issuer_postgres -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/qsa003-rust-contextissuer-canonical.log"
+
+# RUST-061 uses the same canonical Runtime schema plus the mandatory external
+# Control-plane database. The test proves revoke -> external tombstone -> erase
+# ordering and repeated deletion idempotency through the Rust Store adapter.
+cargo test -p qembed-store --test caller_deletion_postgres -- --ignored --test-threads=1 2>&1 \
+  | tee "$evidence_dir/rust-061-caller-deletion-canonical.log"

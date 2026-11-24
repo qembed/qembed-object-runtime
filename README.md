@@ -138,6 +138,22 @@ docker compose --project-name qembed-rust-test --file compose.test.yaml down --v
 
 The migration runner is deliberately separate from normal application startup.
 
+## Run Control-plane migrations explicitly
+
+The mandatory external deletion ledger has its own migration history and must
+be migrated independently from Runtime PostgreSQL:
+
+```bash
+CONTROL_PLANE_MIGRATION_DATABASE_URL=postgres://... cargo run -p qembed-store --bin qembed-control-plane-migrate
+```
+
+This command applies only the Control-plane SQLx migration set. It does not
+apply Runtime schema changes or the qembed-sql Runtime erasure functions. The
+migration URL must target the dedicated Control-plane cluster and use a
+migration identity with the privileges required to create the schema, role,
+table, sequence, and triggers. Keep it separate from
+`CONTROL_PLANE_DATABASE_URL`, which is the restricted application login.
+
 
 ## Invocation identity and atomic begin
 
@@ -161,3 +177,77 @@ provider calls.
 ## Health and readiness
 
 The API exposes process liveness and dependency readiness checks. Readiness verifies PostgreSQL connectivity and exact SQLx migration-history agreement without applying migrations. See [health checks](docs/HEALTH_CHECKS.md) for endpoint and response contracts.
+
+
+## External Caller deletion ledger (RUST-061)
+
+The Caller deletion ledger is mandatory and lives in a dedicated Control-plane
+PostgreSQL cluster, independent from the Runtime database and its backup
+lifecycle. There is no Runtime-local fallback.
+
+Deployment must provide:
+
+- `DATABASE_URL` — Runtime PostgreSQL.
+- `CONTROL_PLANE_DATABASE_URL` — dedicated Control-plane PostgreSQL.
+- `CALLER_DELETION_HMAC_KEY` — 32-byte v1 HMAC secret encoded as exactly
+  64 hexadecimal characters and supplied by secret management. Never store it
+  in either database or a database backup; retain it for the lifetime of all
+  v1 tombstones.
+- `RESTORE_DATABASE_URL` — Runtime-database login that inherits only the
+  restricted `qembed_restore` role. It is used by the pre-start replay step,
+  not by normal request handling.
+
+Apply Control-plane migrations explicitly, separately from Runtime migrations:
+
+```bash
+CONTROL_PLANE_DATABASE_URL=postgres://... cargo run -p qembed-store --bin qembed-control-plane-migrate
+```
+
+Before composing the API router on every start, run
+`PgCallerDeletionRestore::new(restore_pool, ledger).run()` using the
+`RESTORE_DATABASE_URL` pool and pass its returned
+`CallerDeletionReplayComplete` capability to
+`PgReadinessProbe::new(runtime_pool, ledger, replay_complete)`.
+The replay process holds a Control-plane advisory lock until the first
+successful readiness check, closing the race between the replay high-water
+check and traffic admission.
+
+The application readiness probe requires both Runtime and Control-plane
+PostgreSQL to be reachable, both migration histories to match exactly, and the
+replay capability to be successfully activated. Startup rejects Runtime and
+Control-plane connections that identify the same PostgreSQL server instance.
+The Control-plane URL must use a direct PostgreSQL connection or a
+session-pooling proxy: transaction-pooling proxies do not preserve the
+session-level advisory lock used to close the replay/write race. Liveness
+remains independent. A missing Control-plane pool or missing replay
+capability is not a supported configuration.
+
+Provision application logins as members of the corresponding restricted roles,
+not as database owners or superusers. For example, after applying the SQL
+migrations, create separate login roles and grant only the intended group role:
+
+```sql
+CREATE ROLE qembed_control_plane_app LOGIN INHERIT PASSWORD '...';
+GRANT qembed_control_plane_runtime TO qembed_control_plane_app;
+
+CREATE ROLE qembed_restore_app LOGIN INHERIT PASSWORD '...';
+GRANT qembed_restore TO qembed_restore_app;
+```
+
+Use `qembed_control_plane_app` in `CONTROL_PLANE_DATABASE_URL` and
+`qembed_restore_app` in `RESTORE_DATABASE_URL`. Do not grant either login
+membership in `qembed_runtime`, `qembed_admin`, or a superuser role.
+
+The SQL contract is maintained in
+[`qembed/qembed-sql`](https://github.com/qembed/qembed-sql):
+`migrations/rt061_control_plane_caller_deletion_ledger.sql` plus
+`migrations/rt061a_control_plane_tombstone_sequence_lock.sql` provision the
+external tombstone store and serialize sequence assignment. The
+`migrations/rt061_runtime_caller_erasure.sql` migration installs tenant-scoped
+deletion and execute-only restore functions in Runtime.
+Apply both to their respective databases. The Rust workspace keeps the
+Control-plane SQLx migration for isolated integration tests and explicit
+deployment migration execution.
+
+The local `deletion_ledger` present in the canonical Runtime schema is not
+consulted by the Rust adapter and must never be used as a fallback.
