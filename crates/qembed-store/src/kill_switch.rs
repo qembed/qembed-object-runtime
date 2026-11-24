@@ -1,4 +1,5 @@
 //! PostgreSQL adapter for the canonical hierarchical kill-switch table.
+
 use std::{fmt, str::FromStr};
 
 use qembed_domain::{
@@ -29,7 +30,9 @@ pub struct PgKillSwitchStore {
 
 impl PgKillSwitchStore {
     #[must_use]
-    pub fn new(context: PgContext) -> Self { Self { context } }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
+    }
 }
 
 #[derive(Debug)]
@@ -43,10 +46,17 @@ pub enum KillSwitchStoreError {
 impl fmt::Display for KillSwitchStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Context(error) => write!(formatter, "kill-switch context initialization failed: {error}"),
+            Self::Context(error) => write!(
+                formatter,
+                "kill-switch context initialization failed: {error}"
+            ),
             Self::Database(error) => write!(formatter, "kill-switch query failed: {error}"),
-            Self::TenantMismatch => formatter.write_str("kill-switch context tenant differs from authenticated Scope"),
-            Self::InvalidPersistedValue(field) => write!(formatter, "persisted kill switch has invalid {field}"),
+            Self::TenantMismatch => {
+                formatter.write_str("kill-switch context tenant differs from authenticated Scope")
+            }
+            Self::InvalidPersistedValue(field) => {
+                write!(formatter, "persisted kill switch has invalid {field}")
+            }
         }
     }
 }
@@ -62,11 +72,15 @@ impl std::error::Error for KillSwitchStoreError {
 }
 
 impl From<crate::ContextTransactionError> for KillSwitchStoreError {
-    fn from(error: crate::ContextTransactionError) -> Self { Self::Context(error) }
+    fn from(error: crate::ContextTransactionError) -> Self {
+        Self::Context(error)
+    }
 }
 
 impl From<sqlx::Error> for KillSwitchStoreError {
-    fn from(error: sqlx::Error) -> Self { Self::Database(error) }
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
 }
 
 impl KillSwitchStore for PgKillSwitchStore {
@@ -108,9 +122,13 @@ fn reconstitute_switch(row: KillSwitchRow) -> Result<KillSwitch, KillSwitchStore
     let object_id = parse_optional_id::<ObjectId>(row.object_id, "object_id")?;
     let tool_id = parse_optional_id::<ToolId>(row.tool_id, "tool_id")?;
     let scope = match row.scope_type.as_str() {
-        "platform" if tenant_id.is_none() && object_id.is_none() && tool_id.is_none() => KillSwitchScope::Platform,
+        "platform" if tenant_id.is_none() && object_id.is_none() && tool_id.is_none() => {
+            KillSwitchScope::Platform
+        }
         "tenant" if tenant_id.is_some() && object_id.is_none() && tool_id.is_none() => {
-            KillSwitchScope::Tenant { tenant_id: tenant_id.expect("checked above") }
+            KillSwitchScope::Tenant {
+                tenant_id: tenant_id.expect("checked above"),
+            }
         }
         "object" if tenant_id.is_some() && object_id.is_some() && tool_id.is_none() => {
             KillSwitchScope::Object {
@@ -122,7 +140,11 @@ fn reconstitute_switch(row: KillSwitchRow) -> Result<KillSwitch, KillSwitchStore
             tenant_id,
             tool_id: tool_id.expect("checked above"),
         },
-        _ => return Err(KillSwitchStoreError::InvalidPersistedValue("scope identity")),
+        _ => {
+            return Err(KillSwitchStoreError::InvalidPersistedValue(
+                "scope identity",
+            ));
+        }
     };
     Ok(KillSwitch::new(scope, row.enabled, row.reason))
 }
@@ -131,5 +153,11 @@ fn parse_optional_id<T: FromStr>(
     value: Option<String>,
     field: &'static str,
 ) -> Result<Option<T>, KillSwitchStoreError> {
-    value.map(|value| value.parse().map_err(|_| KillSwitchStoreError::InvalidPersistedValue(field))).transpose()
+    value
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|_| KillSwitchStoreError::InvalidPersistedValue(field))
+        })
+        .transpose()
 }
