@@ -444,18 +444,18 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: две независимые PostgreSQL sessions одновременно резервируют один оставшийся daily budget — ровно одна транзакция проходит; конкурентный одинаковый idempotency key даёт один Created и один Replay; downstream failure после reservation откатывает reservation и оба счётчика.
   - DoD: совокупный consumed + reserved usage не превышает effective object/caller budget; replay не создаёт вторую reservation.
 
-- [ ] **RUST-058 (S)** Реализовать distributed rate limiting и pool isolation.
+- [x] **RUST-058 (S)** Реализовать distributed rate limiting и pool isolation.
   - SQL dependencies: QSA-003 qctx2 verifier/accessors merged in `qembed-sql` PR #83; RT-060 Object-scoped Anonymous Caller provisioning merged in PR #85. These migrations are prerequisites for the Rust Anonymous transaction path.
   - Старый Rust PR #90 признан устаревшим: он расходился с актуальным `main`, подключал только Owner, строил Authenticated key по Caller и списывал token до разрешения idempotency. Не продолжать эту ветку; реализация начинается от актуального `main`.
   - Разбиение: RUST-058a — domain/runtime contracts и trusted key provenance; RUST-058b — Valkey atomic Token Bucket adapter и independent-connection concurrency; RUST-058c — SQL-backed Principal/Owner invocation identity, Owner и Principal HTTP admission classes и replay-aware idempotency ordering; RUST-058d — signed qctx2 Anonymous context, Object-scoped Caller, server-derived fingerprint, public HTTP route, fingerprint-isolated rate/idempotency admission, structured observability и acceptance suite.
   - Архитектура и границы: `docs/ADR-RUST-058-DISTRIBUTED-RATE-LIMITING.md`. PostgreSQL `InvocationPool`/token-budget reservations остаются durable accounting; Valkey хранит только ephemeral request-throttling state. Anonymous не получает synthetic Principal; Caller стабилен на уровне Object, а fingerprint изолирует конкретного peer для rate limit и idempotency.
   - DoD: все три класса подключены к invocation surface; Authenticated quota привязана к trusted Principal, не Caller; Anonymous не принимает Principal/Caller ID из DTO; completed/concurrent idempotent replay не списывает повторный token; Valkey outage остаётся fail-open без локального fallback и наблюдаем через structured telemetry; independent Valkey workers подтверждают общий bucket state; PostgreSQL 19/HTTP/Valkey CI green.
 
-- [ ] **RUST-059 (M)** Реализовать hierarchical kill-switch evaluation.
+- [x] **RUST-059 (M)** Реализовать hierarchical kill-switch evaluation.
   - Тесты: unit на precedence Platform/Tenant/Object/Tool; integration — disabled scope блокирует действие до side effect.
   - DoD: проверка выполняется непосредственно перед разрешённым execution path.
 
-- [ ] **RUST-060 (M)** Реализовать cancellation propagation в worker orchestration.
+- [x] **RUST-060 (M)** Реализовать cancellation propagation в worker orchestration.
   - Тесты: integration — cancel до старта, во время ожидания, между шагами; после принятой отмены новые tool calls не стартуют.
   - DoD: cancellation распространяется на все последующие шаги.
 
