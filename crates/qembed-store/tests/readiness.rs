@@ -1,27 +1,61 @@
 mod common;
 
-use qembed_store::{PgReadinessFailure, PgReadinessProbe, run_migrations};
+use qembed_store::{
+    PgReadinessFailure, PgReadinessProbe, external_deletion_ledger::run_control_plane_migrations,
+    run_migrations,
+};
 
 #[tokio::test]
-async fn reports_ready_when_postgres_and_migration_history_match() {
-    let pool = common::connect().await;
-    run_migrations(&pool)
+async fn reports_ready_only_when_both_postgres_clusters_and_migrations_match() {
+    let runtime_pool = common::connect().await;
+    let control_plane_pool = common::connect_control_plane().await;
+    run_migrations(&runtime_pool)
         .await
-        .expect("test database migrations should be applicable");
+        .expect("Runtime migrations should be applicable");
+    run_control_plane_migrations(&control_plane_pool)
+        .await
+        .expect("Control-plane migrations should be applicable");
 
-    let probe = PgReadinessProbe::new(pool.clone());
+    let probe = PgReadinessProbe::new(runtime_pool.clone(), control_plane_pool.clone());
     assert_eq!(probe.check().await, Ok(()));
-    pool.close().await;
+    runtime_pool.close().await;
+    control_plane_pool.close().await;
 }
 
 #[tokio::test]
-async fn reports_database_unavailable_when_pool_is_closed() {
-    let pool = common::connect().await;
-    pool.close().await;
+async fn reports_runtime_database_unavailable_when_runtime_pool_is_closed() {
+    let runtime_pool = common::connect().await;
+    let control_plane_pool = common::connect_control_plane().await;
+    run_migrations(&runtime_pool)
+        .await
+        .expect("Runtime migrations should be applicable");
+    run_control_plane_migrations(&control_plane_pool)
+        .await
+        .expect("Control-plane migrations should be applicable");
+    runtime_pool.close().await;
 
-    let probe = PgReadinessProbe::new(pool);
+    let probe = PgReadinessProbe::new(runtime_pool, control_plane_pool);
     assert_eq!(
         probe.check().await,
         Err(PgReadinessFailure::DatabaseUnavailable)
+    );
+}
+
+#[tokio::test]
+async fn reports_control_plane_unavailable_when_external_ledger_pool_is_closed() {
+    let runtime_pool = common::connect().await;
+    let control_plane_pool = common::connect_control_plane().await;
+    run_migrations(&runtime_pool)
+        .await
+        .expect("Runtime migrations should be applicable");
+    run_control_plane_migrations(&control_plane_pool)
+        .await
+        .expect("Control-plane migrations should be applicable");
+    control_plane_pool.close().await;
+
+    let probe = PgReadinessProbe::new(runtime_pool, control_plane_pool);
+    assert_eq!(
+        probe.check().await,
+        Err(PgReadinessFailure::ControlPlaneUnavailable)
     );
 }
