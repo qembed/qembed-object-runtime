@@ -459,9 +459,12 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: integration — cancel до старта, во время ожидания, между шагами; после принятой отмены новые tool calls не стартуют.
   - DoD: cancellation распространяется на все последующие шаги.
 
-- [ ] **RUST-061 (M)** Реализовать caller deletion ledger и restore replay.
-  - Тесты: integration — delete, повторный delete, restore replay, повторное удаление caller-derived data.
-  - DoD: erased caller data не восстанавливаются при restore.
+- [ ] **RUST-061 (M)** Реализовать обязательный External Caller Deletion Ledger и restore replay. Локального ledger/fallback режима нет.
+  - Архитектура: `docs/ADR-RUST-061-EXTERNAL-CALLER-DELETION-LEDGER.md`. Control-plane PostgreSQL — отдельный кластер и единственный authoritative источник append-only HMAC tombstones; `CONTROL_PLANE_DATABASE_URL` и v1 HMAC secret обязательны.
+  - Протокол: Runtime сначала отзывает Caller (без физического удаления), затем фиксирует tombstone в Control-plane, после durable acknowledgement очищает Caller-derived data. Ошибки оставляют Caller revoked и deletion job retryable; local fallback запрещён.
+  - Restore: readiness/traffic закрыты до полного replay внешнего ledger, проверки отсутствия Caller-derived rows и достижения стабильного high-water mark. Для replay используется узко привилегированная cross-tenant capability без ослабления обычного RLS.
+  - Тесты: integration — delete, повторный delete, отказ/потеря Control-plane, crash points протокола, восстановление старого Runtime backup и replay до readiness.
+  - DoD: erased Caller data не возвращаются после restore; Control-plane недоступность не приводит к downgrade или открытию traffic.
 
 - [ ] **RUST-062 (S)** Реализовать reservation sweeper.
   - Тесты: deterministic clock; повторный запуск; параллельные sweeper; counters не обновляются дважды.
