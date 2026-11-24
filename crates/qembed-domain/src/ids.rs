@@ -85,6 +85,7 @@ define_id!(EventId);
 define_id!(MessageId);
 define_id!(CommandId);
 define_id!(ToolExecutionId);
+define_id!(ToolId);
 define_id!(TaskId);
 
 #[cfg(test)]
