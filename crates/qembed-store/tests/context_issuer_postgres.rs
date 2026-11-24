@@ -3,7 +3,6 @@ use std::time::Duration;
 use qembed_domain::test_support::scope_for_tenant;
 use qembed_domain::{
     anonymous::AnonymousContext,
-    caller::InvocationPool,
     ids::{CallerId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId},
     ports::{
         AnonymousInvocationStartCommand, AnonymousInvocationStartStore,
@@ -874,16 +873,6 @@ async fn seed_public_object(pool: &PgPool, tenant_id: TenantId, object_id: Objec
     .execute(pool)
     .await
     .expect("immutable snapshot fixture should be inserted");
-
-    sqlx::query(
-        "INSERT INTO knowledge_revisions (tenant_id, object_id, current_revision) \
-         VALUES ($1::uuid, $2::uuid, 7)",
-    )
-    .bind(tenant_id.to_string())
-    .bind(object_id.to_string())
-    .execute(pool)
-    .await
-    .expect("knowledge revision fixture should be inserted");
 
     sqlx::query(
         "INSERT INTO object_budgets \
