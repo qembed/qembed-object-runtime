@@ -98,3 +98,12 @@ copied into this Rust migration chain: the SQL repository remains their single
 source of truth. `scripts/test-postgres.sh` pins the merged SQL revision and
 applies RT-059/RT-060 to the canonical integration database before running the
 qctx2 PostgreSQL tests.
+
+
+The RUST-059 kill-switch adapter reads the canonical `kill_switches` table
+from `qembed-sql`. It intentionally adds no Rust-owned copy of that table:
+scope constraints, management-authority enforcement, grants and RLS remain
+defined by the canonical SQL schema. Runtime evaluation is deny-dominant:
+any matching disabled Platform, Tenant, Object or Tool switch blocks the
+side effect before it starts; lower-level enabled switches cannot override
+an ancestor disable.
