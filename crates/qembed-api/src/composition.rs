@@ -682,13 +682,16 @@ pub fn configure_owner_routes_with_rate_limit(
 
 /// Composes the HTTP surface with mandatory distributed Owner invocation admission.
 pub fn api_router(
-    pool: PgPool,
-    context: PgContext,
     probe: PgReadinessProbe,
+    context_issuer: ContextIssuer,
     rate_limit_store: ValkeyRateLimitStore,
     rate_limit_policies: RateLimitPolicies,
     anonymous_fingerprint_key: AnonymousFingerprintKey,
 ) -> Router {
+    // API adapters are constructed from the exact Runtime pool whose restore
+    // replay is represented by the mandatory readiness capability.
+    let pool = probe.runtime_pool();
+    let context = PgContext::new(pool.clone(), context_issuer);
     let principal_backend = PgPrincipalApiBackend {
         pool: pool.clone(),
         context: context.clone(),
