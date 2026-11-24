@@ -8,7 +8,6 @@ use qembed_domain::{
     kill_switch::{
         KillSwitch, KillSwitchAuthority, KillSwitchContext, KillSwitchScope, KillSwitchStore,
     },
-    scope::Scope,
 };
 
 type KillSwitchRow = (
