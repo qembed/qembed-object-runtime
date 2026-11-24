@@ -15,6 +15,7 @@ pub mod caller;
 pub mod caller_delegation;
 mod cas;
 pub mod context_issuer;
+pub mod external_deletion_ledger;
 mod event_outbox;
 pub mod idempotency;
 pub mod invocation_cancellation;
