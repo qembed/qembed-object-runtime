@@ -24,7 +24,7 @@ PostgreSQL is the source of truth for work and business state. JetStream is a du
 ## Test execution
 
 - Normal workspace integration tests exercise the NATS connect failure, claim/publish, lost-PubAck, receipt-write, consumer ACK, and Unknown recovery cases against PostgreSQL 19 and real JetStream.
-- `scripts/test-postgres.sh` runs the destructive NATS restart tests serially after the workspace suite. The broker-loss test removes and recreates only the NATS container (its JetStream data directory is in the container writable layer); PostgreSQL remains running and is not reset.
+- `scripts/test-postgres.sh` runs the destructive NATS restart tests serially after the workspace suite. The broker-loss test removes and recreates only the NATS container and any anonymous volumes attached to it; PostgreSQL remains running and is not reset.
 - The destructive test has a cleanup guard that recreates the NATS service if the test unwinds.
 - The broker-loss test creates two stale Received invocations with provider attempts explicitly `NotStarted`: it delivers one message without ACK, leaves the other undelivered, removes the broker container, runs the real `PgInvocationRecoverySweeper`, republishes both original Outbox identities, and verifies two receipt-history entries per delivery and delivery to the replacement durable consumer.
 
