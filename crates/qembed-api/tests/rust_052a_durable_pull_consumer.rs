@@ -357,7 +357,6 @@ async fn duplicate_jetstream_delivery_after_commit_has_one_postgres_effect() {
         .expect("test marker is cleaned up");
 }
 
-
 #[tokio::test]
 async fn consumer_worker_process_entrypoint() {
     let Ok(subject) = std::env::var("RUST_064_CONSUMER_SUBJECT") else {
@@ -415,7 +414,11 @@ async fn consumer_worker_process_entrypoint() {
         .expect("valid retry policy"),
     );
     let outcome = consumer
-        .process_batch(&CommitHandler { pool: pool.clone() }, 1, Duration::from_secs(2))
+        .process_batch(
+            &CommitHandler { pool: pool.clone() },
+            1,
+            Duration::from_secs(2),
+        )
         .await
         .expect("replacement worker processes the unacknowledged delivery");
     assert_eq!(outcome.received, 1);
