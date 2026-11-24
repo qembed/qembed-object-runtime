@@ -559,7 +559,11 @@ async fn delete_caller(
         Ok(v) => v,
         Err(error) => return credential_error(error),
     };
-    match state.backend.delete_caller(tenant_id, token, caller_id).await {
+    match state
+        .backend
+        .delete_caller(tenant_id, token, caller_id)
+        .await
+    {
         Ok(response) if response.status == "done" => {
             (StatusCode::OK, Json(response)).into_response()
         }
