@@ -221,6 +221,22 @@ session-level advisory lock used to close the replay/write race. Liveness
 remains independent. A missing Control-plane pool or missing replay
 capability is not a supported configuration.
 
+Provision application logins as members of the corresponding restricted roles,
+not as database owners or superusers. For example, after applying the SQL
+migrations, create separate login roles and grant only the intended group role:
+
+```sql
+CREATE ROLE qembed_control_plane_app LOGIN INHERIT PASSWORD '...';
+GRANT qembed_control_plane_runtime TO qembed_control_plane_app;
+
+CREATE ROLE qembed_restore_app LOGIN INHERIT PASSWORD '...';
+GRANT qembed_restore TO qembed_restore_app;
+```
+
+Use `qembed_control_plane_app` in `CONTROL_PLANE_DATABASE_URL` and
+`qembed_restore_app` in `RESTORE_DATABASE_URL`. Do not grant either login
+membership in `qembed_runtime`, `qembed_admin`, or a superuser role.
+
 The SQL contract is maintained in
 [`qembed/qembed-sql`](https://github.com/qembed/qembed-sql):
 `migrations/rt061_control_plane_caller_deletion_ledger.sql` plus
