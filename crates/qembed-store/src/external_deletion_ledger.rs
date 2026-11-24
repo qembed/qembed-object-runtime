@@ -376,12 +376,12 @@ async fn cluster_identity_from_pool(pool: &PgPool) -> Result<PostgresClusterIden
 }
 
 async fn cluster_identity_from_connection(
-    connection: &mut PoolConnection<Postgres>,
+    connection: &mut PgConnection,
 ) -> Result<PostgresClusterIdentity, sqlx::Error> {
     let (database_name, postmaster_start_time) = sqlx::query_as(
         "SELECT current_database(), to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')",
     )
-    .fetch_one(&mut **connection)
+    .fetch_one(&mut *connection)
     .await?;
     Ok(PostgresClusterIdentity {
         database_name,
@@ -396,7 +396,7 @@ async fn cluster_identity_from_connection(
 /// high-water check and admitting Runtime traffic.
 #[derive(Clone)]
 pub struct CallerDeletionReplayComplete {
-    connection: Arc<tokio::sync::Mutex<Option<PoolConnection<Postgres>>>>,
+    connection: Arc<tokio::sync::Mutex<Option<PgConnection>>>,
     activated: Arc<AtomicBool>,
     high_water_mark: i64,
     ledger_identity: Arc<()>,
@@ -542,9 +542,18 @@ impl PgCallerDeletionRestore {
             return Err(CallerDeletionReplayError::RestoreRoleRequired);
         }
 
-        let mut control_plane_connection = self.ledger.pool.acquire().await.map_err(|error| {
-            CallerDeletionReplayError::Ledger(CallerDeletionLedgerError::Database(error))
-        })?;
+        // Detach the session from the pool. Dropping the replay capability must
+        // close this connection (and release its session advisory lock), not
+        // return a still-locked session to the pool.
+        let mut control_plane_connection = self
+            .ledger
+            .pool
+            .acquire()
+            .await
+            .map_err(|error| {
+                CallerDeletionReplayError::Ledger(CallerDeletionLedgerError::Database(error))
+            })?
+            .detach();
 
         sqlx::query("SELECT pg_advisory_lock($1)")
             .bind(ADVISORY_LOCK_KEY)
