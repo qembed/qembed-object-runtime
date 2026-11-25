@@ -271,3 +271,138 @@ async fn future_and_cross_tenant_pins_are_rejected() {
 
     pool.close().await;
 }
+
+#[tokio::test]
+async fn pgvector_search_uses_metric_specific_scores_and_materialized_visibility() {
+    use qembed_domain::knowledge_embedding::{
+        EmbeddingDistanceMetric, EmbeddingModelSpec, EmbeddingVector,
+    };
+    use qembed_store::knowledge_retrieval::RetrievalScore;
+
+    let (pool, store, scope, object_id) = setup().await;
+    let visible = insert_chunk(
+        &pool,
+        &scope,
+        object_id,
+        "live",
+        Some(1),
+        None,
+        false,
+        "visible-vector",
+    )
+    .await;
+    let future = insert_chunk(
+        &pool,
+        &scope,
+        object_id,
+        "live",
+        Some(2),
+        None,
+        false,
+        "future-vector",
+    )
+    .await;
+    set_current_revision(&pool, &scope, object_id, 2).await;
+
+    for (model_id, metric) in [
+        ("rust070-cosine", EmbeddingDistanceMetric::Cosine),
+        ("rust070-l2", EmbeddingDistanceMetric::L2),
+        ("rust070-ip", EmbeddingDistanceMetric::InnerProduct),
+    ] {
+        sqlx::query("INSERT INTO embedding_models(id,provider,model_name,dimension,distance_metric,active) VALUES($1,'test',$1,2,$2,false)")
+            .bind(model_id).bind(metric.as_database_value()).execute(&pool).await.expect("model inserted");
+        for (chunk_id, vector) in [(visible.chunk_id, "[1,0]"), (future.chunk_id, "[0,1]")] {
+            sqlx::query("INSERT INTO knowledge_chunk_embeddings(tenant_id,object_id,chunk_id,model_id,embedding) VALUES($1::uuid,$2::uuid,$3::uuid,$4,$5::vector)")
+                .bind(scope.tenant_id().to_string()).bind(object_id.to_string())
+                .bind(chunk_id.to_string()).bind(model_id).bind(vector)
+                .execute(&pool).await.expect("embedding inserted");
+        }
+        let spec = EmbeddingModelSpec::new(model_id, "test", model_id, 2, metric).unwrap();
+        let query = EmbeddingVector::new(model_id, vec![1.0, 0.0]).unwrap();
+        let results = store
+            .search(
+                &scope,
+                PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::new(1)),
+                &spec,
+                &query,
+                1,
+            )
+            .await
+            .expect("pgvector search succeeds");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].chunk().id(), visible.chunk_id);
+        match (metric, results[0].score()) {
+            (EmbeddingDistanceMetric::Cosine, RetrievalScore::Similarity(score)) => {
+                assert!(score > 0.999)
+            }
+            (EmbeddingDistanceMetric::InnerProduct, RetrievalScore::Similarity(score)) => {
+                assert!(score > 0.999)
+            }
+            (EmbeddingDistanceMetric::L2, RetrievalScore::Distance(distance)) => {
+                assert!(distance < 0.001)
+            }
+            _ => panic!("metric score semantics were mixed"),
+        }
+    }
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn pgvector_search_rejects_model_and_dimension_mismatch_and_zero_top_k() {
+    use qembed_domain::knowledge_embedding::{
+        EmbeddingDistanceMetric, EmbeddingModelSpec, EmbeddingVector,
+    };
+    use qembed_store::knowledge_retrieval::PgKnowledgeRetrievalError;
+
+    let (pool, store, scope, object_id) = setup().await;
+    let spec = EmbeddingModelSpec::new(
+        "rust070-validation",
+        "test",
+        "validation",
+        3,
+        EmbeddingDistanceMetric::Cosine,
+    )
+    .unwrap();
+    let wrong_model = EmbeddingVector::new("another-model", vec![1.0, 0.0, 0.0]).unwrap();
+    let mismatch = store
+        .search(
+            &scope,
+            PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::INITIAL),
+            &spec,
+            &wrong_model,
+            1,
+        )
+        .await;
+    assert!(matches!(
+        mismatch,
+        Err(PgKnowledgeRetrievalError::InvalidQueryVector(_))
+    ));
+
+    let wrong_dimension = EmbeddingVector::new("rust070-validation", vec![1.0, 0.0]).unwrap();
+    let mismatch = store
+        .search(
+            &scope,
+            PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::INITIAL),
+            &spec,
+            &wrong_dimension,
+            1,
+        )
+        .await;
+    assert!(matches!(
+        mismatch,
+        Err(PgKnowledgeRetrievalError::InvalidQueryVector(_))
+    ));
+
+    let valid = EmbeddingVector::new("rust070-validation", vec![1.0, 0.0, 0.0]).unwrap();
+    let zero = store
+        .search(
+            &scope,
+            PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::INITIAL),
+            &spec,
+            &valid,
+            0,
+        )
+        .await;
+    assert!(matches!(zero, Err(PgKnowledgeRetrievalError::InvalidTopK)));
+    pool.close().await;
+}

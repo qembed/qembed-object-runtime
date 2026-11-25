@@ -520,9 +520,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: нерелевантные revision rows исключаются до top-k; RUST-070 обязан использовать materialized candidate CTE перед pgvector distance/LIMIT.
   - Evidence: Rust PR [#142](https://github.com/qembed/qembed-object-runtime/pull/142), CI run [#45599402253](https://github.com/qembed/qembed-object-runtime/actions/runs/45599402253) — success (357 passed, 6 skipped).
 
-- [ ] **RUST-070 (M)** Реализовать pgvector query paths.
-  - Тесты: integration на IP/L2/cosine; проверка порядка результатов и размерностей.
-  - DoD: IP similarity = `-dist`; `1-dist` применяется только к cosine.
+- [x] **RUST-070 (M)** Реализовать pgvector query paths.
+  - Реализация: `PgKnowledgeRetrievalStore::search` проверяет model ID и dimension, материализует revision-visible chunks вместе с embeddings и только затем выполняет metric-specific pgvector ordering и LIMIT. Cosine (`<=>`) возвращает `1 - distance`; Inner Product (`<#>`) возвращает `-distance`; L2 (`<->`) возвращает distance без переименования в similarity. Результат типизирован как `RetrievalScore::Similarity` или `RetrievalScore::Distance`.
+  - Тесты: PostgreSQL integration — cosine/L2/IP score semantics, top-k и revision visibility; model ID/dimension mismatch и top-k=0 отклоняются.
+  - DoD: vector ranking применяется только к materialized revision-visible candidate set; metric semantics не смешиваются.
 - [ ] **RUST-071 (M)** Реализовать HNSW index migration support.
   - Тесты: migration integration — `CREATE INDEX CONCURRENTLY` вне транзакции; повторный запуск и recovery после неудачи.
   - DoD: migrator корректно управляет non-transactional index operations.
