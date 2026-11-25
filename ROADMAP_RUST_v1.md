@@ -585,7 +585,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: deterministic resolver fixtures; mixed public/private, empty, malformed и special answers.
   - DoD: весь RRset проверяется; mixed public/private отклоняется.
 
-- [ ] **RUST-082 (L)** Реализовать pinned connect к проверенному IP.
+- [x] **RUST-082 (L)** Реализовать pinned connect к проверенному IP.
   - Тесты: network integration с контролируемым DNS; DNS rebinding test; TLS SNI/hostname verification.
   - DoD: соединение идёт к проверенному IP при сохранении корректной TLS identity.
 
