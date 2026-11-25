@@ -80,9 +80,9 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
     .expect("model-scoped index exists");
 
     sqlx::query(&format!("DROP INDEX CONCURRENTLY public.\"{index_name}\""))
-    .execute(&pool)
-    .await
-    .expect("existing HNSW index is dropped outside a transaction");
+        .execute(&pool)
+        .await
+        .expect("existing HNSW index is dropped outside a transaction");
 
     let fixture = format!("hnsw_failed_build_{}", Uuid::new_v4().simple());
     sqlx::query(&format!(
