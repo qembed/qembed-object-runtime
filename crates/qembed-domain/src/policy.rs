@@ -567,7 +567,7 @@ impl ProposedAction {
             Self::ExternalNetwork { payload_hash, .. } => (4_u8, payload_hash),
         };
         let mut digest = Sha256::new();
-        digest.update(b"qembed.proposed-action.v1\\0");
+        digest.update(b"qembed.proposed-action.v1\0");
         digest.update([class_tag]);
         digest.update(self.object_id().as_uuid().as_bytes());
         digest.update(self.step_index().to_be_bytes());
