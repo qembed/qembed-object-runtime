@@ -82,9 +82,8 @@ impl fmt::Display for KnowledgeRevisionCommitError {
             Self::DuplicateDocumentKey => {
                 formatter.write_str("multiple indexed documents have the same document key")
             }
-            Self::IncompleteIndexing => {
-                formatter.write_str("one or more indexed documents lack chunks or required embeddings")
-            }
+            Self::IncompleteIndexing => formatter
+                .write_str("one or more indexed documents lack chunks or required embeddings"),
             Self::RevisionOutOfRange => {
                 formatter.write_str("persisted knowledge revision is outside the domain range")
             }
@@ -155,14 +154,14 @@ impl PgKnowledgeRepository {
         .fetch_one(transaction.connection())
         .await?;
 
-        let current_value =
-            u64::try_from(current_revision).map_err(|_| KnowledgeRevisionCommitError::RevisionOutOfRange)?;
+        let current_value = u64::try_from(current_revision)
+            .map_err(|_| KnowledgeRevisionCommitError::RevisionOutOfRange)?;
         let previous_revision = RevisionNumber::new(current_value);
         let revision = previous_revision
             .next()
             .map_err(|_| KnowledgeRevisionCommitError::RevisionOverflow)?;
-        let revision_sql =
-            i64::try_from(revision.value()).map_err(|_| KnowledgeRevisionCommitError::RevisionOverflow)?;
+        let revision_sql = i64::try_from(revision.value())
+            .map_err(|_| KnowledgeRevisionCommitError::RevisionOverflow)?;
 
         // RUST-068 owns model lifecycle operations. SHARE prevents concurrent
         // INSERT/UPDATE/DELETE from changing the required active set mid-commit.
@@ -170,11 +169,10 @@ impl PgKnowledgeRepository {
             .execute(transaction.connection())
             .await?;
 
-        let active_models: Vec<String> = sqlx::query_scalar(
-            "SELECT id FROM embedding_models WHERE active ORDER BY id",
-        )
-        .fetch_all(transaction.connection())
-        .await?;
+        let active_models: Vec<String> =
+            sqlx::query_scalar("SELECT id FROM embedding_models WHERE active ORDER BY id")
+                .fetch_all(transaction.connection())
+                .await?;
         if active_models.is_empty() {
             return Err(KnowledgeRevisionCommitError::NoActiveEmbeddingModels);
         }
