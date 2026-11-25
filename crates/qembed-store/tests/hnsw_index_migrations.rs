@@ -52,9 +52,9 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
     .unwrap();
     sqlx::query("INSERT INTO embedding_models(id, dimension, distance_metric) VALUES ($1, $2, $3)")
         .bind(model.id())
-    .bind(i32::try_from(model.dimension()).unwrap())
-    .bind(model.distance_metric().as_database_value())
-    .execute(&pool)
+        .bind(i32::try_from(model.dimension()).unwrap())
+        .bind(model.distance_metric().as_database_value())
+        .execute(&pool)
     .await
     .expect("model metadata inserted");
 
@@ -156,9 +156,10 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
 async fn hnsw_manager_skips_dimensions_outside_pgvector_vector_index_limit() {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set by the test harness");
-    let pool = qembed_store::connect_pool(&database_url, qembed_store::PgPoolConfig::default())
-    .await
-    .expect("PostgreSQL connection opens");
+    let pool =
+        qembed_store::connect_pool(&database_url, qembed_store::PgPoolConfig::default())
+            .await
+            .expect("PostgreSQL connection opens");
     let model = EmbeddingModelSpec::new(
         "rust071-too-wide",
         "test",
