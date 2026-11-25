@@ -1,7 +1,7 @@
 //! Fail-closed validation gate for commands before an executor can see them.
 use std::{error::Error, fmt};
 
-use qembed_domain::{ids::ObjectId, policy::AllowedCommand, ports::ToolBindingStore, scope::Scope};
+use qembed_domain::{policy::AllowedCommand, ports::ToolBindingStore, scope::Scope};
 
 /// A command whose captured Tool binding was revalidated against PostgreSQL.
 #[derive(Debug)]
@@ -44,14 +44,13 @@ impl<E: Error + 'static> Error for BindingValidationError<E> {}
 pub async fn validate_allowed_command_binding<S: ToolBindingStore>(
     store: &S,
     scope: &Scope,
-    object_id: ObjectId,
     command: AllowedCommand,
 ) -> Result<ValidatedAllowedCommand, BindingValidationError<S::Error>> {
     let binding = command
         .tool_binding()
         .ok_or(BindingValidationError::MissingBindingIdentity)?;
     let current = store
-        .is_tool_binding_current(scope, object_id, binding)
+        .is_tool_binding_current(scope, command.object_id(), binding)
         .await
         .map_err(BindingValidationError::Store)?;
     if !current {
