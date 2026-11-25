@@ -377,8 +377,7 @@ fn extract_urls(text: &str) -> BTreeSet<String> {
                 }
                 end += 1;
             }
-            let candidate = text[start..end]
-                .trim_end_matches(['.', ',', ';', ':', '!', '?']);
+            let candidate = text[start..end].trim_end_matches(['.', ',', ';', ':', '!', '?']);
             if !candidate.is_empty() {
                 urls.insert(candidate.to_owned());
             }
@@ -490,7 +489,8 @@ mod tests {
                 },
             ],
         };
-        let duplicate_claim = CitationVerifier::new().verify(&document, std::slice::from_ref(&evidence));
+        let duplicate_claim =
+            CitationVerifier::new().verify(&document, std::slice::from_ref(&evidence));
         assert!(
             duplicate_claim
                 .violations()
