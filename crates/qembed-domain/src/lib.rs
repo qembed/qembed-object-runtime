@@ -119,6 +119,7 @@ pub mod invocation_read;
 pub mod jcs;
 pub mod kill_switch;
 pub mod knowledge;
+pub mod knowledge_ingestion;
 pub mod object;
 pub mod object_validation;
 pub mod object_version;
