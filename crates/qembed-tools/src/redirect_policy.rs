@@ -142,9 +142,7 @@ async fn validate_target<R: DnsResolver>(
     url.set_fragment(None);
 
     if url.scheme() != "http" && url.scheme() != "https" {
-        return Err(RedirectError::UnsupportedScheme(
-            url.scheme().to_owned(),
-        ));
+        return Err(RedirectError::UnsupportedScheme(url.scheme().to_owned()));
     }
 
     if !url.username().is_empty() || url.password().is_some() {
@@ -159,7 +157,9 @@ async fn validate_target<R: DnsResolver>(
         None => return Err(RedirectError::MissingHost),
     };
     let hostname = DnsName::parse(host).map_err(|_| RedirectError::InvalidHostname)?;
-    let port = url.port_or_known_default().ok_or(RedirectError::InvalidPort)?;
+    let port = url
+        .port_or_known_default()
+        .ok_or(RedirectError::InvalidPort)?;
     if port == 0 {
         return Err(RedirectError::InvalidPort);
     }
@@ -187,9 +187,7 @@ pub enum RedirectError {
     InvalidPort,
     HttpsDowngrade,
     RedirectLoop(String),
-    TooManyRedirects {
-        limit: usize,
-    },
+    TooManyRedirects { limit: usize },
     DnsResolution(DnsResolutionError),
 }
 
@@ -219,7 +217,10 @@ impl fmt::Display for RedirectError {
                 write!(formatter, "redirect limit of {limit} was exceeded")
             }
             Self::DnsResolution(error) => {
-                write!(formatter, "redirect destination DNS validation failed: {error}")
+                write!(
+                    formatter,
+                    "redirect destination DNS validation failed: {error}"
+                )
             }
         }
     }
@@ -337,10 +338,7 @@ mod tests {
         assert_eq!(target.hostname().as_fqdn(), "other.example.");
         assert_eq!(target.addresses().hostname().as_fqdn(), "other.example.");
         assert_eq!(target.url().as_str(), "https://other.example/next");
-        assert_eq!(
-            resolver.calls(),
-            vec!["public.example.", "other.example."]
-        );
+        assert_eq!(resolver.calls(), vec!["public.example.", "other.example."]);
     }
 
     #[tokio::test]
@@ -397,9 +395,7 @@ mod tests {
             Err(RedirectError::IpLiteralNotAllowed)
         );
         assert_eq!(
-            policy
-                .start("https://2130706433/private", &resolver)
-                .await,
+            policy.start("https://2130706433/private", &resolver).await,
             Err(RedirectError::IpLiteralNotAllowed)
         );
         assert_eq!(
@@ -448,9 +444,6 @@ mod tests {
 
         assert_eq!(target.url().as_str(), "https://public.example/next?x=1");
         assert_eq!(target.hostname().as_fqdn(), "public.example.");
-        assert_eq!(
-            resolver.calls(),
-            vec!["public.example.", "public.example."]
-        );
+        assert_eq!(resolver.calls(), vec!["public.example.", "public.example."]);
     }
 }
