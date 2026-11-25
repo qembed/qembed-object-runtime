@@ -293,7 +293,14 @@ fn extract_numbers(text: &str) -> BTreeSet<String> {
             index += 1;
             continue;
         }
-        let start = index;
+        let start = if index > 0
+            && matches!(bytes[index - 1], b'-' | b'+')
+            && (index < 2 || !bytes[index - 2].is_ascii_alphanumeric())
+        {
+            index - 1
+        } else {
+            index
+        };
         index += 1;
         while index < bytes.len() {
             if bytes[index].is_ascii_digit()
@@ -317,19 +324,30 @@ fn extract_numbers(text: &str) -> BTreeSet<String> {
 }
 
 fn normalize_number(raw: &str) -> String {
-    let percent = raw.ends_with('%');
-    let value = raw.trim_end_matches('%');
+    let (sign, unsigned) = if let Some(value) = raw.strip_prefix('-') {
+        ("-", value)
+    } else if let Some(value) = raw.strip_prefix('+') {
+        ("+", value)
+    } else {
+        ("", raw)
+    };
+    let percent = unsigned.ends_with('%');
+    let value = unsigned.trim_end_matches('%');
     let last_dot = value.rfind('.');
     let last_comma = value.rfind(',');
     let decimal_separator = match (last_dot, last_comma) {
         (Some(dot), Some(comma)) => Some(if dot > comma { '.' } else { ',' }),
+        (Some(_), None) if is_grouped_number(value, '.') => None,
         (Some(_), None) => Some('.'),
         (None, Some(_)) if is_grouped_number(value, ',') => None,
         (None, Some(_)) => Some(','),
         (None, None) => None,
     };
 
-    let mut normalized = String::with_capacity(value.len() + if percent { 1 } else { 0 });
+    let mut normalized = String::with_capacity(
+        sign.len() + value.len() + if percent { 1 } else { 0 },
+    );
+    normalized.push_str(sign);
     let decimal_index = decimal_separator.and_then(|separator| value.rfind(separator));
     for (index, ch) in value.char_indices() {
         if ch.is_ascii_digit() {
@@ -611,6 +629,36 @@ mod tests {
                 .verify(&document, &[evidence])
                 .is_accepted()
         );
+    }
+
+    #[test]
+    fn numeric_grounding_preserves_sign_and_grouping() {
+        let negative = chunk("The balance is -5.");
+        let id = negative.id;
+        let matching = CitationDocument {
+            claims: vec![claim("The balance is -5.", vec![id])],
+        };
+        assert!(CitationVerifier::new().verify(&matching, &[negative.clone()]).is_accepted());
+
+        let positive = chunk("The balance is 5.");
+        let id = positive.id;
+        let mismatched = CitationDocument {
+            claims: vec![claim("The balance is -5.", vec![id])],
+        };
+        assert!(
+            CitationVerifier::new()
+                .verify(&mismatched, &[positive])
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V5NumericGrounding)
+        );
+
+        let grouped = chunk("The population is 1.234.567.");
+        let id = grouped.id;
+        let normalized = CitationDocument {
+            claims: vec![claim("The population is 1234567.", vec![id])],
+        };
+        assert!(CitationVerifier::new().verify(&normalized, &[grouped]).is_accepted());
     }
 
     #[test]
