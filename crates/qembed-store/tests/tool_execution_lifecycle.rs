@@ -202,20 +202,30 @@ async fn setup() -> Fixture {
 }
 
 #[tokio::test]
-async fn stale_or_disabled_binding_rejects_claim_before_external_execution() {
+async fn changed_binding_version_rejects_claim_before_external_execution() {
     let fixture = setup().await;
 
     // Simulate an Owner changing the binding after the Allow decision and
     // ToolExecution were created. The trigger advances binding_version.
     sqlx::query(
-        "UPDATE object_tools SET enabled=false
+        "UPDATE object_tools SET permissions='{"updated":true}'::jsonb
           WHERE tenant_id=$1 AND object_id=$2",
     )
     .bind(fixture.scope.tenant_id().into_uuid())
     .bind(fixture.object_id.into_uuid())
     .execute(&fixture.pool)
     .await
-    .expect("binding can be disabled");
+    .expect("binding can be changed");
+
+    let binding_state: (i64, bool) = sqlx::query_as(
+        "SELECT binding_version, enabled FROM object_tools WHERE tenant_id=$1 AND object_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(fixture.object_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("updated binding is readable");
+    assert_eq!(binding_state, (2, true), "binding mutation advances its monotonic version");
 
     let store = PgToolExecutionStore::new(fixture.context.clone());
     let claim = store
