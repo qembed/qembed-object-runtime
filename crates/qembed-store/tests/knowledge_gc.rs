@@ -239,3 +239,67 @@ async fn active_invocation_pin_blocks_gc_until_terminal_transition_releases_it()
     ));
     pool.close().await;
 }
+
+
+#[tokio::test]
+async fn concurrent_gc_collectors_delete_a_retired_document_exactly_once() {
+    let (pool, context, scope, object_id, invocation_id, document_id) = setup().await;
+
+    sqlx::query(
+        "UPDATE object_invocations SET status='Cancelled', finished_at=now(), version=version+1 \
+         WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .bind(invocation_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("terminal transition releases the active revision pin");
+
+    let pin_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM knowledge_revision_pins \
+         WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .bind(invocation_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("pin count readable");
+    assert_eq!(pin_count, 0);
+
+    let collector = PgKnowledgeGarbageCollector::new(context);
+    let competing_collector = collector.clone();
+    let (first, second) = tokio::join!(
+        collector.collect_retired_documents(&scope, object_id, 10),
+        competing_collector.collect_retired_documents(&scope, object_id, 10)
+    );
+    let first = first.expect("first GC transaction should complete");
+    let second = second.expect("second GC transaction should complete");
+
+    assert_eq!(first + second, 1, "the retired document is deleted once");
+    assert!(
+        (first == 1 && second == 0) || (first == 0 && second == 1),
+        "exactly one collector wins and the other observes no eligible rows"
+    );
+
+    let remaining: (i64, i64, i64) = sqlx::query_as(
+        "SELECT \
+            (SELECT count(*) FROM knowledge_documents WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND id=$3::uuid), \
+            (SELECT count(*) FROM knowledge_chunks WHERE tenant_id=$1::uuid AND object_id=$2::uuid), \
+            (SELECT count(*) FROM knowledge_revision_log WHERE tenant_id=$1::uuid AND object_id=$2::uuid)",
+    )
+    .bind(scope.tenant_id().to_string())
+    .bind(object_id.to_string())
+    .bind(document_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("GC aftermath should be readable");
+    assert_eq!(
+        remaining,
+        (0, 0, 2),
+        "document and chunk are gone while the immutable revision log remains"
+    );
+
+    pool.close().await;
+}
