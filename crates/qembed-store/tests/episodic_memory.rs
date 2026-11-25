@@ -4,11 +4,93 @@ use qembed_domain::{
     ids::{CallerId, ObjectId, TenantId},
     test_support::scope_for_tenant,
 };
-use qembed_store::episodic_memory::{EpisodicMemoryError, PgEpisodicMemoryRepository};
+use qembed_store::{
+    ContextIssuer, ContextIssuerConfig, PgContext, RingEd25519SigningKey,
+    episodic_memory::{EpisodicMemoryError, PgEpisodicMemoryRepository},
+};
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
+async fn runtime_pool(database_url: &str) -> PgPool {
+    PgPoolOptions::new()
+        .max_connections(2)
+        .after_connect(|connection, _metadata| {
+            Box::pin(async move {
+                sqlx::query("SET ROLE qembed_runtime")
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(database_url)
+        .await
+        .expect("restricted Runtime pool should connect as qembed_runtime")
+}
+
+async fn stage_issuer(admin_pool: &PgPool) -> ContextIssuer {
+    let deployment_id = "rust-074-caller-isolation";
+    let database_oid: String =
+        sqlx::query_scalar("SELECT oid::text FROM pg_database WHERE datname = current_database()")
+            .fetch_one(admin_pool)
+            .await
+            .expect("database OID should be readable");
+    let issuer_name = "qembed-runtime";
+    let audience =
+        format!("urn:qembed:postgres:deployment:{deployment_id}:database:{database_oid}");
+    let key_id = format!("rust074-test-{}", Uuid::new_v4());
+    let signing_key = RingEd25519SigningKey::from_seed(key_id.clone(), &[0x74_u8; 32])
+        .expect("RUST-074 test seed should create a valid Ed25519 signer");
+    let public_key = signing_key.public_key();
+
+    let mut control_plane = admin_pool
+        .acquire()
+        .await
+        .expect("key control-plane connection should be acquired");
+    sqlx::query("SET SESSION AUTHORIZATION qembed_key_control_plane")
+        .execute(&mut *control_plane)
+        .await
+        .expect("test harness should assume the key control-plane identity");
+    sqlx::query("SELECT qembed_crypto.stage_verification_key($1, $2, $3, $4, $5, $6, $7, $8)")
+        .bind(&key_id)
+        .bind(public_key.to_vec())
+        .bind(issuer_name)
+        .bind(&audience)
+        .bind(deployment_id)
+        .bind("operator:rust-074-test")
+        .bind(Uuid::new_v4())
+        .bind("stage RUST-074 Caller isolation test key")
+        .execute(&mut *control_plane)
+        .await
+        .expect("control plane should stage the public verification key");
+    let _: String = sqlx::query_scalar(
+        "SELECT qembed_crypto.activate_verification_key($1, $2, $3, $4, $5)::text",
+    )
+    .bind(&key_id)
+    .bind("operator:rust-074-test")
+    .bind("approver:rust-074-test")
+    .bind(Uuid::new_v4())
+    .bind("activate RUST-074 Caller isolation test key")
+    .fetch_one(&mut *control_plane)
+    .await
+    .expect("a distinct approver should activate the test key");
+    sqlx::query("RESET SESSION AUTHORIZATION")
+        .execute(&mut *control_plane)
+        .await
+        .expect("control-plane authorization should be reset before pool reuse");
+    drop(control_plane);
+
+    let config = ContextIssuerConfig::with_default_lifetime(
+        issuer_name,
+        audience,
+        deployment_id,
+        key_id,
+    )
+    .expect("RUST-074 ContextIssuer configuration should be valid");
+    ContextIssuer::new(config, signing_key).expect("RUST-074 ContextIssuer should be valid")
+}
+
 async fn seed_caller(
-    pool: &sqlx::PgPool,
+    pool: &PgPool,
     tenant_id: TenantId,
     principal_id: Uuid,
     caller_id: CallerId,
@@ -45,7 +127,9 @@ async fn seed_caller(
 #[tokio::test]
 #[ignore = "requires canonical qembed-sql RT-050 signed-context migration; run from scripts/test-postgres.sh"]
 async fn caller_scoped_application_path_cannot_read_another_callers_episodic_memory() {
-    let pool = common::connect().await;
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set by scripts/test-postgres.sh");
+    let admin_pool = common::connect().await;
     let tenant_id = TenantId::new();
     let scope = scope_for_tenant(tenant_id);
     let principal_id = scope.principal().principal_id().into_uuid();
@@ -56,7 +140,7 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
 
     sqlx::query("INSERT INTO tenants (id) VALUES ($1::uuid)")
         .bind(tenant_id.to_string())
-        .execute(&pool)
+        .execute(&admin_pool)
         .await
         .expect("tenant fixture inserted");
     sqlx::query(
@@ -65,14 +149,14 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
     )
     .bind(tenant_id.to_string())
     .bind(principal_id.to_string())
-    .execute(&pool)
+    .execute(&admin_pool)
     .await
     .expect("Owner Principal fixture inserted");
 
-    seed_caller(&pool, tenant_id, principal_id, caller_a, 11, true).await;
-    seed_caller(&pool, tenant_id, principal_id, caller_b, 22, true).await;
+    seed_caller(&admin_pool, tenant_id, principal_id, caller_a, 11, true).await;
+    seed_caller(&admin_pool, tenant_id, principal_id, caller_b, 22, true).await;
     seed_caller(
-        &pool,
+        &admin_pool,
         tenant_id,
         principal_id,
         caller_without_delegation,
@@ -87,7 +171,7 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
     )
     .bind(tenant_id.to_string())
     .bind(object_id.to_string())
-    .execute(&pool)
+    .execute(&admin_pool)
     .await
     .expect("Object fixture inserted");
 
@@ -107,16 +191,18 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
         .bind(object_id.to_string())
         .bind(caller_id.to_string())
         .bind(claim)
-        .execute(&pool)
+        .execute(&admin_pool)
         .await
         .expect("episodic memory fixture inserted");
     }
 
-    let context = common::signed_context(&pool).await;
+    let issuer = stage_issuer(&admin_pool).await;
+    let runtime_pool = runtime_pool(&database_url).await;
+    let context = PgContext::new(runtime_pool.clone(), issuer);
     let repository = PgEpisodicMemoryRepository::new(context.clone());
 
-    // First prove that the signed qctx Caller claim independently filters the
-    // canonical RLS policy, even without an explicit caller_id SQL predicate.
+    // Prove signed-context RLS independently of the repository's explicit
+    // caller_id predicate: the qembed_runtime role sees only Caller A's row.
     let (mut transaction, resolved) = context
         .begin_caller(&scope, caller_a)
         .await
@@ -164,5 +250,6 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
         Err(EpisodicMemoryError::Context(_))
     ));
 
-    pool.close().await;
+    runtime_pool.close().await;
+    admin_pool.close().await;
 }
