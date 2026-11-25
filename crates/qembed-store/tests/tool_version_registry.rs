@@ -63,6 +63,15 @@ async fn registry_loads_exact_immutable_version_and_rejects_mutation() {
         "immutable ToolVersion must reject UPDATE"
     );
 
+    let deletion = sqlx::query("DELETE FROM tool_versions WHERE id=$1::uuid")
+        .bind(version_id.to_string())
+        .execute(&pool)
+        .await;
+    assert!(
+        deletion.is_err(),
+        "immutable ToolVersion must reject DELETE"
+    );
+
     let unchanged = registry
         .get_tool_version(tool_id, version_id)
         .await
