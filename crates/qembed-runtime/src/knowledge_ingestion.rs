@@ -2,7 +2,7 @@
 use qembed_domain::{
     ids::{KnowledgeChunkId, KnowledgeDocumentId},
     knowledge_ingestion::{
-        IngestionChunk, IngestionEmbeddingModel, IngestionPersistenceOutcome,
+        IngestionChunk, IngestionPersistenceOutcome,
         KnowledgeIngestionDocumentState, KnowledgeIngestionError, ModelEmbedding,
     },
     ports::KnowledgeIngestionStore,
