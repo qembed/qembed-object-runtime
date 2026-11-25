@@ -351,7 +351,10 @@ mod tests {
         let result = resolve_public(&resolver, "example.com")
             .await
             .expect("A-only answer is valid");
-        assert_eq!(result.addresses(), &["93.184.216.34".parse().unwrap()]);
+        assert_eq!(
+            result.addresses(),
+            &["93.184.216.34".parse::<IpAddr>().unwrap()]
+        );
     }
 
     #[tokio::test]

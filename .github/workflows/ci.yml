@@ -87,13 +87,6 @@ jobs:
       - name: Check workspace targets
         run: cargo check --workspace --all-targets
 
-      - name: Capture resolved Cargo.lock for dependency pinning
-        if: always()
-        run: |
-          printf '%s\n' '__LOCKFILE_BEGIN__'
-          cat Cargo.lock
-          printf '%s\n' '__LOCKFILE_END__'
-
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
