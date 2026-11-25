@@ -60,7 +60,7 @@ async fn setup() -> (PgPool, qembed_store::PgContext, Scope, ObjectId, Invocatio
     let snapshot_id = SnapshotId::new();
     let projection = br#"{"limits":{"max_tokens_per_invocation":10000}}"#;
     sqlx::query(
-        "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, decode(repeat('00',32),'hex'), $5::text::jsonb)",
+        "INSERT INTO snapshots (tenant_id, snapshot_id, object_id, object_version_id, schema_version, canonical_json, content_hash, json_projection) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, decode(repeat('00',32),'hex'), convert_from($5, 'UTF8')::jsonb)",
     )
     .bind(tenant_id.to_string())
     .bind(snapshot_id.to_string())
