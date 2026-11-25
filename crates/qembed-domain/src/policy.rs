@@ -536,6 +536,15 @@ pub fn evaluate_policy(
 /// require_deserialize::<AllowedCommand>();
 /// ```
 ///
+/// External callers cannot invoke the private mint boundary:
+///
+/// ```compile_fail
+/// use qembed_domain::ids::InvocationId;
+/// use qembed_domain::policy::AllowedCommand;
+///
+/// let _ = AllowedCommand::mint(InvocationId::new(), 0, [0; 32]);
+/// ```
+///
 /// It has no default value:
 ///
 /// ```compile_fail
