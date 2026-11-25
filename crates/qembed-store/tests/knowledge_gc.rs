@@ -240,7 +240,6 @@ async fn active_invocation_pin_blocks_gc_until_terminal_transition_releases_it()
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn concurrent_gc_collectors_delete_a_retired_document_exactly_once() {
     let (pool, context, scope, object_id, invocation_id, document_id) = setup().await;
