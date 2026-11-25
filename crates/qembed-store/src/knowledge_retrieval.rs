@@ -162,7 +162,7 @@ impl PgKnowledgeRetrievalStore {
         }
 
         let rows = sqlx::query(
-            "SELECT id, document_id, content, position, metadata \
+            "SELECT id, document_id, content, chunk_position, metadata \
                FROM knowledge_visible_chunks_at($1::uuid, $2::uuid, $3) \
               ORDER BY document_id, position, id",
         )
