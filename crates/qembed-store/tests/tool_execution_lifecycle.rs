@@ -208,7 +208,7 @@ async fn changed_binding_version_rejects_claim_before_external_execution() {
     // Simulate an Owner changing the binding after the Allow decision and
     // ToolExecution were created. The trigger advances binding_version.
     sqlx::query(
-        "UPDATE object_tools SET permissions='{"updated":true}'::jsonb
+        "UPDATE object_tools SET permissions=jsonb_build_object('updated', true)
           WHERE tenant_id=$1 AND object_id=$2",
     )
     .bind(fixture.scope.tenant_id().into_uuid())

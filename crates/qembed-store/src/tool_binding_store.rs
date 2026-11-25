@@ -20,9 +20,7 @@ impl fmt::Display for PgToolBindingStoreError {
                 write!(f, "Tool binding context initialization failed: {error}")
             }
             Self::Database(error) => write!(f, "Tool binding lookup failed: {error}"),
-            Self::InvalidBindingVersion => {
-                f.write_str("persisted Tool binding version is invalid")
-            }
+            Self::InvalidBindingVersion => f.write_str("persisted Tool binding version is invalid"),
         }
     }
 }
