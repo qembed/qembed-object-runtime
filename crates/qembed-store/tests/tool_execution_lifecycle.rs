@@ -225,7 +225,11 @@ async fn changed_binding_version_rejects_claim_before_external_execution() {
     .fetch_one(&fixture.pool)
     .await
     .expect("updated binding is readable");
-    assert_eq!(binding_state, (2, true), "binding mutation advances its monotonic version");
+    assert_eq!(
+        binding_state,
+        (2, true),
+        "binding mutation advances its monotonic version"
+    );
 
     let store = PgToolExecutionStore::new(fixture.context.clone());
     let claim = store

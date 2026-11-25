@@ -1,10 +1,10 @@
 //! PostgreSQL adapter for tenant-scoped Object-to-Tool binding validation.
 use std::{error::Error, fmt};
 
+use crate::{PgContext, fetch_optional};
 use qembed_domain::{
     ids::ObjectId, ports::ToolBindingStore, scope::Scope, tool_binding::ToolBindingIdentity,
 };
-use crate::{PgContext, fetch_optional};
 
 #[derive(Debug)]
 pub enum PgToolBindingStoreError {
