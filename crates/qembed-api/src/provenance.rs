@@ -66,7 +66,10 @@ impl fmt::Display for ApplicationProvenanceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Retrieval(error) => {
-                write!(formatter, "application provenance evidence retrieval failed: {error}")
+                write!(
+                    formatter,
+                    "application provenance evidence retrieval failed: {error}"
+                )
             }
         }
     }
