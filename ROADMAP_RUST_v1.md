@@ -524,9 +524,12 @@ SQLX_OFFLINE=true cargo check --workspace
   - Реализация: `PgKnowledgeRetrievalStore::search` проверяет model ID и dimension, материализует revision-visible chunks вместе с embeddings и только затем выполняет metric-specific pgvector ordering и LIMIT. Cosine (`<=>`) возвращает `1 - distance`; Inner Product (`<#>`) возвращает `-distance`; L2 (`<->`) возвращает distance без переименования в similarity. Результат типизирован как `RetrievalScore::Similarity` или `RetrievalScore::Distance`.
   - Тесты: PostgreSQL integration — cosine/L2/IP score semantics, top-k и revision visibility; model ID/dimension mismatch и top-k=0 отклоняются.
   - DoD: vector ranking применяется только к materialized revision-visible candidate set; metric semantics не смешиваются.
-- [ ] **RUST-071 (M)** Реализовать HNSW index migration support.
-  - Тесты: migration integration — `CREATE INDEX CONCURRENTLY` вне транзакции; повторный запуск и recovery после неудачи.
-  - DoD: migrator корректно управляет non-transactional index operations.
+- [x] **RUST-071 (M)** Реализовать HNSW index migration support.
+  - Реализация: после SQLx schema migrations `run_migrations` вызывает `PgHnswIndexManager`, который строит partial HNSW index для каждого зарегистрированного model ID с его точной размерностью и operator class. `CREATE/DROP INDEX CONCURRENTLY` выполняются на выделенном pool connection вне транзакции; session advisory lock сериализует migrator по model ID. Валидные индексы сохраняются, invalid artifacts от прерванного concurrent build удаляются и пересоздаются при повторном запуске.
+  - Ограничение: pgvector HNSW для `vector` поддерживает до 2,000 dimensions; более широкие модели остаются на exact retrieval без скрытого преобразования precision/dimension.
+  - Тесты: PostgreSQL integration — успешное concurrent создание, повторный запуск без перестроения, искусственно созданный invalid index после failed concurrent unique build и автоматическое восстановление.
+  - Важно: RUST-070 materialized revision-visible candidate boundary пока не позволяет использовать глобальный HNSW index в retrieval query. ANN query integration не включается ценой нарушения revision visibility.
+  - DoD: migrator корректно управляет non-transactional index operations и recovery.
 
 - [ ] **RUST-072 (M)** Реализовать retrieval pinning и GC protection.
   - Тесты: DB integration — active invocation pins revision; GC не удаляет pinned revision; release pin после завершения.
