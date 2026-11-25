@@ -26,17 +26,27 @@ impl ToolDefinition {
         if description.trim().is_empty() {
             return Err(ToolDefinitionError::EmptyDescription);
         }
-        Ok(Self { id, name, description })
+        Ok(Self {
+            id,
+            name,
+            description,
+        })
     }
 
     #[must_use]
-    pub const fn id(&self) -> ToolId { self.id }
+    pub const fn id(&self) -> ToolId {
+        self.id
+    }
 
     #[must_use]
-    pub fn name(&self) -> &str { &self.name }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
     #[must_use]
-    pub fn description(&self) -> &str { &self.description }
+    pub fn description(&self) -> &str {
+        &self.description
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,28 +142,44 @@ impl ToolVersion {
     }
 
     #[must_use]
-    pub const fn id(&self) -> ToolVersionId { self.id }
+    pub const fn id(&self) -> ToolVersionId {
+        self.id
+    }
 
     #[must_use]
-    pub const fn tool_id(&self) -> ToolId { self.tool_id }
+    pub const fn tool_id(&self) -> ToolId {
+        self.tool_id
+    }
 
     #[must_use]
-    pub fn version(&self) -> &str { &self.version }
+    pub fn version(&self) -> &str {
+        &self.version
+    }
 
     #[must_use]
-    pub const fn risk_level(&self) -> ToolRiskLevel { self.risk_level }
+    pub const fn risk_level(&self) -> ToolRiskLevel {
+        self.risk_level
+    }
 
     #[must_use]
-    pub fn input_schema(&self) -> &Value { &self.input_schema }
+    pub fn input_schema(&self) -> &Value {
+        &self.input_schema
+    }
 
     #[must_use]
-    pub fn output_schema(&self) -> &Value { &self.output_schema }
+    pub fn output_schema(&self) -> &Value {
+        &self.output_schema
+    }
 
     #[must_use]
-    pub const fn timeout_ms(&self) -> u32 { self.timeout_ms }
+    pub const fn timeout_ms(&self) -> u32 {
+        self.timeout_ms
+    }
 
     #[must_use]
-    pub const fn idempotent(&self) -> bool { self.idempotent }
+    pub const fn idempotent(&self) -> bool {
+        self.idempotent
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,16 +216,19 @@ mod tests {
     #[test]
     fn read_only_risk_levels_may_be_non_idempotent() {
         for risk in [ToolRiskLevel::R0, ToolRiskLevel::R1] {
-            assert!(ToolVersion::new(
-                ToolVersionId::new(),
-                ToolId::new(),
-                "1",
-                risk,
-                serde_json::json!({}),
-                serde_json::json!({}),
-                1_000,
-                false,
-            ).is_ok());
+            assert!(
+                ToolVersion::new(
+                    ToolVersionId::new(),
+                    ToolId::new(),
+                    "1",
+                    risk,
+                    serde_json::json!({}),
+                    serde_json::json!({}),
+                    1_000,
+                    false,
+                )
+                .is_ok()
+            );
         }
     }
 
@@ -213,7 +242,16 @@ mod tests {
             serde_json::json!({}),
         );
         assert_eq!(
-            ToolVersion::new(args.0, args.1, " ", args.2, args.3.clone(), args.4.clone(), 1, true),
+            ToolVersion::new(
+                args.0,
+                args.1,
+                " ",
+                args.2,
+                args.3.clone(),
+                args.4.clone(),
+                1,
+                true
+            ),
             Err(ToolVersionError::EmptyVersion)
         );
         assert_eq!(

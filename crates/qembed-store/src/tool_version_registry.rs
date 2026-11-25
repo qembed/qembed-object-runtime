@@ -21,10 +21,14 @@ pub enum PgToolVersionRegistryError {
 impl fmt::Display for PgToolVersionRegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Database(error) => write!(formatter, "ToolVersion registry database error: {error}"),
+            Self::Database(error) => {
+                write!(formatter, "ToolVersion registry database error: {error}")
+            }
             Self::DuplicateDefinition => formatter.write_str("Tool definition already exists"),
             Self::DuplicateVersion => formatter.write_str("ToolVersion already exists"),
-            Self::InvalidPersistedValue => formatter.write_str("persisted ToolVersion violates the domain contract"),
+            Self::InvalidPersistedValue => {
+                formatter.write_str("persisted ToolVersion violates the domain contract")
+            }
             Self::InvalidDomainValue(error) => write!(formatter, "invalid ToolVersion: {error:?}"),
         }
     }
@@ -40,7 +44,9 @@ impl Error for PgToolVersionRegistryError {
 }
 
 impl From<sqlx::Error> for PgToolVersionRegistryError {
-    fn from(error: sqlx::Error) -> Self { Self::Database(error) }
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
 }
 
 /// Global registry adapter. Reads require the runtime role; registration requires
@@ -52,7 +58,9 @@ pub struct PgToolVersionRegistry {
 
 impl PgToolVersionRegistry {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self { Self { pool } }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
 
     /// Registers a Tool definition. Tool identity and display name are global.
     pub async fn register_definition(
@@ -69,7 +77,9 @@ impl PgToolVersionRegistry {
         .await;
         match result {
             Ok(_) => Ok(()),
-            Err(error) if is_unique_violation(&error) => Err(PgToolVersionRegistryError::DuplicateDefinition),
+            Err(error) if is_unique_violation(&error) => {
+                Err(PgToolVersionRegistryError::DuplicateDefinition)
+            }
             Err(error) => Err(error.into()),
         }
     }
@@ -94,7 +104,9 @@ impl PgToolVersionRegistry {
         .await;
         match result {
             Ok(_) => Ok(()),
-            Err(error) if is_unique_violation(&error) => Err(PgToolVersionRegistryError::DuplicateVersion),
+            Err(error) if is_unique_violation(&error) => {
+                Err(PgToolVersionRegistryError::DuplicateVersion)
+            }
             Err(error) => Err(error.into()),
         }
     }
@@ -126,13 +138,29 @@ impl ToolVersionRegistry for PgToolVersionRegistry {
             let timeout_ms: i32 = row.try_get("timeout_ms")?;
             let idempotent: bool = row.try_get("idempotent")?;
 
-            let id = id.parse().map_err(|_| PgToolVersionRegistryError::InvalidPersistedValue)?;
-            let stored_tool_id = stored_tool_id.parse().map_err(|_| PgToolVersionRegistryError::InvalidPersistedValue)?;
-            let risk = ToolRiskLevel::from_database_value(&risk).map_err(PgToolVersionRegistryError::InvalidDomainValue)?;
-            let timeout_ms = u32::try_from(timeout_ms).map_err(|_| PgToolVersionRegistryError::InvalidPersistedValue)?;
-            ToolVersion::new(id, stored_tool_id, version, risk, input_schema, output_schema, timeout_ms, idempotent)
-                .map_err(PgToolVersionRegistryError::InvalidDomainValue)
-        }).transpose()
+            let id = id
+                .parse()
+                .map_err(|_| PgToolVersionRegistryError::InvalidPersistedValue)?;
+            let stored_tool_id = stored_tool_id
+                .parse()
+                .map_err(|_| PgToolVersionRegistryError::InvalidPersistedValue)?;
+            let risk = ToolRiskLevel::from_database_value(&risk)
+                .map_err(PgToolVersionRegistryError::InvalidDomainValue)?;
+            let timeout_ms = u32::try_from(timeout_ms)
+                .map_err(|_| PgToolVersionRegistryError::InvalidPersistedValue)?;
+            ToolVersion::new(
+                id,
+                stored_tool_id,
+                version,
+                risk,
+                input_schema,
+                output_schema,
+                timeout_ms,
+                idempotent,
+            )
+            .map_err(PgToolVersionRegistryError::InvalidDomainValue)
+        })
+        .transpose()
     }
 }
 

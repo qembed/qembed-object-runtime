@@ -6,7 +6,7 @@ use qembed_domain::{
     ids::{ToolId, ToolVersionId},
     ports::ToolVersionRegistry,
     snapshot::Snapshot,
-    snapshot_tools::{snapshot_tool_references, SnapshotToolReferencesError},
+    snapshot_tools::{SnapshotToolReferencesError, snapshot_tool_references},
     tool_version::ToolVersion,
 };
 
@@ -29,7 +29,10 @@ pub async fn resolve_snapshot_tools<R: ToolVersionRegistry>(
             .get_tool_version(tool_id, version_id)
             .await
             .map_err(ToolVersionResolutionError::Registry)?
-            .ok_or(ToolVersionResolutionError::VersionNotFound { tool_id, version_id })?;
+            .ok_or(ToolVersionResolutionError::VersionNotFound {
+                tool_id,
+                version_id,
+            })?;
 
         if version.tool_id() != tool_id || version.id() != version_id {
             return Err(ToolVersionResolutionError::RegistryIdentityMismatch {
@@ -47,17 +50,37 @@ pub async fn resolve_snapshot_tools<R: ToolVersionRegistry>(
 pub enum ToolVersionResolutionError<E> {
     InvalidSnapshotReferences(SnapshotToolReferencesError),
     Registry(E),
-    VersionNotFound { tool_id: ToolId, version_id: ToolVersionId },
-    RegistryIdentityMismatch { expected_tool_id: ToolId, expected_version_id: ToolVersionId },
+    VersionNotFound {
+        tool_id: ToolId,
+        version_id: ToolVersionId,
+    },
+    RegistryIdentityMismatch {
+        expected_tool_id: ToolId,
+        expected_version_id: ToolVersionId,
+    },
 }
 
 impl<E: fmt::Display> fmt::Display for ToolVersionResolutionError<E> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidSnapshotReferences(error) => write!(formatter, "invalid Snapshot tool references: {error:?}"),
+            Self::InvalidSnapshotReferences(error) => {
+                write!(formatter, "invalid Snapshot tool references: {error:?}")
+            }
             Self::Registry(error) => write!(formatter, "ToolVersion registry failed: {error}"),
-            Self::VersionNotFound { tool_id, version_id } => write!(formatter, "ToolVersion {version_id} for Tool {tool_id} was not found"),
-            Self::RegistryIdentityMismatch { expected_tool_id, expected_version_id } => write!(formatter, "registry returned a different identity than {expected_tool_id}/{expected_version_id}"),
+            Self::VersionNotFound {
+                tool_id,
+                version_id,
+            } => write!(
+                formatter,
+                "ToolVersion {version_id} for Tool {tool_id} was not found"
+            ),
+            Self::RegistryIdentityMismatch {
+                expected_tool_id,
+                expected_version_id,
+            } => write!(
+                formatter,
+                "registry returned a different identity than {expected_tool_id}/{expected_version_id}"
+            ),
         }
     }
 }
@@ -93,19 +116,30 @@ mod tests {
 
     fn tool_version(tool_id: ToolId, version_id: ToolVersionId, label: &str) -> ToolVersion {
         ToolVersion::new(
-            version_id, tool_id, label, ToolRiskLevel::R0,
+            version_id,
+            tool_id,
+            label,
+            ToolRiskLevel::R0,
             serde_json::json!({"type":"object"}),
             serde_json::json!({"type":"object"}),
-            2_000, true,
-        ).expect("valid ToolVersion")
+            2_000,
+            true,
+        )
+        .expect("valid ToolVersion")
     }
 
     fn snapshot(tool_id: ToolId, version_id: ToolVersionId) -> Snapshot {
-        let json = format!(r#"{{"tools":[{{"tool_id":"{tool_id}","tool_version_id":"{version_id}"}}]}}"#);
+        let json =
+            format!(r#"{{"tools":[{{"tool_id":"{tool_id}","tool_version_id":"{version_id}"}}]}}"#);
         Snapshot::new(
-            SnapshotId::new(), TenantId::new(), ObjectId::new(), ObjectVersionId::new(), 1,
+            SnapshotId::new(),
+            TenantId::new(),
+            ObjectId::new(),
+            ObjectVersionId::new(),
+            1,
             json.into_bytes(),
-        ).expect("canonical Snapshot")
+        )
+        .expect("canonical Snapshot")
     }
 
     #[tokio::test]
@@ -120,7 +154,8 @@ mod tests {
         registry.0.insert((tool, new_id), newer);
 
         let resolved = resolve_snapshot_tools(&registry, &snapshot(tool, old_id))
-            .await.expect("pinned version exists");
+            .await
+            .expect("pinned version exists");
         assert_eq!(resolved, vec![old]);
     }
 
@@ -129,18 +164,28 @@ mod tests {
         let tool = ToolId::new();
         let missing = ToolVersionId::new();
         let error = resolve_snapshot_tools(&MockRegistry::default(), &snapshot(tool, missing))
-            .await.expect_err("missing immutable version must not fall back");
-        assert!(matches!(error, ToolVersionResolutionError::VersionNotFound { .. }));
+            .await
+            .expect_err("missing immutable version must not fall back");
+        assert!(matches!(
+            error,
+            ToolVersionResolutionError::VersionNotFound { .. }
+        ));
     }
 
     #[tokio::test]
     async fn empty_snapshot_does_not_query_registry() {
         let snapshot = Snapshot::new(
-            SnapshotId::new(), TenantId::new(), ObjectId::new(), ObjectVersionId::new(), 1,
+            SnapshotId::new(),
+            TenantId::new(),
+            ObjectId::new(),
+            ObjectVersionId::new(),
+            1,
             br#"{"limits":{}}"#.to_vec(),
-        ).expect("canonical Snapshot");
+        )
+        .expect("canonical Snapshot");
         let resolved = resolve_snapshot_tools(&MockRegistry::default(), &snapshot)
-            .await.expect("empty tools list is valid");
+            .await
+            .expect("empty tools list is valid");
         assert!(resolved.is_empty());
     }
 }

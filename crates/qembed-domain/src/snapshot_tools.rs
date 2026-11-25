@@ -15,14 +15,21 @@ pub struct SnapshotToolReference {
 impl SnapshotToolReference {
     #[must_use]
     pub const fn new(tool_id: ToolId, tool_version_id: ToolVersionId) -> Self {
-        Self { tool_id, tool_version_id }
+        Self {
+            tool_id,
+            tool_version_id,
+        }
     }
 
     #[must_use]
-    pub const fn tool_id(self) -> ToolId { self.tool_id }
+    pub const fn tool_id(self) -> ToolId {
+        self.tool_id
+    }
 
     #[must_use]
-    pub const fn tool_version_id(self) -> ToolVersionId { self.tool_version_id }
+    pub const fn tool_version_id(self) -> ToolVersionId {
+        self.tool_version_id
+    }
 }
 
 /// Parses the Snapshot's canonical `tools` array without consulting mutable bindings.
@@ -37,12 +44,16 @@ pub fn snapshot_tool_references(
     let Some(tools) = value.get("tools") else {
         return Ok(Vec::new());
     };
-    let entries = tools.as_array().ok_or(SnapshotToolReferencesError::ToolsMustBeArray)?;
+    let entries = tools
+        .as_array()
+        .ok_or(SnapshotToolReferencesError::ToolsMustBeArray)?;
 
     let mut seen = HashSet::with_capacity(entries.len());
     let mut references = Vec::with_capacity(entries.len());
     for entry in entries {
-        let object = entry.as_object().ok_or(SnapshotToolReferencesError::InvalidToolEntry)?;
+        let object = entry
+            .as_object()
+            .ok_or(SnapshotToolReferencesError::InvalidToolEntry)?;
         let tool_id = object
             .get("tool_id")
             .and_then(serde_json::Value::as_str)
@@ -87,22 +98,24 @@ mod tests {
             ObjectVersionId::new(),
             1,
             json.to_vec(),
-        ).expect("test JSON is canonical")
+        )
+        .expect("test JSON is canonical")
     }
 
     #[test]
     fn missing_tools_means_no_tool_references() {
-        assert!(snapshot_tool_references(&snapshot(br#"{"limits":{}}"#))
-            .expect("valid snapshot").is_empty());
+        assert!(
+            snapshot_tool_references(&snapshot(br#"{"limits":{}}"#))
+                .expect("valid snapshot")
+                .is_empty()
+        );
     }
 
     #[test]
     fn reads_exact_tool_version_ids_from_snapshot() {
         let tool = ToolId::new();
         let version = ToolVersionId::new();
-        let json = format!(
-            r#"{{"tools":[{{"tool_id":"{tool}","tool_version_id":"{version}"}}]}}"#
-        );
+        let json = format!(r#"{{"tools":[{{"tool_id":"{tool}","tool_version_id":"{version}"}}]}}"#);
         let refs = snapshot_tool_references(&snapshot(json.as_bytes())).expect("valid references");
         assert_eq!(refs, vec![SnapshotToolReference::new(tool, version)]);
     }
@@ -119,7 +132,9 @@ mod tests {
             Err(SnapshotToolReferencesError::DuplicateToolId)
         );
         assert_eq!(
-            snapshot_tool_references(&snapshot(br#"{"tools":[{"tool_id":"bad","tool_version_id":"bad"}]}"#)),
+            snapshot_tool_references(&snapshot(
+                br#"{"tools":[{"tool_id":"bad","tool_version_id":"bad"}]}"#
+            )),
             Err(SnapshotToolReferencesError::InvalidToolId)
         );
     }

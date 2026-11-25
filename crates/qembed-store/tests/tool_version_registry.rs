@@ -13,8 +13,8 @@ async fn registry_loads_exact_immutable_version_and_rejects_mutation() {
     let registry = PgToolVersionRegistry::new(pool.clone());
 
     let tool_id = ToolId::new();
-    let definition = ToolDefinition::new(tool_id, "registry-test", "test tool")
-        .expect("definition is valid");
+    let definition =
+        ToolDefinition::new(tool_id, "registry-test", "test tool").expect("definition is valid");
     registry
         .register_definition(&definition)
         .await
@@ -45,17 +45,22 @@ async fn registry_loads_exact_immutable_version_and_rejects_mutation() {
     assert_eq!(loaded, version);
 
     let wrong_tool = ToolId::new();
-    assert!(registry
-        .get_tool_version(wrong_tool, version_id)
-        .await
-        .expect("wrong-tool lookup should succeed")
-        .is_none());
+    assert!(
+        registry
+            .get_tool_version(wrong_tool, version_id)
+            .await
+            .expect("wrong-tool lookup should succeed")
+            .is_none()
+    );
 
     let mutation = sqlx::query("UPDATE tool_versions SET version='2.0.0' WHERE id=$1::uuid")
         .bind(version_id.to_string())
         .execute(&pool)
         .await;
-    assert!(mutation.is_err(), "immutable ToolVersion must reject UPDATE");
+    assert!(
+        mutation.is_err(),
+        "immutable ToolVersion must reject UPDATE"
+    );
 
     let unchanged = registry
         .get_tool_version(tool_id, version_id)
