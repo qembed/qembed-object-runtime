@@ -100,6 +100,16 @@ pub enum PolicyCheckOutcome {
 ///
 /// Never deserialize this type from model output, document content, or a
 /// transport DTO. Those inputs are represented by UntrustedEvidenceDigest.
+/// The constructor is crate-private so only the domain Authorizer can create
+/// trusted policy facts.
+///
+/// External crates cannot create trusted checks:
+///
+/// ```compile_fail
+/// use qembed_domain::policy::{PolicyCheck, PolicyCheckOutcome, TrustedPolicyCheck};
+///
+/// let _ = TrustedPolicyCheck::new(PolicyCheck::CapabilityGranted, PolicyCheckOutcome::Satisfied);
+/// ```
 ///
 /// It cannot be reconstructed from serialized model/document input:
 ///
@@ -118,7 +128,7 @@ pub struct TrustedPolicyCheck {
 impl TrustedPolicyCheck {
     /// Creates a check/result pair from a trusted fact provider.
     #[must_use]
-    pub const fn new(check: PolicyCheck, outcome: PolicyCheckOutcome) -> Self {
+    pub(crate) const fn new(check: PolicyCheck, outcome: PolicyCheckOutcome) -> Self {
         Self { check, outcome }
     }
 
@@ -182,7 +192,20 @@ impl UntrustedEvidenceDigest {
 /// Untrusted evidence is carried into the audit context as hashes only.
 ///
 /// This input is not a transport DTO and cannot be deserialized from model or
-/// document content:
+/// document content. Its constructor is crate-private so external adapters
+/// cannot manufacture trusted policy evaluations.
+///
+/// External crates cannot create an evaluation input directly:
+///
+/// ```compile_fail
+/// use qembed_domain::policy::{PolicyActionClass, PolicyEvaluationInput};
+/// use qembed_domain::ids::{InvocationId, ObjectId, PrincipalId};
+///
+/// let _ = PolicyEvaluationInput::new(
+///     InvocationId::new(), PrincipalId::new(), ObjectId::new(), 1,
+///     PolicyActionClass::KnowledgeRead, [0; 32], 0, vec![], vec![],
+/// );
+/// ```
 ///
 /// ```compile_fail
 /// use qembed_domain::policy::PolicyEvaluationInput;
@@ -207,7 +230,7 @@ impl PolicyEvaluationInput {
     /// Creates an evaluation input from trusted identity and fact-provider output.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         invocation_id: InvocationId,
         principal_id: PrincipalId,
         object_id: ObjectId,
