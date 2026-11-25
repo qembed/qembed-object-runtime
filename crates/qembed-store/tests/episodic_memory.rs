@@ -14,7 +14,6 @@ async fn seed_caller(
     tenant_id: TenantId,
     principal_id: PrincipalId,
     caller_id: CallerId,
-    token_byte: u8,
 ) {
     sqlx::query(
         "INSERT INTO owner_principals (tenant_id, caller_id, principal_kind) \
@@ -32,7 +31,7 @@ async fn seed_caller(
     )
     .bind(caller_id.to_string())
     .bind(tenant_id.to_string())
-    .bind(vec![token_byte; 32])
+    .bind(vec![11_u8; 32])
     .execute(pool)
     .await
     .expect("Caller fixture inserted");
@@ -71,12 +70,11 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
         tenant_id,
         scope_a.principal().principal_id(),
         caller_a,
-        11,
     )
     .await;
 
     // Caller B exists in the same tenant and Object, but is not delegated to
-    // Principal A. Its private row is seeded as a fixture, outside the app path.
+    // Principal A. Its private row is seeded outside the application path.
     sqlx::query(
         "INSERT INTO callers (id, tenant_id, token_hash, caller_kind) \
          VALUES ($1::uuid, $2::uuid, $3, 'Authenticated')",
@@ -99,18 +97,22 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
     .await
     .expect("Object fixture inserted");
 
-    let context = common::signed_context(&pool).await;
-    let repository = PgEpisodicMemoryRepository::new(context);
-
-    repository
-        .record_user_claim(&scope_a, caller_a, object_id, "Caller A private memory")
-        .await
-        .expect("Caller A can record its own memory");
-
+    let caller_a_memory_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO memories \
+         (id, tenant_id, object_id, caller_id, memory_kind, claim, source_kind, verification, confidence, expires_at) \
+         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'episodic', 'Caller A private memory', 'User', 'Unverified', 0.5, clock_timestamp() + interval '1 day') \
+         RETURNING id",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(caller_a.to_string())
+    .fetch_one(&pool)
+    .await
+    .expect("Caller A memory fixture inserted");
     let caller_b_memory_id: uuid::Uuid = sqlx::query_scalar(
         "INSERT INTO memories \
-         (id, tenant_id, object_id, caller_id, memory_kind, claim, source_kind, verification, confidence) \
-         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'episodic', 'Caller B secret', 'User', 'Unverified', 0.5) \
+         (id, tenant_id, object_id, caller_id, memory_kind, claim, source_kind, verification, confidence, expires_at) \
+         VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, 'episodic', 'Caller B secret', 'User', 'Unverified', 0.5, clock_timestamp() + interval '1 day') \
          RETURNING id",
     )
     .bind(tenant_id.to_string())
@@ -120,6 +122,9 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
     .await
     .expect("Caller B memory fixture inserted");
 
+    let context = common::signed_context(&pool).await;
+    let repository = PgEpisodicMemoryRepository::new(context);
+
     let visible_to_a = repository
         .list_episodic(&scope_a, caller_a, object_id)
         .await
@@ -128,6 +133,7 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
     assert_eq!(visible_to_a[0].claim(), "Caller A private memory");
     assert_eq!(visible_to_a[0].source_kind(), "User");
     assert_eq!(visible_to_a[0].verification(), "Unverified");
+    assert_eq!(visible_to_a[0].id(), caller_a_memory_id);
     assert_ne!(visible_to_a[0].id(), caller_b_memory_id);
 
     assert!(matches!(
