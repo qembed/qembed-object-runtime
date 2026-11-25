@@ -748,3 +748,30 @@ mod tests {
         assert_chat_provider(&TestProvider);
     }
 }
+
+
+/// Persistence boundary for staged-document ingestion. Implementations must
+/// atomically persist every chunk and its complete active-model embedding set,
+/// then transition the document to indexed in the same transaction.
+pub trait KnowledgeIngestionStore: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn load_knowledge_ingestion_document(
+        &self,
+        scope: &Scope,
+        document_id: crate::ids::KnowledgeDocumentId,
+    ) -> impl Future<Output = Result<Option<crate::knowledge_ingestion::KnowledgeIngestionDocumentState>, Self::Error>> + Send;
+
+    fn active_ingestion_embedding_models(
+        &self,
+        scope: &Scope,
+    ) -> impl Future<Output = Result<Vec<crate::knowledge_ingestion::IngestionEmbeddingModel>, Self::Error>> + Send;
+
+    fn persist_indexed_knowledge_document(
+        &self,
+        scope: &Scope,
+        document_id: crate::ids::KnowledgeDocumentId,
+        expected_models: &[crate::knowledge_ingestion::IngestionEmbeddingModel],
+        chunks: &[crate::knowledge_ingestion::IngestionChunk],
+    ) -> impl Future<Output = Result<crate::knowledge_ingestion::IngestionPersistenceOutcome, Self::Error>> + Send;
+}
