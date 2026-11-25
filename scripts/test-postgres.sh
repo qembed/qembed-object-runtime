@@ -152,6 +152,11 @@ done
 cargo test -p qembed-store --test context_issuer_postgres -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/qsa003-rust-contextissuer-canonical.log"
 
+# RUST-074: exercise the application Caller repository against the canonical
+# signed-context memories RLS policy, not the Rust-owned development schema.
+cargo test -p qembed-store --test episodic_memory -- --ignored --test-threads=1 2>&1 \
+  | tee "$evidence_dir/rust-074-episodic-memory-caller-isolation.log"
+
 # RUST-061 uses the same canonical Runtime schema plus the mandatory external
 # Control-plane database. The test proves revoke -> external tombstone -> erase
 # ordering and repeated deletion idempotency through the Rust Store adapter.
