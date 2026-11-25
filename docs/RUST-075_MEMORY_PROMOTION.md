@@ -17,4 +17,4 @@
 ## Acceptance
 
 - Domain unit tests cover owner/non-owner, eligible User/ThirdParty candidates, episodic rejection, and invalid source/verification states.
-- Canonical PostgreSQL integration proves a new Verified row is created, candidate remains Unverified and unchanged, supersedes_id and verified_by are correct, repeated promotion is rejected, and a non-owner is rejected before SQL.
+- Canonical PostgreSQL integration proves a new Verified row is created with a non-null verified_at, candidate remains Unverified and unchanged, supersedes_id and verified_by are correct, repeated promotion is rejected, and a non-owner is rejected before SQL.
