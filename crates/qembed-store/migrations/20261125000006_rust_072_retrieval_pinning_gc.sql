@@ -44,7 +44,7 @@ CREATE POLICY knowledge_documents_definer_access
 GRANT SELECT, INSERT ON knowledge_revision_pins TO qembed_runtime;
 GRANT SELECT ON knowledge_revision_pins TO qembed_admin;
 GRANT SELECT, DELETE ON knowledge_revision_pins TO qembed_definer;
-GRANT SELECT, DELETE ON knowledge_documents TO qembed_definer;
+GRANT SELECT, UPDATE, DELETE ON knowledge_documents TO qembed_definer;
 GRANT SELECT, UPDATE ON knowledge_revisions TO qembed_definer;
 GRANT SELECT ON knowledge_revision_log TO qembed_definer;
 
@@ -65,7 +65,7 @@ BEGIN
        AND object_id = NEW.object_id
      FOR SHARE;
 
-    IF NOT FOUND OR NEW.revision > v_current_revision THEN
+    IF NOT FOUND OR NEW.revision <> v_current_revision THEN
         RAISE EXCEPTION 'knowledge revision pin is not committed for this Object'
             USING ERRCODE = '23514';
     END IF;
@@ -76,7 +76,8 @@ BEGIN
        AND object_id = NEW.object_id
        AND id = NEW.invocation_id
        AND knowledge_revision = NEW.revision
-       AND status NOT IN ('Completed', 'CompletedDegraded', 'Failed', 'Cancelled');
+       AND status NOT IN ('Completed', 'CompletedDegraded', 'Failed', 'Cancelled')
+     FOR SHARE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'knowledge revision pin must belong to an active matching invocation'
@@ -172,8 +173,8 @@ BEGIN
                   AND pin.revision < document.valid_to_revision
            )
          ORDER BY document.valid_to_revision, document.id
-         FOR UPDATE OF document SKIP LOCKED
          LIMIT p_batch_size
+         FOR UPDATE OF document SKIP LOCKED
     ),
     deleted AS (
         DELETE FROM knowledge_documents AS document
