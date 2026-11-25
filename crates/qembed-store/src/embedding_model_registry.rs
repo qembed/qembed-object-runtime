@@ -21,16 +21,16 @@ pub enum PgEmbeddingModelRegistryError {
 impl fmt::Display for PgEmbeddingModelRegistryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Database(error) => {
-                write!(formatter, "embedding model registry database error: {error}")
-            }
+            Self::Database(error) => write!(
+                formatter,
+                "embedding model registry database error: {error}"
+            ),
             Self::DuplicateModelId => {
                 formatter.write_str("embedding model ID is already registered")
             }
             Self::ModelNotFound => formatter.write_str("embedding model was not found"),
-            Self::InvalidPersistedModel => {
-                formatter.write_str("persisted embedding model metadata violates the domain contract")
-            }
+            Self::InvalidPersistedModel => formatter
+                .write_str("persisted embedding model metadata violates the domain contract"),
         }
     }
 }

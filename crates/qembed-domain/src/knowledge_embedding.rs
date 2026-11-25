@@ -146,10 +146,7 @@ pub struct EmbeddingVector {
 }
 
 impl EmbeddingVector {
-    pub fn new(
-        model_id: impl Into<String>,
-        values: Vec<f32>,
-    ) -> Result<Self, EmbeddingModelError> {
+    pub fn new(model_id: impl Into<String>, values: Vec<f32>) -> Result<Self, EmbeddingModelError> {
         let model_id = model_id.into();
 
         if model_id.trim().is_empty() || values.is_empty() {
@@ -267,8 +264,14 @@ mod tests {
 
     #[test]
     fn same_dimension_does_not_make_different_metrics_interchangeable() {
-        let cosine = EmbeddingModel::new(spec("cosine-model", 3, EmbeddingDistanceMetric::Cosine), true);
-        let ip = EmbeddingModel::new(spec("ip-model", 3, EmbeddingDistanceMetric::InnerProduct), true);
+        let cosine = EmbeddingModel::new(
+            spec("cosine-model", 3, EmbeddingDistanceMetric::Cosine),
+            true,
+        );
+        let ip = EmbeddingModel::new(
+            spec("ip-model", 3, EmbeddingDistanceMetric::InnerProduct),
+            true,
+        );
         let vector = EmbeddingVector::new("cosine-model", vec![1.0, 0.0, 0.0]).unwrap();
 
         assert_eq!(cosine.validate_vector(&vector), Ok(()));
@@ -276,10 +279,7 @@ mod tests {
             ip.validate_vector(&vector),
             Err(EmbeddingModelError::ModelIdMismatch)
         );
-        assert_ne!(
-            cosine.spec().distance_metric(),
-            ip.spec().distance_metric()
-        );
+        assert_ne!(cosine.spec().distance_metric(), ip.spec().distance_metric());
     }
 
     #[test]

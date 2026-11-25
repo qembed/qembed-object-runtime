@@ -1,6 +1,6 @@
 use qembed_domain::knowledge_embedding::{EmbeddingDistanceMetric, EmbeddingModelSpec};
 use qembed_store::{
-    connect_pool, embedding_model_registry::PgEmbeddingModelRegistry, run_migrations, PgPoolConfig,
+    PgPoolConfig, connect_pool, embedding_model_registry::PgEmbeddingModelRegistry, run_migrations,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -27,13 +27,15 @@ async fn setup() -> (PgPool, PgEmbeddingModelRegistry) {
     (pool.clone(), PgEmbeddingModelRegistry::new(pool))
 }
 
-fn spec(
-    id: String,
-    dimension: usize,
-    metric: EmbeddingDistanceMetric,
-) -> EmbeddingModelSpec {
-    EmbeddingModelSpec::new(id, "test-provider", "test-embedding-model", dimension, metric)
-        .unwrap()
+fn spec(id: String, dimension: usize, metric: EmbeddingDistanceMetric) -> EmbeddingModelSpec {
+    EmbeddingModelSpec::new(
+        id,
+        "test-provider",
+        "test-embedding-model",
+        dimension,
+        metric,
+    )
+    .unwrap()
 }
 
 #[tokio::test]
