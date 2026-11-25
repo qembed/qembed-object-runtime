@@ -181,7 +181,7 @@ impl Error for PinnedConnectError {}
 #[cfg(test)]
 mod tests {
     use std::{
-        net::{IpAddr, Ipv4Addr, SocketAddr},
+        net::{IpAddr, Ipv4Addr},
         sync::Arc,
         time::Duration,
     };
