@@ -227,6 +227,20 @@ impl PgKnowledgeRepository {
         )
         .await?;
 
+        // Lock existing embedding rows as well: a concurrent model adapter must
+        // not remove or replace evidence after completeness has been checked.
+        let _locked_embeddings: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT chunk_id FROM knowledge_chunk_embeddings \\
+             WHERE tenant_id = $1::uuid AND object_id = $2::uuid \\
+               AND chunk_id = ANY($3::uuid[]) \\
+             ORDER BY chunk_id, model_id FOR SHARE",
+        )
+        .bind(scope.tenant_id().to_string())
+        .bind(object_id.to_string())
+        .bind(&indexed_ids)
+        .fetch_all(transaction.connection())
+        .await?;
+
         let incomplete: bool = sqlx::query_scalar(
             "SELECT EXISTS ( \
                 SELECT 1 FROM knowledge_documents d \
