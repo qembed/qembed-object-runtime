@@ -134,9 +134,7 @@ impl fmt::Display for MemoryPromotionValidationError {
             Self::UnsupportedCandidateSource => {
                 formatter.write_str("candidate source is not eligible for Owner promotion")
             }
-            Self::CandidateNotUnverified => {
-                formatter.write_str("candidate is not Unverified")
-            }
+            Self::CandidateNotUnverified => formatter.write_str("candidate is not Unverified"),
         }
     }
 }

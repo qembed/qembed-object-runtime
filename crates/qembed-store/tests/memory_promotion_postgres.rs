@@ -33,12 +33,14 @@ async fn owner_promotion_creates_new_verified_row_and_preserves_candidate() {
     .await
     .expect("Owner principal fixture");
 
-    sqlx::query("INSERT INTO objects (tenant_id, object_id, state) VALUES ($1::uuid, $2::uuid, 'draft')")
-        .bind(tenant_id.to_string())
-        .bind(object_id.to_string())
-        .execute(&pool)
-        .await
-        .expect("Object fixture");
+    sqlx::query(
+        "INSERT INTO objects (tenant_id, object_id, state) VALUES ($1::uuid, $2::uuid, 'draft')",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("Object fixture");
 
     sqlx::query(
         "INSERT INTO memories (id, tenant_id, object_id, memory_kind, claim, source_kind, verification, confidence) \

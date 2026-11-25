@@ -172,7 +172,9 @@ impl fmt::Display for MemoryPromotionError {
             Self::CandidateRejected(error) => {
                 write!(formatter, "memory candidate cannot be promoted: {error}")
             }
-            Self::AlreadyPromoted => formatter.write_str("memory candidate has already been promoted"),
+            Self::AlreadyPromoted => {
+                formatter.write_str("memory candidate has already been promoted")
+            }
             Self::InvalidStoredState => {
                 formatter.write_str("memory candidate has an unknown persisted state")
             }
