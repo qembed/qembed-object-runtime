@@ -14,12 +14,12 @@ Episodic memory reads begin a signed Caller-scoped PostgreSQL transaction throug
 
 The current RUST-074 Store slice is read-only. Memory creation, provenance assignment, and Owner promotion are separate application workflows; RUST-075 owns Owner-authored Verified-row promotion.
 
-PostgreSQL RLS remains an independent enforcement layer for episodic memories and dependent rows. Missing or revoked Caller delegation fails closed before the memory query.
+PostgreSQL RLS remains an independent enforcement layer for episodic memories and dependent rows. The Rust Caller integration test is deliberately run against the canonical qembed-sql schema after RT-050 is installed; the ordinary Rust-owned SQLx development schema does not contain `memories`. Missing or revoked Caller delegation fails closed before the memory query.
 
 ## Acceptance coverage
 
-- PostgreSQL integration: Caller A cannot read Caller B's episodic memory, even when both memories share tenant and Object.
-- PostgreSQL integration: Caller A cannot select Caller B without a direct active delegation.
+- Canonical PostgreSQL integration (run by `scripts/test-postgres.sh` after qembed-sql RT-050): Caller A cannot read Caller B's episodic memory, even when both memories share tenant and Object; a direct query without an explicit Caller predicate is still filtered by signed-context RLS.
+- Canonical PostgreSQL integration: an un-delegated Caller cannot be selected by the authenticated Principal.
 - PostgreSQL/API integration: a valid citation resolves only against persisted revision-visible evidence; a forged chunk ID is rejected.
 - The application verifier has no evidence input parameter, so request data cannot replace the retrieved evidence text.
 
