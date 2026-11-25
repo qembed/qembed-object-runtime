@@ -301,23 +301,71 @@ fn validate_answer(
 
 fn is_public_unicast(address: IpAddr) -> bool {
     match address {
-        IpAddr::V4(address) => {
-            !address.is_private()
-                && !address.is_loopback()
-                && !address.is_link_local()
-                && !address.is_unspecified()
-                && !address.is_multicast()
-                && !address.is_broadcast()
-        }
-        IpAddr::V6(address) => {
-            address.to_ipv4_mapped().is_none()
-                && !address.is_loopback()
-                && !address.is_unique_local()
-                && !address.is_unicast_link_local()
-                && !address.is_unspecified()
-                && !address.is_multicast()
-        }
+        IpAddr::V4(address) => is_public_ipv4(address),
+        IpAddr::V6(address) => is_public_ipv6(address),
     }
+}
+
+/// Applies a conservative public-destination policy using the IANA special-purpose
+/// registries. The explicit allow-list exceptions in 192.0.0.0/24 are globally
+/// reachable protocol anycasts; all other addresses in that block remain rejected.
+fn is_public_ipv4(address: Ipv4Addr) -> bool {
+    if address == Ipv4Addr::new(192, 0, 0, 9) || address == Ipv4Addr::new(192, 0, 0, 10) {
+        return true;
+    }
+
+    const NON_PUBLIC: &[(Ipv4Addr, u8)] = &[
+        (Ipv4Addr::new(0, 0, 0, 0), 8),       // "This network"
+        (Ipv4Addr::new(10, 0, 0, 0), 8),      // Private use
+        (Ipv4Addr::new(100, 64, 0, 0), 10),   // Shared address space / CGNAT
+        (Ipv4Addr::new(127, 0, 0, 0), 8),     // Loopback
+        (Ipv4Addr::new(169, 254, 0, 0), 16),  // Link-local, including cloud metadata
+        (Ipv4Addr::new(172, 16, 0, 0), 12),   // Private use
+        (Ipv4Addr::new(192, 0, 0, 0), 24),    // IETF protocol assignments (except .9/.10)
+        (Ipv4Addr::new(192, 0, 2, 0), 24),    // Documentation
+        (Ipv4Addr::new(192, 88, 99, 0), 24),  // Deprecated 6to4 relay anycast
+        (Ipv4Addr::new(192, 168, 0, 0), 16),  // Private use
+        (Ipv4Addr::new(198, 18, 0, 0), 15),   // Benchmarking
+        (Ipv4Addr::new(198, 51, 100, 0), 24), // Documentation
+        (Ipv4Addr::new(203, 0, 113, 0), 24),  // Documentation
+        (Ipv4Addr::new(224, 0, 0, 0), 4),     // Multicast
+        (Ipv4Addr::new(240, 0, 0, 0), 4),     // Reserved
+    ];
+
+    !NON_PUBLIC
+        .iter()
+        .any(|(network, prefix)| ipv4_in_prefix(address, *network, *prefix))
+        && !address.is_broadcast()
+}
+
+fn ipv4_in_prefix(address: Ipv4Addr, network: Ipv4Addr, prefix: u8) -> bool {
+    let mask = u32::MAX << (32 - u32::from(prefix));
+    (u32::from(address) & mask) == (u32::from(network) & mask)
+}
+
+/// Only the IPv6 global-unicast allocation (2000::/3) is eligible. Special-purpose
+/// allocations inside it are then denied, including transition, documentation,
+/// benchmarking and non-globally-reachable protocol ranges.
+fn is_public_ipv6(address: Ipv6Addr) -> bool {
+    const GLOBAL_UNICAST: (Ipv6Addr, u8) = (Ipv6Addr::new(0x2000, 0, 0, 0, 0, 0, 0, 0), 3);
+    const NON_PUBLIC: &[(Ipv6Addr, u8)] = &[
+        (Ipv6Addr::new(0x2001, 0, 0, 0, 0, 0, 0, 0), 23), // IETF protocol assignments
+        (Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0), 32), // Documentation
+        (Ipv6Addr::new(0x2001, 2, 0, 0, 0, 0, 0, 0), 48), // Benchmarking
+        (Ipv6Addr::new(0x2002, 0, 0, 0, 0, 0, 0, 0), 16), // 6to4
+        (Ipv6Addr::new(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20), // Documentation
+    ];
+
+    ipv6_in_prefix(address, GLOBAL_UNICAST.0, GLOBAL_UNICAST.1)
+        && address.to_ipv4_mapped().is_none()
+        && !NON_PUBLIC
+            .iter()
+            .any(|(network, prefix)| ipv6_in_prefix(address, *network, *prefix))
+}
+
+fn ipv6_in_prefix(address: Ipv6Addr, network: Ipv6Addr, prefix: u8) -> bool {
+    let mask = u128::MAX << (128 - u32::from(prefix));
+    (u128::from(address) & mask) == (u128::from(network) & mask)
 }
 
 #[cfg(test)]
@@ -409,6 +457,86 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn rejects_ipv4_special_purpose_ranges() {
+        for address in [
+            "0.0.0.0",
+            "0.1.2.3",
+            "10.0.0.1",
+            "100.63.255.255",
+            "100.64.0.1",
+            "100.127.255.254",
+            "127.0.0.1",
+            "169.254.169.254",
+            "169.254.170.2",
+            "172.16.0.1",
+            "192.0.0.8",
+            "192.0.0.170",
+            "192.0.0.171",
+            "192.0.2.1",
+            "192.88.99.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "240.0.0.1",
+            "255.255.255.255",
+        ] {
+            let address = address.parse().expect("valid IPv4 fixture");
+            assert!(!is_public_unicast(IpAddr::V4(address)), "{address}");
+        }
+    }
+
+    #[test]
+    fn accepts_globally_reachable_ipv4_special_registry_exceptions() {
+        for address in ["192.0.0.9", "192.0.0.10", "192.31.196.1", "192.52.193.1", "192.175.48.1"] {
+            let address = address.parse().expect("valid IPv4 fixture");
+            assert!(is_public_unicast(IpAddr::V4(address)), "{address}");
+        }
+    }
+
+    #[test]
+    fn rejects_ipv6_special_purpose_ranges_and_transition_addresses() {
+        for address in [
+            "::",
+            "::1",
+            "::ffff:192.0.2.1",
+            "64:ff9b::c000:201",
+            "64:ff9b:1::c000:201",
+            "100::1",
+            "2001::1",
+            "2001:2::1",
+            "2001:db8::1",
+            "2002::1",
+            "3fff::1",
+            "fc00::1",
+            "fe80::1",
+            "ff02::1",
+            "5f00::1",
+        ] {
+            let address = address.parse().expect("valid IPv6 fixture");
+            assert!(!is_public_unicast(IpAddr::V6(address)), "{address}");
+        }
+    }
+
+    #[test]
+    fn accepts_global_unicast_ipv6_outside_special_purpose_ranges() {
+        for address in ["2001:4860:4860::8888", "2606:4700:4700::1111"] {
+            let address = address.parse().expect("valid IPv6 fixture");
+            assert!(is_public_unicast(IpAddr::V6(address)), "{address}");
+        }
+    }
+
+    #[test]
+    fn special_range_prefix_boundaries_are_exact() {
+        assert!(!is_public_unicast(IpAddr::V4("100.64.0.0".parse().unwrap())));
+        assert!(is_public_unicast(IpAddr::V4("100.128.0.0".parse().unwrap())));
+        assert!(!is_public_unicast(IpAddr::V4("198.19.255.255".parse().unwrap())));
+        assert!(is_public_unicast(IpAddr::V4("198.20.0.0".parse().unwrap())));
+        assert!(!is_public_unicast(IpAddr::V6("2001:db8::".parse().unwrap())));
+        assert!(is_public_unicast(IpAddr::V6("2001:db9::".parse().unwrap())));
     }
 
     #[test]
