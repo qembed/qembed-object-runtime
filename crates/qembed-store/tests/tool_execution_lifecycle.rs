@@ -241,7 +241,10 @@ async fn changed_binding_version_rejects_claim_before_external_execution() {
         .expect("execution exists");
     assert_eq!(persisted.status(), ToolExecutionStatus::Authorized);
     assert_eq!(persisted.version(), 0);
-    assert_eq!(persisted.fencing_token(), ToolExecutionFencingToken::INITIAL);
+    assert_eq!(
+        persisted.fencing_token(),
+        ToolExecutionFencingToken::INITIAL
+    );
     assert_eq!(persisted.lease_owner(), None);
 
     fixture.pool.close().await;

@@ -400,8 +400,12 @@ impl fmt::Display for PolicyEvaluationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroPolicyVersion => formatter.write_str("policy version must be non-zero"),
-            Self::ToolBindingRequired => formatter.write_str("ToolExecution requires a current binding identity"),
-            Self::NotToolExecution => formatter.write_str("binding-aware authorization requires ToolExecution"),
+            Self::ToolBindingRequired => {
+                formatter.write_str("ToolExecution requires a current binding identity")
+            }
+            Self::NotToolExecution => {
+                formatter.write_str("binding-aware authorization requires ToolExecution")
+            }
         }
     }
 }
@@ -547,7 +551,10 @@ impl Authorizer {
                 Some(binding),
             )
         });
-        Ok(AuthorizationOutcome { policy, allowed_command })
+        Ok(AuthorizationOutcome {
+            policy,
+            allowed_command,
+        })
     }
 }
 
@@ -724,7 +731,8 @@ mod tests {
                     crate::ids::ToolId::new(),
                     crate::ids::ToolVersionId::new(),
                     1,
-                ).expect("valid binding"),
+                )
+                .expect("valid binding"),
             )
             .expect("valid policy");
         let allowed = outcome.allowed_command().expect("Allow mints capability");

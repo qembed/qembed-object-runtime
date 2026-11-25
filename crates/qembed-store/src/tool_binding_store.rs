@@ -2,10 +2,7 @@
 use std::{error::Error, fmt};
 
 use qembed_domain::{
-    ids::ObjectId,
-    ports::ToolBindingStore,
-    scope::Scope,
-    tool_binding::ToolBindingIdentity,
+    ids::ObjectId, ports::ToolBindingStore, scope::Scope, tool_binding::ToolBindingIdentity,
 };
 use sqlx::Row;
 
@@ -21,12 +18,17 @@ pub enum PgToolBindingStoreError {
 impl fmt::Display for PgToolBindingStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Context(error) => write!(f, "Tool binding context initialization failed: {error}"),
+            Self::Context(error) => {
+                write!(f, "Tool binding context initialization failed: {error}")
+            }
             Self::Database(error) => write!(f, "Tool binding lookup failed: {error}"),
-            Self::InvalidBindingVersion => f.write_str("persisted Tool binding version is invalid"),
+            Self::InvalidBindingVersion => {
+                f.write_str("persisted Tool binding version is invalid")
+            }
         }
     }
 }
+
 impl Error for PgToolBindingStoreError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
@@ -36,20 +38,30 @@ impl Error for PgToolBindingStoreError {
         }
     }
 }
+
 impl From<crate::ContextTransactionError> for PgToolBindingStoreError {
-    fn from(value: crate::ContextTransactionError) -> Self { Self::Context(value) }
+    fn from(value: crate::ContextTransactionError) -> Self {
+        Self::Context(value)
+    }
 }
+
 impl From<sqlx::Error> for PgToolBindingStoreError {
-    fn from(value: sqlx::Error) -> Self { Self::Database(value) }
+    fn from(value: sqlx::Error) -> Self {
+        Self::Database(value)
+    }
 }
 
 /// Read-only validation adapter. It never resolves a newer version as a fallback.
 #[derive(Clone)]
-pub struct PgToolBindingStore { context: PgContext }
+pub struct PgToolBindingStore {
+    context: PgContext,
+}
 
 impl PgToolBindingStore {
     #[must_use]
-    pub fn new(context: PgContext) -> Self { Self { context } }
+    pub fn new(context: PgContext) -> Self {
+        Self { context }
+    }
 }
 
 impl ToolBindingStore for PgToolBindingStore {
@@ -73,9 +85,17 @@ impl ToolBindingStore for PgToolBindingStore {
             .bind(object_id.to_string())
             .bind(binding.tool_id().to_string())
             .bind(binding.tool_version_id().to_string())
-            .bind(i64::try_from(binding.binding_version()).map_err(|_| PgToolBindingStoreError::InvalidBindingVersion)?),
-        ).await?;
-        let current = row.map(|row| row.try_get::<bool, _>("enabled")).transpose()?.unwrap_or(false);
+            .bind(
+                i64::try_from(binding.binding_version())
+                    .map_err(|_| PgToolBindingStoreError::InvalidBindingVersion)?,
+            ),
+        )
+        .await?;
+
+        let current = row
+            .map(|row| row.try_get::<bool, _>("enabled"))
+            .transpose()?
+            .unwrap_or(false);
         transaction.commit().await?;
         Ok(current)
     }
