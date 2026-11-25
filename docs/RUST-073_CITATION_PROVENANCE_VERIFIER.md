@@ -41,8 +41,10 @@ collections and does not treat unresolved citations as external references.
 
 ## Numeric and URL matching
 
-Numeric literals are compared after deterministic normalization of grouping
-separators, decimal separators, and percent units. A percentage is not treated
+Numeric literals are compared after deterministic normalization of unambiguous
+multi-group separators, decimal separators, signs, and percent units. A single
+comma or dot followed by three digits is treated as ambiguous decimal notation,
+not silently assumed to be a thousands separator. A percentage is not treated
 as the same literal as the corresponding unqualified number.
 
 Explicit HTTP, HTTPS, and www URLs are extracted and compared verbatim after
