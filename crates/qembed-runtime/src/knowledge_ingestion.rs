@@ -1,5 +1,5 @@
-use std::{error::Error, fmt};
 //! Staged-document ingestion orchestration. Provider I/O is outside DB transactions.
+use std::{error::Error, fmt};
 use qembed_domain::{
     ids::{KnowledgeChunkId, KnowledgeDocumentId},
     knowledge_ingestion::{
