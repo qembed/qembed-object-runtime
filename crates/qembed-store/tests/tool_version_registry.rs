@@ -2,6 +2,7 @@ mod common;
 
 use qembed_domain::{
     ids::{ToolId, ToolVersionId},
+    ports::ToolVersionRegistry,
     tool_version::{ToolDefinition, ToolRiskLevel, ToolVersion},
 };
 use qembed_store::{run_migrations, tool_version_registry::PgToolVersionRegistry};
