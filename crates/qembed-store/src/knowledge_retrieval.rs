@@ -10,6 +10,7 @@ use std::{error::Error, fmt};
 use qembed_domain::{
     ids::{KnowledgeChunkId, KnowledgeDocumentId},
     knowledge::PinnedKnowledgeRevision,
+    knowledge_embedding::{EmbeddingDistanceMetric, EmbeddingModel, EmbeddingModelError, EmbeddingModelSpec, EmbeddingVector},
     scope::Scope,
 };
 use sqlx::{Row, types::Uuid};
@@ -63,6 +64,8 @@ pub enum PgKnowledgeRetrievalError {
     FutureRevision,
     RevisionOutOfRange,
     InvalidPersistedChunkPosition,
+    InvalidQueryVector(EmbeddingModelError),
+    InvalidTopK,
 }
 
 impl fmt::Display for PgKnowledgeRetrievalError {
@@ -86,6 +89,8 @@ impl fmt::Display for PgKnowledgeRetrievalError {
             Self::InvalidPersistedChunkPosition => {
                 formatter.write_str("persisted chunk position is negative")
             }
+            Self::InvalidQueryVector(error) => write!(formatter, "invalid retrieval query vector: {error}"),
+            Self::InvalidTopK => formatter.write_str("retrieval top-k must be positive and fit PostgreSQL BIGINT"),
         }
     }
 }
@@ -189,4 +194,32 @@ impl PgKnowledgeRetrievalStore {
         transaction.commit().await?;
         Ok(chunks)
     }
+}
+
+/// Whether a pgvector result is a similarity (higher is better) or distance (lower is better).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RetrievalScore {
+    Similarity(f64),
+    Distance(f64),
+}
+
+/// A revision-visible chunk ranked by one embedding model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RankedKnowledgeChunk {
+    chunk: VisibleKnowledgeChunk,
+    score: RetrievalScore,
+}
+
+impl RankedKnowledgeChunk {
+    #[must_use]
+    pub const fn chunk(&self) -> &VisibleKnowledgeChunk { &self.chunk }
+
+    #[must_use]
+    pub const fn score(&self) -> RetrievalScore { self.score }
+}
+
+#[derive(Clone, Copy)]
+enum RetrievalScoreKind {
+    Similarity,
+    Distance,
 }
