@@ -79,13 +79,9 @@ async fn stage_issuer(admin_pool: &PgPool) -> ContextIssuer {
         .expect("control-plane authorization should be reset before pool reuse");
     drop(control_plane);
 
-    let config = ContextIssuerConfig::with_default_lifetime(
-        issuer_name,
-        audience,
-        deployment_id,
-        key_id,
-    )
-    .expect("RUST-074 ContextIssuer configuration should be valid");
+    let config =
+        ContextIssuerConfig::with_default_lifetime(issuer_name, audience, deployment_id, key_id)
+            .expect("RUST-074 ContextIssuer configuration should be valid");
     ContextIssuer::new(config, signing_key).expect("RUST-074 ContextIssuer should be valid")
 }
 
