@@ -344,9 +344,8 @@ fn normalize_number(raw: &str) -> String {
         (None, None) => None,
     };
 
-    let mut normalized = String::with_capacity(
-        sign.len() + value.len() + if percent { 1 } else { 0 },
-    );
+    let mut normalized =
+        String::with_capacity(sign.len() + value.len() + if percent { 1 } else { 0 });
     normalized.push_str(sign);
     let decimal_index = decimal_separator.and_then(|separator| value.rfind(separator));
     for (index, ch) in value.char_indices() {
@@ -638,7 +637,11 @@ mod tests {
         let matching = CitationDocument {
             claims: vec![claim("The balance is -5.", vec![id])],
         };
-        assert!(CitationVerifier::new().verify(&matching, std::slice::from_ref(&negative)).is_accepted());
+        assert!(
+            CitationVerifier::new()
+                .verify(&matching, std::slice::from_ref(&negative))
+                .is_accepted()
+        );
 
         let positive = chunk("The balance is 5.");
         let id = positive.id;
@@ -658,7 +661,11 @@ mod tests {
         let normalized = CitationDocument {
             claims: vec![claim("The population is 1234567.", vec![id])],
         };
-        assert!(CitationVerifier::new().verify(&normalized, &[grouped]).is_accepted());
+        assert!(
+            CitationVerifier::new()
+                .verify(&normalized, &[grouped])
+                .is_accepted()
+        );
     }
 
     #[test]
