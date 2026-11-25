@@ -12,8 +12,7 @@ use uuid::Uuid;
 async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artifacts() {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set by the test harness");
-    let admin_options =
-        PgConnectOptions::from_str(&database_url).expect("DATABASE_URL is valid");
+    let admin_options = PgConnectOptions::from_str(&database_url).expect("DATABASE_URL is valid");
     let mut admin = PgConnection::connect_with(&admin_options)
         .await
         .expect("admin connection opens");
@@ -51,10 +50,8 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
         EmbeddingDistanceMetric::Cosine,
     )
     .unwrap();
-    sqlx::query(
-        "INSERT INTO embedding_models(id, dimension, distance_metric) VALUES ($1, $2, $3)",
-    )
-    .bind(model.id())
+    sqlx::query("INSERT INTO embedding_models(id, dimension, distance_metric) VALUES ($1, $2, $3)")
+        .bind(model.id())
     .bind(i32::try_from(model.dimension()).unwrap())
     .bind(model.distance_metric().as_database_value())
     .execute(&pool)
@@ -109,7 +106,10 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
     ))
     .execute(&pool)
     .await;
-    assert!(failed_build.is_err(), "duplicate values must fail unique index build");
+    assert!(
+        failed_build.is_err(),
+        "duplicate values must fail unique index build"
+    );
 
     let invalid_artifact: bool = sqlx::query_scalar(
         "SELECT NOT i.indisvalid \
@@ -156,10 +156,7 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
 async fn hnsw_manager_skips_dimensions_outside_pgvector_vector_index_limit() {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set by the test harness");
-    let pool = qembed_store::connect_pool(
-        &database_url,
-        qembed_store::PgPoolConfig::default(),
-    )
+    let pool = qembed_store::connect_pool(&database_url, qembed_store::PgPoolConfig::default())
     .await
     .expect("PostgreSQL connection opens");
     let model = EmbeddingModelSpec::new(
