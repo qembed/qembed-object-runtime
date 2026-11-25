@@ -33,6 +33,7 @@ pub mod knowledge_gc;
 pub mod knowledge_ingestion;
 pub mod knowledge_repository;
 pub mod knowledge_retrieval;
+pub mod memory_promotion;
 pub mod object_repository;
 pub mod outbox_dispatcher;
 pub mod pg_context;

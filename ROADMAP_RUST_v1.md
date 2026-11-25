@@ -537,13 +537,15 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: активный invocation воспроизводимо читает зафиксированную revision; GC не может удалить видимые ему данные.
   - Evidence: Rust PR [#145](https://github.com/qembed/qembed-object-runtime/pull/145), CI run [#45622706121](https://github.com/qembed/qembed-object-runtime/actions/runs/45622706121) — success (362 passed, 6 skipped); canonical SQL RT-063 PR [#97](https://github.com/qembed/qembed-sql/pull/97) — merged, PostgreSQL smoke and migration checks green.
 
-- [ ] **RUST-073 (M)** Реализовать citation/provenance verifier V1–V7.
+- [x] **RUST-073 (M)** Реализовать citation/provenance verifier V1–V7.
   - Тесты: positive/negative corpus для chunk IDs, чисел, ссылок и обязательных citations; property tests на malformed claims.
   - DoD: verifier отклоняет неподтверждённые claims.
+  - Evidence: Rust PR [#147](https://github.com/qembed/qembed-object-runtime/pull/147), CI run [#45635114821](https://github.com/qembed/qembed-object-runtime/actions/runs/45630503061) — success.
 
-- [ ] **RUST-074 (M)** Реализовать application-level provenance и caller isolation.
+- [x] **RUST-074 (M)** Реализовать application-level provenance и caller isolation.
   - Тесты: integration — Caller A не читает episodic memory Caller B; forged provenance rejected.
   - DoD: provenance проверяется на app path, а не только DB constraints.
+  - Evidence: Rust PR [#148](https://github.com/qembed/qembed-object-runtime/pull/148), CI run [#45637358810](https://github.com/qembed/qembed-object-runtime/actions/runs/45637358810) — success (374 passed, 7 skipped); canonical SQL RT-050 Caller/RLS integration passed.
 
 - [ ] **RUST-075 (S)** Реализовать memory promotion как новую Owner-authored Verified row.
   - Тесты: domain и DB integration — candidate остаётся неизменным; только TenantOwner может подтвердить; supersedes chain валидна.
