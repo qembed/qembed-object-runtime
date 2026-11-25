@@ -10,9 +10,9 @@ This is deterministic provenance validation, not natural-language entailment. It
 
 ## Episodic memory Caller boundary
 
-Episodic memory reads and writes begin a signed Caller-scoped PostgreSQL transaction through `PgContext::begin_caller`. The requested Caller is resolved against the authenticated Principal's active direct delegation; the resulting `ResolvedCaller` is bound to the same transaction. The repository uses only that resolved Caller ID and also filters by it explicitly.
+Episodic memory reads begin a signed Caller-scoped PostgreSQL transaction through `PgContext::begin_caller`. The requested Caller is resolved against the authenticated Principal's active direct delegation; the resulting `ResolvedCaller` is bound to the same transaction. The repository uses only that resolved Caller ID and also filters by it explicitly.
 
-User-authored memory writes hard-code `source_kind = User` and `verification = Unverified`. The application API does not accept provenance assertions from the request. Other provenance transitions, including Owner promotion, remain separate workflows and are not implemented here.
+The current RUST-074 Store slice is read-only. Memory creation, provenance assignment, and Owner promotion are separate application workflows; RUST-075 owns Owner-authored Verified-row promotion.
 
 PostgreSQL RLS remains an independent enforcement layer for episodic memories and dependent rows. Missing or revoked Caller delegation fails closed before the memory query.
 
@@ -21,10 +21,10 @@ PostgreSQL RLS remains an independent enforcement layer for episodic memories an
 - PostgreSQL integration: Caller A cannot read Caller B's episodic memory, even when both memories share tenant and Object.
 - PostgreSQL integration: Caller A cannot select Caller B without a direct active delegation.
 - PostgreSQL/API integration: a valid citation resolves only against persisted revision-visible evidence; a forged chunk ID is rejected.
-- Unit tests: user claim bounds and control-character validation.
+- The application verifier has no evidence input parameter, so request data cannot replace the retrieved evidence text.
 
 ## Explicit non-goals
 
 - No natural-language entailment model.
-- No Owner memory promotion or Verified-row creation; that is RUST-075.
+- No memory write or Owner promotion workflow; promotion is RUST-075.
 - No cross-Caller delegation or implicit Caller selection.
