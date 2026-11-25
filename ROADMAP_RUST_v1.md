@@ -531,9 +531,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - Важно: RUST-070 materialized revision-visible candidate boundary пока не позволяет использовать глобальный HNSW index в retrieval query. ANN query integration не включается ценой нарушения revision visibility.
   - DoD: migrator корректно управляет non-transactional index operations и recovery.
 
-- [ ] **RUST-072 (M)** Реализовать retrieval pinning и GC protection.
-  - Тесты: DB integration — active invocation pins revision; GC не удаляет pinned revision; release pin после завершения.
-  - DoD: активный invocation воспроизводимо читает зафиксированную revision.
+- [x] **RUST-072 (M)** Реализовать retrieval pinning и GC protection.
+  - Реализация: положительная Knowledge revision сохраняется в отдельной pin-строке атомарно с созданием invocation; pin guard проверяет точное совпадение с текущей committed revision и active invocation. Pin creation и GC сериализованы блокировкой строки knowledge_revisions (FOR SHARE против FOR UPDATE). Terminal transition (Completed, CompletedDegraded, Failed, Cancelled) автоматически освобождает pin через SECURITY DEFINER trigger; runtime не имеет прямого DELETE/UPDATE на pins. Tenant-scoped GC удаляет только retired documents, которые не видны ни одному active pin, ограничивает batch 1–500 и полагается на FK cascade для chunks/embeddings, сохраняя append-only revision log.
+  - Тесты: PostgreSQL integration — begin_invocation сохраняет точную revision; active invocation защищает retired document от GC; terminal transition освобождает pin; повторный GC удаляет document и cascaded chunks; проверяется invalid batch size. Workspace CI: 362 passed, 6 skipped.
+  - DoD: активный invocation воспроизводимо читает зафиксированную revision; GC не может удалить видимые ему данные.
+  - Evidence: Rust PR [#145](https://github.com/qembed/qembed-object-runtime/pull/145), CI run [#45622706121](https://github.com/qembed/qembed-object-runtime/actions/runs/45622706121) — success (362 passed, 6 skipped); canonical SQL RT-063 PR [#97](https://github.com/qembed/qembed-sql/pull/97) — merged, PostgreSQL smoke and migration checks green.
 
 - [ ] **RUST-073 (M)** Реализовать citation/provenance verifier V1–V7.
   - Тесты: positive/negative corpus для chunk IDs, чисел, ссылок и обязательных citations; property tests на malformed claims.
