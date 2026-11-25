@@ -7,3 +7,4 @@ pub mod adapters;
 pub mod composition;
 pub mod errors;
 pub mod handlers;
+pub mod provenance;
