@@ -19,6 +19,7 @@ pub mod context_issuer;
 pub mod embedding_model_registry;
 mod event_outbox;
 pub mod external_deletion_ledger;
+pub mod hnsw_index;
 pub mod idempotency;
 pub mod invocation_cancellation;
 mod invocation_lease;
@@ -95,7 +96,12 @@ pub async fn connect_pool(database_url: &str, config: PgPoolConfig) -> Result<Pg
 pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     let migrations_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
     let migrator = Migrator::new(migrations_path).await?;
-    migrator.run(pool).await
+    migrator.run(pool).await?;
+    hnsw_index::PgHnswIndexManager::new(pool.clone())
+        .ensure_registered_models()
+        .await
+        .map_err(|error| MigrateError::Execute(sqlx::Error::Protocol(error.to_string())))?;
+    Ok(())
 }
 
 /// A PostgreSQL transaction with trusted tenant and authenticated Principal context established transaction-locally.

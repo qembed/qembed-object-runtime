@@ -122,3 +122,31 @@ incremental Rust integration-test/runtime slice.
 
 
 The RUST-068 registry adapter is a platform-admin-only Store capability. It registers immutable provider/model identity, vector dimension and distance metric, and permits activation changes only. Runtime credentials retain read-only access to the registry; registry mutations take a table lock compatible with the RUST-066 commit lock so the required active-model set cannot change during publication validation.
+
+
+## RUST-071: model-scoped HNSW index provisioning
+
+The Store migration entry point runs SQLx schema migrations first, then
+`PgHnswIndexManager` reconciles one HNSW index per registered embedding model.
+Indexes are partial on the immutable `model_id` and cast to that model's exact
+vector dimension. This is required because the registry permits different
+models (and therefore different dimensions) in the same untyped pgvector
+column; a single global HNSW index would not be valid for heterogeneous
+dimensions.
+
+Index DDL uses `CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY` on a
+pool connection outside a transaction. A session advisory lock serializes
+provisioning for each model. The PostgreSQL catalogs are authoritative:
+valid indexes are retained, while invalid artifacts left by an interrupted
+concurrent build are dropped concurrently and rebuilt on the next migration
+run.
+
+pgvector's `vector` HNSW index supports at most 2,000 dimensions. Models above
+that limit remain supported by exact retrieval and are reported as skipped by
+the HNSW manager; no dimension reduction or precision loss is silently applied.
+
+The current RUST-070 retrieval path still materializes the revision-visible
+candidate set before ranking, so it does not yet use these global HNSW indexes.
+That is deliberate: ANN candidate selection must not bypass pinned-revision
+visibility and consume top-k slots with invisible rows. HNSW query-plan
+integration requires a separate correctness-preserving design.
