@@ -230,9 +230,9 @@ impl PgKnowledgeRepository {
         // Lock existing embedding rows as well: a concurrent model adapter must
         // not remove or replace evidence after completeness has been checked.
         let _locked_embeddings: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT chunk_id FROM knowledge_chunk_embeddings \\
-             WHERE tenant_id = $1::uuid AND object_id = $2::uuid \\
-               AND chunk_id = ANY($3::uuid[]) \\
+            "SELECT chunk_id FROM knowledge_chunk_embeddings \
+             WHERE tenant_id = $1::uuid AND object_id = $2::uuid \
+               AND chunk_id = ANY($3::uuid[]) \
              ORDER BY chunk_id, model_id FOR SHARE",
         )
         .bind(scope.tenant_id().to_string())
