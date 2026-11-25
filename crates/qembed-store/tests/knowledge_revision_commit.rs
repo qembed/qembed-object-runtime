@@ -17,7 +17,9 @@ const TEST_MODEL_ID: &str = "rust066-integration-model";
 
 async fn setup() -> (PgPool, PgKnowledgeRepository, Scope, ObjectId) {
     let pool = common::connect().await;
-    run_migrations(&pool).await.expect("migrations should apply");
+    run_migrations(&pool)
+        .await
+        .expect("migrations should apply");
 
     sqlx::query(
         "INSERT INTO embedding_models (id, provider, model_name, dimension, distance_metric, active) \
@@ -206,8 +208,7 @@ async fn incomplete_indexing_does_not_advance_revision_or_publish_document() {
 #[tokio::test]
 async fn outbox_failure_rolls_back_revision_intervals_and_revision_log() {
     let (pool, repository, scope, object_id) = setup().await;
-    let (document_id, _) =
-        add_indexed_document(&pool, &scope, object_id, "rollback", true).await;
+    let (document_id, _) = add_indexed_document(&pool, &scope, object_id, "rollback", true).await;
 
     let suffix = scope.tenant_id().to_string().replace('-', "");
     let function_name = format!("test_knowledge_outbox_failure_{suffix}");
@@ -268,15 +269,20 @@ async fn outbox_failure_rolls_back_revision_intervals_and_revision_log() {
 #[tokio::test]
 async fn concurrent_commits_serialize_on_revision_row_and_publish_once() {
     let (pool, repository, scope, object_id) = setup().await;
-    let (document_id, _) =
-        add_indexed_document(&pool, &scope, object_id, "concurrent", true).await;
+    let (document_id, _) = add_indexed_document(&pool, &scope, object_id, "concurrent", true).await;
 
     let (first, second) = tokio::join!(
         repository.commit_knowledge_revision(&scope, object_id),
         repository.commit_knowledge_revision(&scope, object_id)
     );
-    let successes = [first.is_ok(), second.is_ok()].into_iter().filter(|success| *success).count();
-    assert_eq!(successes, 1, "only one transaction may publish the indexed batch");
+    let successes = [first.is_ok(), second.is_ok()]
+        .into_iter()
+        .filter(|success| *success)
+        .count();
+    assert_eq!(
+        successes, 1,
+        "only one transaction may publish the indexed batch"
+    );
     let loser = if first.is_err() { first } else { second };
     assert!(matches!(
         loser,
