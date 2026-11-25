@@ -490,6 +490,222 @@ pub fn evaluate_policy(
     })
 }
 
+/// A typed action proposal. It contains no raw JSON, Tool ID, or URL.
+///
+/// The enum variant fixes the policy action class. payload_hash is the digest
+/// of the canonical typed payload; action_hash additionally binds the action
+/// class, Object, step, and payload digest under a versioned domain separator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProposedAction {
+    /// Read Knowledge for an Object.
+    KnowledgeRead {
+        object_id: ObjectId,
+        step_index: u32,
+        payload_hash: [u8; 32],
+    },
+    /// Execute a Tool against its resolved immutable binding.
+    ToolExecution {
+        object_id: ObjectId,
+        step_index: u32,
+        payload_hash: [u8; 32],
+    },
+    /// Mutate an Object or its configuration.
+    ObjectMutation {
+        object_id: ObjectId,
+        step_index: u32,
+        payload_hash: [u8; 32],
+    },
+    /// Make an outbound network request.
+    ExternalNetwork {
+        object_id: ObjectId,
+        step_index: u32,
+        payload_hash: [u8; 32],
+    },
+}
+
+impl ProposedAction {
+    /// Returns the action class fixed by this proposal variant.
+    #[must_use]
+    pub const fn action_class(self) -> PolicyActionClass {
+        match self {
+            Self::KnowledgeRead { .. } => PolicyActionClass::KnowledgeRead,
+            Self::ToolExecution { .. } => PolicyActionClass::ToolExecution,
+            Self::ObjectMutation { .. } => PolicyActionClass::ObjectMutation,
+            Self::ExternalNetwork { .. } => PolicyActionClass::ExternalNetwork,
+        }
+    }
+
+    /// Returns the Object targeted by the proposal.
+    #[must_use]
+    pub const fn object_id(self) -> ObjectId {
+        match self {
+            Self::KnowledgeRead { object_id, .. }
+            | Self::ToolExecution { object_id, .. }
+            | Self::ObjectMutation { object_id, .. }
+            | Self::ExternalNetwork { object_id, .. } => object_id,
+        }
+    }
+
+    /// Returns the zero-based step index in the invocation.
+    #[must_use]
+    pub const fn step_index(self) -> u32 {
+        match self {
+            Self::KnowledgeRead { step_index, .. }
+            | Self::ToolExecution { step_index, .. }
+            | Self::ObjectMutation { step_index, .. }
+            | Self::ExternalNetwork { step_index, .. } => step_index,
+        }
+    }
+
+    /// Returns a digest bound to the action class, Object, step, and payload.
+    #[must_use]
+    pub fn action_hash(self) -> [u8; 32] {
+        let (class_tag, payload_hash) = match self {
+            Self::KnowledgeRead { payload_hash, .. } => (1_u8, payload_hash),
+            Self::ToolExecution { payload_hash, .. } => (2_u8, payload_hash),
+            Self::ObjectMutation { payload_hash, .. } => (3_u8, payload_hash),
+            Self::ExternalNetwork { payload_hash, .. } => (4_u8, payload_hash),
+        };
+        let mut digest = Sha256::new();
+        digest.update(b"qembed.proposed-action.v1\\0");
+        digest.update([class_tag]);
+        digest.update(self.object_id().as_uuid().as_bytes());
+        digest.update(self.step_index().to_be_bytes());
+        digest.update(payload_hash);
+        digest.finalize().into()
+    }
+}
+
+/// Trusted context supplied by domain-side fact providers to the Authorizer.
+///
+/// Its constructor is crate-private and it is not a transport DTO. Model or
+/// document content must never be converted into TrustedPolicyCheck values.
+#[derive(Debug)]
+pub struct TrustedPolicyContext {
+    invocation_id: InvocationId,
+    principal_id: PrincipalId,
+    policy_version: u32,
+    evaluated_at_unix_ms: u64,
+    trusted_checks: Vec<TrustedPolicyCheck>,
+    untrusted_evidence: Vec<UntrustedEvidenceDigest>,
+}
+
+impl TrustedPolicyContext {
+    /// Builds trusted context from authenticated identity and trusted fact providers.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    #[allow(dead_code)] // RUST-079 fact providers will assemble this context.
+    pub(crate) fn new(
+        invocation_id: InvocationId,
+        principal_id: PrincipalId,
+        policy_version: u32,
+        evaluated_at_unix_ms: u64,
+        trusted_checks: Vec<TrustedPolicyCheck>,
+        untrusted_evidence: Vec<UntrustedEvidenceDigest>,
+    ) -> Self {
+        Self {
+            invocation_id,
+            principal_id,
+            policy_version,
+            evaluated_at_unix_ms,
+            trusted_checks,
+            untrusted_evidence,
+        }
+    }
+}
+
+/// Outcome of authorization. Only Allow carries an executor capability.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AuthorizationOutcome {
+    /// Policy allowed the exact action and minted its capability.
+    Allowed(AllowedCommand),
+    /// Policy denied the action; no capability was minted.
+    Denied,
+    /// Policy requires a separate approval; no capability was minted.
+    RequiresApproval,
+}
+
+/// Authorization result with its policy audit record.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuthorizationResult {
+    outcome: AuthorizationOutcome,
+    audit: PolicyAuditContext,
+}
+
+impl AuthorizationResult {
+    /// Returns the typed authorization outcome.
+    #[must_use]
+    pub const fn outcome(&self) -> &AuthorizationOutcome {
+        &self.outcome
+    }
+
+    /// Returns the audit context for the authorization.
+    #[must_use]
+    pub const fn audit(&self) -> &PolicyAuditContext {
+        &self.audit
+    }
+
+    /// Consumes the result and returns its outcome and audit context.
+    #[must_use]
+    pub fn into_parts(self) -> (AuthorizationOutcome, PolicyAuditContext) {
+        (self.outcome, self.audit)
+    }
+}
+
+/// The sole production boundary that can mint an AllowedCommand.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Authorizer;
+
+impl Authorizer {
+    /// Evaluates a typed proposal against trusted facts and mints only on Allow.
+    pub fn authorize(
+        &self,
+        action: ProposedAction,
+        context: TrustedPolicyContext,
+    ) -> Result<AuthorizationResult, PolicyEvaluationError> {
+        let invocation_id = context.invocation_id;
+        let action_hash = action.action_hash();
+        let evaluation = evaluate_policy(PolicyEvaluationInput::new(
+            invocation_id,
+            context.principal_id,
+            action.object_id(),
+            context.policy_version,
+            action.action_class(),
+            action_hash,
+            context.evaluated_at_unix_ms,
+            context.trusted_checks,
+            context.untrusted_evidence,
+        ))?;
+        let audit = evaluation.audit().clone();
+
+        let outcome = match evaluation.decision() {
+            PolicyDecision::Allow => AuthorizationOutcome::Allowed(AllowedCommand::mint(
+                invocation_id,
+                action.step_index(),
+                action_hash,
+            )),
+            PolicyDecision::Deny => AuthorizationOutcome::Denied,
+            PolicyDecision::RequireApproval => AuthorizationOutcome::RequiresApproval,
+        };
+
+        Ok(AuthorizationResult { outcome, audit })
+    }
+}
+
+/// Executor port. Implementations receive only the non-serializable capability,
+/// never a ProposedAction, raw JSON, Tool ID, or raw URL.
+///
+/// It consumes the capability so callers cannot replay the same in-memory value.
+pub trait CommandExecutor {
+    /// Successful execution result.
+    type Output;
+    /// Adapter-specific execution failure.
+    type Error;
+
+    /// Executes the command represented by a capability minted by Authorizer.
+    fn execute(&self, command: AllowedCommand) -> Result<Self::Output, Self::Error>;
+}
+
 /// An unforgeable-by-callers capability representing one policy-approved command.
 ///
 /// The fields are private, the type is not serializable or cloneable, and its
