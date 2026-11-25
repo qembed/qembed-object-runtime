@@ -573,15 +573,15 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: unit — allow/deny; compile-fail — executor не принимает raw action; negative tests на forged command.
   - DoD: executor принимает только capability, а не ProposedAction/raw JSON/tool ID/raw URL.
 
-- [ ] **RUST-079 (M)** Реализовать tool registry adapter и immutable ToolVersion resolution.
+- [x] **RUST-079 (M)** Реализовать tool registry adapter и immutable ToolVersion resolution.
   - Тесты: contract/integration — snapshot разрешает точную версию; отсутствующая/несовпадающая версия rejected.
   - DoD: contract tool не меняется под существующим ToolVersion ID.
 
-- [ ] **RUST-080 (M)** Реализовать binding validation и stale capability rejection.
+- [x] **RUST-080 (M)** Реализовать binding validation и stale capability rejection.
   - Тесты: DB integration — binding изменён после mint; execution блокируется до network call.
   - DoD: capability связана с актуальной binding identity/version.
 
-- [ ] **RUST-081 (M)** Реализовать DNS resolver с проверкой полного A+AAAA RRset.
+- [x] **RUST-081 (M)** Реализовать DNS resolver с проверкой полного A+AAAA RRset.
   - Тесты: deterministic resolver fixtures; mixed public/private, empty, malformed и special answers.
   - DoD: весь RRset проверяется; mixed public/private отклоняется.
 

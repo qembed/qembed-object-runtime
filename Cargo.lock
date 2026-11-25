@@ -1529,6 +1529,8 @@ dependencies = [
  "qembed-domain",
  "serde_json",
  "tokio",
+ "tokio-rustls",
+ "webpki-roots",
 ]
 
 [[package]]

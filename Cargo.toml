@@ -21,6 +21,8 @@ axum = "=0.8.4"
 async-nats = { version = "=0.53.0", default-features = false, features = ["jetstream", "ring"] }
 futures-util = "=0.3.34"
 hickory-resolver = { version = "=0.26.3", default-features = false, features = ["system-config", "tokio"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "=1.0.12"
 tower = { version = "=0.5.2", features = ["util"] }
 serde = { version = "=1.0.219", features = ["derive"] }
 serde_json = "=1.0.140"
@@ -31,7 +33,7 @@ time = { version = "=0.3.44", features = ["formatting"] }
 sha2 = "=0.10.8"
 uuid = { version = "=1.16.0", features = ["serde", "v4", "v5"] }
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "uuid", "json"] }
-tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "=1.44.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 # Keep SQLx's transitive URL/IDNA stack on the audited versions.
 home = "=0.5.11"
 idna_adapter = "=1.2.1"

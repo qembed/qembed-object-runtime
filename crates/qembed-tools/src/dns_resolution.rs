@@ -104,6 +104,11 @@ impl ResolvedAddressSet {
     pub fn addresses(&self) -> &[IpAddr] {
         &self.addresses
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(addresses: Vec<IpAddr>) -> Self {
+        Self { addresses }
+    }
 }
 
 /// Errors produced while resolving or validating an address set.
