@@ -11,6 +11,7 @@ hickory-resolver.workspace = true
 qembed-domain = { path = "../qembed-domain" }
 tokio.workspace = true
 tokio-rustls.workspace = true
+url.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
