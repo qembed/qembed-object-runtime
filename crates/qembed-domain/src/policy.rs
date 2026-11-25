@@ -128,6 +128,7 @@ pub struct TrustedPolicyCheck {
 impl TrustedPolicyCheck {
     /// Creates a check/result pair from a trusted fact provider.
     #[must_use]
+    #[allow(dead_code)] // RUST-078 Authorizer will be the trusted fact producer.
     pub(crate) const fn new(check: PolicyCheck, outcome: PolicyCheckOutcome) -> Self {
         Self { check, outcome }
     }
@@ -230,6 +231,7 @@ impl PolicyEvaluationInput {
     /// Creates an evaluation input from trusted identity and fact-provider output.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
+    #[allow(dead_code)] // RUST-078 Authorizer will assemble trusted evaluation inputs.
     pub(crate) fn new(
         invocation_id: InvocationId,
         principal_id: PrincipalId,
