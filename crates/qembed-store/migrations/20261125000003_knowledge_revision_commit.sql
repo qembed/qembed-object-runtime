@@ -169,7 +169,9 @@ CREATE TRIGGER trg_knowledge_revision_log_append_only
     BEFORE UPDATE OR DELETE ON knowledge_revision_log
     FOR EACH ROW EXECUTE FUNCTION reject_knowledge_revision_log_mutation();
 
-GRANT CREATE ON SCHEMA public TO qembed_definer;\nALTER FUNCTION knowledge_documents_sync() OWNER TO qembed_definer;\nREVOKE CREATE ON SCHEMA public FROM qembed_definer;
+GRANT CREATE ON SCHEMA public TO qembed_definer;
+ALTER FUNCTION knowledge_documents_sync() OWNER TO qembed_definer;
+REVOKE CREATE ON SCHEMA public FROM qembed_definer;
 REVOKE ALL ON FUNCTION knowledge_documents_sync() FROM PUBLIC;
 GRANT SELECT, UPDATE ON knowledge_chunks TO qembed_definer;
 CREATE POLICY knowledge_chunks_definer_access ON knowledge_chunks
