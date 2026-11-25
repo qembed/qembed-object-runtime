@@ -782,4 +782,3 @@ mod tests {
         assert_chat_provider(&TestProvider);
     }
 }
-
