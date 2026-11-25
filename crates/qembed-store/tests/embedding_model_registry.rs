@@ -18,6 +18,27 @@ async fn setup() -> (PgPool, PgEmbeddingModelRegistry) {
     run_migrations(&pool).await.expect("migrations apply");
 
     let mut connection = pool.acquire().await.expect("single connection acquired");
+    let grants: (bool, bool) = sqlx::query_as(
+        "SELECT has_table_privilege('qembed_admin', 'public.embedding_models', 'INSERT'),                 has_table_privilege('qembed_runtime', 'public.embedding_models', 'INSERT')",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .expect("registry role grants are readable");
+    assert!(grants.0, "platform admin can register models");
+    assert!(!grants.1, "runtime cannot mutate the global model registry");
+
+    // Shadow the global table with a connection-local fixture so tests never
+    // change the active model set observed by parallel ingestion tests.
+    sqlx::query(
+        "CREATE TEMP TABLE embedding_models (             id TEXT PRIMARY KEY,             provider TEXT NOT NULL,             model_name TEXT NOT NULL,             dimension INTEGER NOT NULL CHECK (dimension > 0),             distance_metric TEXT NOT NULL CHECK (distance_metric IN ('cosine', 'l2', 'ip')),             active BOOLEAN NOT NULL DEFAULT true,             created_at TIMESTAMPTZ NOT NULL DEFAULT now()         ) ON COMMIT PRESERVE ROWS",
+    )
+    .execute(&mut *connection)
+    .await
+    .expect("connection-local registry fixture is created");
+    sqlx::query("GRANT ALL ON TABLE pg_temp.embedding_models TO qembed_admin")
+        .execute(&mut *connection)
+        .await
+        .expect("admin can use the connection-local registry fixture");
     sqlx::query("SET SESSION AUTHORIZATION qembed_admin")
         .execute(&mut *connection)
         .await
