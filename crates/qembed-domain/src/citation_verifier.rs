@@ -132,7 +132,9 @@ impl CitationVerifier {
         }
         if retrieved.is_empty() || retrieved.len() > MAX_RETRIEVED_CHUNKS {
             report.violations.push(violation(
-                VerificationRule::V1Envelope, None, None,
+                VerificationRule::V1Envelope,
+                None,
+                None,
                 "retrieved evidence count must be between 1 and MAX_RETRIEVED_CHUNKS",
             ));
         }
@@ -152,7 +154,9 @@ impl CitationVerifier {
             if evidence.insert(chunk.id, chunk.content.as_str()).is_some() {
                 invalid_evidence = true;
                 report.violations.push(violation(
-                    VerificationRule::V7EvidenceIntegrity, None, Some(chunk.id),
+                    VerificationRule::V7EvidenceIntegrity,
+                    None,
+                    Some(chunk.id),
                     "retrieved evidence contains a duplicate chunk ID",
                 ));
             }
@@ -345,7 +349,9 @@ fn is_grouped_number(value: &str, separator: char) -> bool {
     let groups = value.split(separator).collect::<Vec<_>>();
     groups.len() > 1
         && (1..=3).contains(&groups[0].len())
-        && groups.iter().all(|group| !group.is_empty() && group.bytes().all(|byte| byte.is_ascii_digit()))
+        && groups
+            .iter()
+            .all(|group| !group.is_empty() && group.bytes().all(|byte| byte.is_ascii_digit()))
         && groups.iter().skip(1).all(|group| group.len() == 3)
 }
 
@@ -578,7 +584,11 @@ mod tests {
             let document = CitationDocument {
                 claims: vec![claim(&format!("bad{ch}text"), vec![id])],
             };
-            assert!(!verifier.verify(&document, std::slice::from_ref(&evidence)).is_accepted());
+            assert!(
+                !verifier
+                    .verify(&document, std::slice::from_ref(&evidence))
+                    .is_accepted()
+            );
         }
     }
 
