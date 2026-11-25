@@ -41,6 +41,7 @@ pub mod readiness;
 pub mod reservation_sweeper;
 pub mod snapshot_repository;
 pub mod tool_execution_store;
+pub mod tool_version_registry;
 pub mod valkey_rate_limit;
 pub use cas::{CasError, execute_cas};
 pub use context_issuer::{

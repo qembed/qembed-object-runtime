@@ -133,7 +133,9 @@ pub mod provider_call_attempt;
 pub mod rate_limit;
 pub mod scope;
 pub mod snapshot;
+pub mod snapshot_tools;
 pub mod tool_execution;
+pub mod tool_version;
 pub mod tool_execution_lease;
 pub mod tool_execution_reconciliation;
 
