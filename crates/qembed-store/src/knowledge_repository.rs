@@ -211,18 +211,16 @@ impl PgKnowledgeRepository {
 
         // Lock all chunks before checking embeddings. Their FK key-share locks
         // prevent a concurrent embedding insert from racing past this check.
-        let _locked_chunks: Vec<Uuid> = fetch_all(
-            &mut transaction,
-            sqlx::query_as(
-                "SELECT id FROM knowledge_chunks \
-                 WHERE tenant_id = $1::uuid AND object_id = $2::uuid \
-                   AND document_id = ANY($3::uuid[]) \
-                 ORDER BY id FOR UPDATE",
-            )
-            .bind(scope.tenant_id().to_string())
-            .bind(object_id.to_string())
-            .bind(&indexed_ids),
+        let _locked_chunks: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM knowledge_chunks \
+             WHERE tenant_id = $1::uuid AND object_id = $2::uuid \
+               AND document_id = ANY($3::uuid[]) \
+             ORDER BY id FOR UPDATE",
         )
+        .bind(scope.tenant_id().to_string())
+        .bind(object_id.to_string())
+        .bind(&indexed_ids)
+        .fetch_all(transaction.connection())
         .await?;
 
         // Lock existing embedding rows as well: a concurrent model adapter must
@@ -381,7 +379,7 @@ impl PgKnowledgeRepository {
             object_id,
             previous_revision,
             revision,
-            published_documents,
+            published_documents: indexed_documents,
             retired_documents,
         })
     }
