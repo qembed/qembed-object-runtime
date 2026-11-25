@@ -508,9 +508,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: неполный документ не становится видимым; единственная publication boundary остаётся в `commit_knowledge_revision`, который независимо перепроверяет completeness.
   - Evidence: Rust PR [#140](https://github.com/qembed/qembed-object-runtime/pull/140), CI run [#45582952235](https://github.com/qembed/qembed-object-runtime/actions/runs/45582952235) — success.
 
-- [ ] **RUST-068 (M)** Реализовать embedding model registry.
-  - Тесты: contract tests для размерности/метрики; negative tests на смешение несовместимых embeddings.
-  - DoD: разные модели и размерности изолированы.
+- [x] **RUST-068 (M)** Реализовать embedding model registry.
+  - Реализация: provider-neutral domain contract фиксирует model ID, provider, model name, dimension и distance metric; vector contract требует совпадения model ID и размерности. PostgreSQL registry поддерживает регистрацию, чтение, список и изменение active-флага; immutable model metadata не обновляется через registry API. Запись доступна только qembed_admin, runtime остаётся read-only. Registry mutations сериализованы с RUST-066 commit через SHARE ROW EXCLUSIVE lock против commit-side SHARE lock.
+  - Тесты: contract tests для положительной размерности и отображения cosine/L2/IP; negative tests на чужой model ID, неверную размерность, несовместимую метрику и non-finite vectors; PostgreSQL integration — register/get/list/activation, duplicate ID, неизменность dimension/metric, admin/runtime grants.
+  - DoD: разные модели, метрики и размерности изолированы; runtime не может менять глобальный registry.
+  - Evidence: Rust PR [#141](https://github.com/qembed/qembed-object-runtime/pull/141), CI run [#45589012062](https://github.com/qembed/qembed-object-runtime/actions/runs/45589012062) — success (355 passed, 6 skipped).
 
 - [ ] **RUST-069 (M)** Реализовать retrieval filtering по revision до vector top-k.
   - Тесты: DB integration с staged, future, closed и pinned revisions; regression test на порядок filter/top-k.
