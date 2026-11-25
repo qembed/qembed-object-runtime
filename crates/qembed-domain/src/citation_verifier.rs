@@ -296,11 +296,10 @@ fn extract_numbers(text: &str) -> BTreeSet<String> {
         let start = index;
         index += 1;
         while index < bytes.len() {
-            if bytes[index].is_ascii_digit() {
-                index += 1;
-            } else if (bytes[index] == b'.' || bytes[index] == b',')
-                && index + 1 < bytes.len()
-                && bytes[index + 1].is_ascii_digit()
+            if bytes[index].is_ascii_digit()
+                || ((bytes[index] == b'.' || bytes[index] == b',')
+                    && index + 1 < bytes.len()
+                    && bytes[index + 1].is_ascii_digit())
             {
                 index += 1;
             } else {
@@ -379,7 +378,7 @@ fn extract_urls(text: &str) -> BTreeSet<String> {
                 end += 1;
             }
             let candidate = text[start..end]
-                .trim_end_matches(|ch: char| matches!(ch, '.' | ',' | ';' | ':' | '!' | '?'));
+                .trim_end_matches(['.', ',', ';', ':', '!', '?']);
             if !candidate.is_empty() {
                 urls.insert(candidate.to_owned());
             }
@@ -491,7 +490,7 @@ mod tests {
                 },
             ],
         };
-        let duplicate_claim = CitationVerifier::new().verify(&document, &[evidence.clone()]);
+        let duplicate_claim = CitationVerifier::new().verify(&document, std::slice::from_ref(&evidence));
         assert!(
             duplicate_claim
                 .violations()
