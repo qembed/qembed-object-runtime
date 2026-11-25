@@ -106,39 +106,73 @@ async fn set_current_revision(pool: &PgPool, scope: &Scope, object_id: ObjectId,
 async fn pinned_revision_excludes_staged_future_closed_and_erased_chunks() {
     let (pool, store, scope, object_id) = setup().await;
 
-    let staged = insert_chunk(&pool, &scope, object_id, "staged", None, None, false, "staged")
-        .await;
-    let indexed = insert_chunk(&pool, &scope, object_id, "indexed", None, None, false, "indexed")
-        .await;
-    let live = insert_chunk(&pool, &scope, object_id, "live", Some(2), None, false, "live-at-two")
-        .await;
-    let retired =
-        insert_chunk(&pool, &scope, object_id, "retired", Some(1), Some(3), false, "retired-at-two")
-            .await;
-    let future =
-        insert_chunk(&pool, &scope, object_id, "live", Some(3), None, false, "future-winner")
-            .await;
-    let closed =
-        insert_chunk(&pool, &scope, object_id, "retired", Some(1), Some(2), false, "closed-at-two")
-            .await;
-    let erased =
-        insert_chunk(&pool, &scope, object_id, "erased", Some(1), None, true, "")
-            .await;
+    let staged = insert_chunk(
+        &pool, &scope, object_id, "staged", None, None, false, "staged",
+    )
+    .await;
+    let indexed = insert_chunk(
+        &pool, &scope, object_id, "indexed", None, None, false, "indexed",
+    )
+    .await;
+    let live = insert_chunk(
+        &pool,
+        &scope,
+        object_id,
+        "live",
+        Some(2),
+        None,
+        false,
+        "live-at-two",
+    )
+    .await;
+    let retired = insert_chunk(
+        &pool,
+        &scope,
+        object_id,
+        "retired",
+        Some(1),
+        Some(3),
+        false,
+        "retired-at-two",
+    )
+    .await;
+    let future = insert_chunk(
+        &pool,
+        &scope,
+        object_id,
+        "live",
+        Some(3),
+        None,
+        false,
+        "future-winner",
+    )
+    .await;
+    let closed = insert_chunk(
+        &pool,
+        &scope,
+        object_id,
+        "retired",
+        Some(1),
+        Some(2),
+        false,
+        "closed-at-two",
+    )
+    .await;
+    let erased = insert_chunk(&pool, &scope, object_id, "erased", Some(1), None, true, "").await;
 
     set_current_revision(&pool, &scope, object_id, 3).await;
 
     let at_revision_two = store
         .visible_chunks(
             &scope,
-            PinnedKnowledgeRevision::new(
-                scope.tenant_id(),
-                object_id,
-                RevisionNumber::new(2),
-            ),
+            PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::new(2)),
         )
         .await
         .expect("revision two candidates load");
-    let ids = at_revision_two.iter().map(|chunk| chunk.id()).collect::<Vec<_>>();
+    let ids = at_revision_two
+        .iter()
+        .map(|chunk| chunk.id())
+        .collect::<Vec<_>>();
 
     assert!(ids.contains(&live.chunk_id));
     assert!(ids.contains(&retired.chunk_id));
@@ -151,11 +185,7 @@ async fn pinned_revision_excludes_staged_future_closed_and_erased_chunks() {
     let at_revision_one = store
         .visible_chunks(
             &scope,
-            PinnedKnowledgeRevision::new(
-                scope.tenant_id(),
-                object_id,
-                RevisionNumber::new(1),
-            ),
+            PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::new(1)),
         )
         .await
         .expect("revision one candidates load");
@@ -220,23 +250,18 @@ async fn future_and_cross_tenant_pins_are_rejected() {
     let future = store
         .visible_chunks(
             &scope,
-            PinnedKnowledgeRevision::new(
-                scope.tenant_id(),
-                object_id,
-                RevisionNumber::new(1),
-            ),
+            PinnedKnowledgeRevision::new(scope.tenant_id(), object_id, RevisionNumber::new(1)),
         )
         .await;
-    assert!(matches!(future, Err(PgKnowledgeRetrievalError::FutureRevision)));
+    assert!(matches!(
+        future,
+        Err(PgKnowledgeRetrievalError::FutureRevision)
+    ));
 
     let foreign = store
         .visible_chunks(
             &scope,
-            PinnedKnowledgeRevision::new(
-                TenantId::new(),
-                object_id,
-                RevisionNumber::INITIAL,
-            ),
+            PinnedKnowledgeRevision::new(TenantId::new(), object_id, RevisionNumber::INITIAL),
         )
         .await;
     assert!(matches!(

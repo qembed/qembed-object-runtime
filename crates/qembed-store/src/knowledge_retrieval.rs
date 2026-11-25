@@ -68,13 +68,24 @@ pub enum PgKnowledgeRetrievalError {
 impl fmt::Display for PgKnowledgeRetrievalError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Context(error) => write!(formatter, "knowledge retrieval context failed: {error}"),
-            Self::Database(error) => write!(formatter, "knowledge retrieval database error: {error}"),
-            Self::PinnedTenantMismatch => formatter.write_str("pinned Knowledge revision belongs to another tenant"),
+            Self::Context(error) => {
+                write!(formatter, "knowledge retrieval context failed: {error}")
+            }
+            Self::Database(error) => {
+                write!(formatter, "knowledge retrieval database error: {error}")
+            }
+            Self::PinnedTenantMismatch => {
+                formatter.write_str("pinned Knowledge revision belongs to another tenant")
+            }
             Self::ObjectNotFound => formatter.write_str("Knowledge revision object was not found"),
-            Self::FutureRevision => formatter.write_str("pinned Knowledge revision is newer than the committed revision"),
-            Self::RevisionOutOfRange => formatter.write_str("pinned Knowledge revision is outside the database range"),
-            Self::InvalidPersistedChunkPosition => formatter.write_str("persisted chunk position is negative"),
+            Self::FutureRevision => formatter
+                .write_str("pinned Knowledge revision is newer than the committed revision"),
+            Self::RevisionOutOfRange => {
+                formatter.write_str("pinned Knowledge revision is outside the database range")
+            }
+            Self::InvalidPersistedChunkPosition => {
+                formatter.write_str("persisted chunk position is negative")
+            }
         }
     }
 }
@@ -168,9 +179,7 @@ impl PgKnowledgeRetrievalStore {
                 .map_err(|_| PgKnowledgeRetrievalError::InvalidPersistedChunkPosition)?;
             chunks.push(VisibleKnowledgeChunk {
                 id: KnowledgeChunkId::from_uuid(row.try_get::<Uuid, _>("id")?),
-                document_id: KnowledgeDocumentId::from_uuid(
-                    row.try_get::<Uuid, _>("document_id")?,
-                ),
+                document_id: KnowledgeDocumentId::from_uuid(row.try_get::<Uuid, _>("document_id")?),
                 content: row.try_get("content")?,
                 position,
                 metadata: row.try_get("metadata")?,
