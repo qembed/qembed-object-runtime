@@ -1,5 +1,5 @@
 //! Atomic PostgreSQL persistence for staged Knowledge ingestion.
-use std::{error::Error, fmt};
+use crate::PgContext;
 use qembed_domain::{
     ids::KnowledgeDocumentId,
     knowledge_ingestion::{
@@ -9,7 +9,8 @@ use qembed_domain::{
     ports::KnowledgeIngestionStore,
     scope::Scope,
 };
-use crate::PgContext;
+use std::{error::Error, fmt};
+
 #[derive(Debug)]
 pub enum PgKnowledgeIngestionError {
     Context(crate::ContextTransactionError),
