@@ -26,11 +26,11 @@ ALTER TABLE knowledge_revision_pins FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY knowledge_revision_pins_runtime_tenant
     ON knowledge_revision_pins FOR ALL TO qembed_runtime
-    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+    USING (tenant_id = (SELECT qembed_crypto.current_tenant_id()))
+    WITH CHECK (tenant_id = (SELECT qembed_crypto.current_tenant_id()));
 CREATE POLICY knowledge_revision_pins_admin_select
     ON knowledge_revision_pins FOR SELECT TO qembed_admin
-    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
+    USING (tenant_id = (SELECT qembed_crypto.current_tenant_id()));
 CREATE POLICY knowledge_revision_pins_definer_access
     ON knowledge_revision_pins TO qembed_definer
     USING (true) WITH CHECK (true);
@@ -136,7 +136,7 @@ AS $collect_retired_knowledge_documents$
 DECLARE
     v_current_revision BIGINT;
     v_deleted INTEGER;
-    v_context_tenant UUID := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+    v_context_tenant UUID := qembed_crypto.current_tenant_id();
 BEGIN
     IF v_context_tenant IS NULL OR v_context_tenant <> p_tenant_id THEN
         RAISE EXCEPTION 'Knowledge GC tenant differs from trusted transaction context'
