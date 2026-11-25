@@ -363,7 +363,7 @@ fn normalize_number(raw: &str) -> String {
 
 fn is_grouped_number(value: &str, separator: char) -> bool {
     let groups = value.split(separator).collect::<Vec<_>>();
-    groups.len() > 1
+    groups.len() >= 3
         && (1..=3).contains(&groups[0].len())
         && groups
             .iter()
@@ -618,10 +618,10 @@ mod tests {
 
     #[test]
     fn normalizes_grouped_and_decimal_numbers_without_losing_percent_units() {
-        let evidence = chunk("Values: 1,000; 3.14; 12,5; and 5%.");
+        let evidence = chunk("Values: 1,000,000; 3.14; 12,5; and 5%.");
         let id = evidence.id;
         let document = CitationDocument {
-            claims: vec![claim("Values: 1000, 3.14, 12.5, and 5%.", vec![id])],
+            claims: vec![claim("Values: 1000000, 3.14, 12.5, and 5%.", vec![id])],
         };
         assert!(
             CitationVerifier::new()
@@ -665,6 +665,22 @@ mod tests {
             CitationVerifier::new()
                 .verify(&normalized, &[grouped])
                 .is_accepted()
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_single_separator_as_thousands_grouping() {
+        let evidence = chunk("The amount is 1,000.");
+        let id = evidence.id;
+        let document = CitationDocument {
+            claims: vec![claim("The amount is 1000.", vec![id])],
+        };
+        assert!(
+            CitationVerifier::new()
+                .verify(&document, &[evidence])
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V5NumericGrounding)
         );
     }
 
