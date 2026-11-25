@@ -127,6 +127,7 @@ pub mod object;
 pub mod object_validation;
 pub mod object_version;
 pub mod policy;
+pub mod policy_evaluation;
 pub mod ports;
 pub mod principal;
 pub mod provider_call_attempt;
