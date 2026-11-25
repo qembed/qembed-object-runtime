@@ -181,7 +181,7 @@ impl UntrustedEvidenceDigest {
 
     /// Returns the content digest; raw content is never exposed by this type.
     #[must_use]
-    pub const fn sha256(self) -> &[u8; 32] {
+    pub const fn sha256(&self) -> &[u8; 32] {
         &self.sha256
     }
 }
