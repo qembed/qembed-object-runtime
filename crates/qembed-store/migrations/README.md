@@ -107,3 +107,15 @@ defined by the canonical SQL schema. Runtime evaluation is deny-dominant:
 any matching disabled Platform, Tenant, Object or Tool switch blocks the
 side effect before it starts; lower-level enabled switches cannot override
 an ancestor disable.
+
+
+The RUST-066 Knowledge migration adds the Store-owned persistence slice for
+revision commits: the active embedding-model registry projection, revision log,
+documents, chunks, vector embeddings, tenant RLS policies, append-only log
+guard, and the definer-owned document-to-chunk visibility synchronization
+trigger. The commit repository locks the revision row and model registry,
+checks that every indexed document has chunks and every chunk has an embedding
+for every active model, then changes document/chunk intervals and appends the
+revision log, event and outbox row in one transaction. The full production
+Knowledge schema remains canonical in `qembed/qembed-sql`; this is the
+incremental Rust integration-test/runtime slice.
