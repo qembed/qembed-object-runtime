@@ -664,17 +664,18 @@ mod tests {
     #[test]
     fn explicit_deny_takes_precedence_over_approval() {
         let mut checks = satisfied_checks(PolicyActionClass::ToolExecution);
-        checks.push(TrustedPolicyCheck::new(
-            PolicyCheck::CapabilityGranted,
-            PolicyCheckOutcome::Denied,
-        ));
         for check in &mut checks {
-            if check.check() == PolicyCheck::BindingCurrent {
-                *check = TrustedPolicyCheck::new(
+            *check = match check.check() {
+                PolicyCheck::CapabilityGranted => TrustedPolicyCheck::new(
+                    PolicyCheck::CapabilityGranted,
+                    PolicyCheckOutcome::Denied,
+                ),
+                PolicyCheck::BindingCurrent => TrustedPolicyCheck::new(
                     PolicyCheck::BindingCurrent,
                     PolicyCheckOutcome::RequiresApproval,
-                );
-            }
+                ),
+                _ => *check,
+            };
         }
         let result = evaluate_policy(input(PolicyActionClass::ToolExecution, checks, vec![]))
             .expect("configured policy version is valid");
