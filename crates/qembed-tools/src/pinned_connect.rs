@@ -434,5 +434,4 @@ mod tests {
             Some("example.test".to_owned())
         );
     }
-
 }
