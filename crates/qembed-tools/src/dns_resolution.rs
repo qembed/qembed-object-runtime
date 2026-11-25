@@ -490,7 +490,13 @@ mod tests {
 
     #[test]
     fn accepts_globally_reachable_ipv4_special_registry_exceptions() {
-        for address in ["192.0.0.9", "192.0.0.10", "192.31.196.1", "192.52.193.1", "192.175.48.1"] {
+        for address in [
+            "192.0.0.9",
+            "192.0.0.10",
+            "192.31.196.1",
+            "192.52.193.1",
+            "192.175.48.1",
+        ] {
             let address = address.parse().expect("valid IPv4 fixture");
             assert!(is_public_unicast(IpAddr::V4(address)), "{address}");
         }
@@ -530,11 +536,19 @@ mod tests {
 
     #[test]
     fn special_range_prefix_boundaries_are_exact() {
-        assert!(!is_public_unicast(IpAddr::V4("100.64.0.0".parse().unwrap())));
-        assert!(is_public_unicast(IpAddr::V4("100.128.0.0".parse().unwrap())));
-        assert!(!is_public_unicast(IpAddr::V4("198.19.255.255".parse().unwrap())));
+        assert!(!is_public_unicast(IpAddr::V4(
+            "100.64.0.0".parse().unwrap()
+        )));
+        assert!(is_public_unicast(IpAddr::V4(
+            "100.128.0.0".parse().unwrap()
+        )));
+        assert!(!is_public_unicast(IpAddr::V4(
+            "198.19.255.255".parse().unwrap()
+        )));
         assert!(is_public_unicast(IpAddr::V4("198.20.0.0".parse().unwrap())));
-        assert!(!is_public_unicast(IpAddr::V6("2001:db8::".parse().unwrap())));
+        assert!(!is_public_unicast(IpAddr::V6(
+            "2001:db8::".parse().unwrap()
+        )));
         assert!(is_public_unicast(IpAddr::V6("2001:db9::".parse().unwrap())));
     }
 
