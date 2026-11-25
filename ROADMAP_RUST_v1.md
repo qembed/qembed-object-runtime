@@ -547,9 +547,10 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: provenance проверяется на app path, а не только DB constraints.
   - Evidence: Rust PR [#148](https://github.com/qembed/qembed-object-runtime/pull/148), CI run [#45637358810](https://github.com/qembed/qembed-object-runtime/actions/runs/45637358810) — success (374 passed, 7 skipped); canonical SQL RT-050 Caller/RLS integration passed.
 
-- [ ] **RUST-075 (S)** Реализовать memory promotion как новую Owner-authored Verified row.
+- [x] **RUST-075 (S)** Реализовать memory promotion как новую Owner-authored Verified row.
   - Тесты: domain и DB integration — candidate остаётся неизменным; только TenantOwner может подтвердить; supersedes chain валидна.
   - DoD: promotion создаёт новую Verified запись с корректной ссылкой на superseded candidate.
+  - Evidence: Rust PR [#149](https://github.com/qembed/qembed-object-runtime/pull/149), CI run [#45650580420](https://github.com/qembed/qembed-object-runtime/actions/runs/45650580420) — success (379 passed, 8 skipped); canonical PostgreSQL promotion integration passed.
 
 - [ ] **RUST-076 (S)** Добавить knowledge concurrency и GC suite.
   - Тесты: commit race, pinned invocation, GC race, rollback и повторная публикация.
