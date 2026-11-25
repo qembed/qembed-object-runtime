@@ -137,7 +137,9 @@ async fn caller_scoped_application_path_cannot_read_another_callers_episodic_mem
     assert_ne!(visible_to_a[0].id(), caller_b_memory_id);
 
     assert!(matches!(
-        repository.list_episodic(&scope_a, caller_b, object_id).await,
+        repository
+            .list_episodic(&scope_a, caller_b, object_id)
+            .await,
         Err(EpisodicMemoryError::Context(_))
     ));
 
