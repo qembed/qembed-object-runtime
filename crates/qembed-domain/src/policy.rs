@@ -496,16 +496,26 @@ pub struct Authorizer;
 
 impl Authorizer {
     /// Evaluates trusted policy facts and mints a capability only for Allow.
-    pub fn authorize(&self, input: PolicyEvaluationInput, step_index: u32)
-        -> Result<AuthorizationOutcome, PolicyEvaluationError>
-    {
+    pub fn authorize(
+        &self,
+        input: PolicyEvaluationInput,
+        step_index: u32,
+    ) -> Result<AuthorizationOutcome, PolicyEvaluationError> {
         let policy = evaluate_policy(input)?;
         let allowed_command = if policy.decision() == PolicyDecision::Allow {
             Some(AllowedCommand::mint(
-                policy.audit().invocation_id(), step_index, *policy.audit().action_hash(),
+                policy.audit().invocation_id(),
+                step_index,
+                *policy.audit().action_hash(),
             ))
-        } else { None };
-        Ok(AuthorizationOutcome { policy, allowed_command })
+        } else {
+            None
+        };
+
+        Ok(AuthorizationOutcome {
+            policy,
+            allowed_command,
+        })
     }
 }
 
@@ -518,13 +528,19 @@ pub struct AuthorizationOutcome {
 
 impl AuthorizationOutcome {
     #[must_use]
-    pub const fn policy(&self) -> &PolicyEvaluationResult { &self.policy }
+    pub const fn policy(&self) -> &PolicyEvaluationResult {
+        &self.policy
+    }
 
     #[must_use]
-    pub const fn allowed_command(&self) -> Option<&AllowedCommand> { self.allowed_command.as_ref() }
+    pub const fn allowed_command(&self) -> Option<&AllowedCommand> {
+        self.allowed_command.as_ref()
+    }
 
     #[must_use]
-    pub fn into_allowed_command(self) -> Option<AllowedCommand> { self.allowed_command }
+    pub fn into_allowed_command(self) -> Option<AllowedCommand> {
+        self.allowed_command
+    }
 }
 
 /// An unforgeable-by-callers capability representing one policy-approved command.
@@ -625,10 +641,7 @@ impl AllowedCommand {
 
     /// Mints a capability after policy has approved the exact command context.
     ///
-    /// Kept private so this module remains the sole minting boundary. The
-    /// Authorizer introduced later must call this only after a positive policy
-    /// decision; adapters and executors receive, but cannot manufacture, it.
-    #[allow(dead_code)] // The Authorizer will use this mint boundary in RUST-078.
+    /// Kept private so the Authorizer remains the sole minting boundary.
     fn mint(invocation_id: InvocationId, step_index: u32, action_hash: [u8; 32]) -> Self {
         Self {
             command_id: derive_command_id(invocation_id, step_index, &action_hash),
@@ -655,7 +668,10 @@ mod tests {
         );
         let outcome = Authorizer.authorize(policy_input, step_index).expect("valid policy");
         let allowed = outcome.allowed_command().expect("Allow mints capability");
-        assert_eq!(allowed.command_id(), derive_command_id(invocation_id, step_index, &action_hash));
+        assert_eq!(
+            allowed.command_id(),
+            derive_command_id(invocation_id, step_index, &action_hash)
+        );
         assert_eq!(allowed.invocation_id(), invocation_id);
         assert_eq!(allowed.step_index(), step_index);
         assert_eq!(allowed.action_hash(), &action_hash);
@@ -665,14 +681,24 @@ mod tests {
     #[test]
     fn authorizer_never_mints_for_deny_or_approval() {
         let mut denied_checks = satisfied_checks(PolicyActionClass::ToolExecution);
-        denied_checks[0] = TrustedPolicyCheck::new(PolicyCheck::PrincipalAuthorized, PolicyCheckOutcome::Denied);
-        let denied = Authorizer.authorize(input(PolicyActionClass::ToolExecution, denied_checks, vec![]), 0).expect("valid policy");
+        denied_checks[0] = TrustedPolicyCheck::new(
+            PolicyCheck::PrincipalAuthorized,
+            PolicyCheckOutcome::Denied,
+        );
+        let denied = Authorizer
+            .authorize(input(PolicyActionClass::ToolExecution, denied_checks, vec![]), 0)
+            .expect("valid policy");
         assert_eq!(denied.policy().decision(), PolicyDecision::Deny);
         assert!(denied.allowed_command().is_none());
 
         let mut approval_checks = satisfied_checks(PolicyActionClass::ToolExecution);
-        approval_checks[0] = TrustedPolicyCheck::new(PolicyCheck::PrincipalAuthorized, PolicyCheckOutcome::RequiresApproval);
-        let approval = Authorizer.authorize(input(PolicyActionClass::ToolExecution, approval_checks, vec![]), 0).expect("valid policy");
+        approval_checks[0] = TrustedPolicyCheck::new(
+            PolicyCheck::PrincipalAuthorized,
+            PolicyCheckOutcome::RequiresApproval,
+        );
+        let approval = Authorizer
+            .authorize(input(PolicyActionClass::ToolExecution, approval_checks, vec![]), 0)
+            .expect("valid policy");
         assert_eq!(approval.policy().decision(), PolicyDecision::RequireApproval);
         assert!(approval.allowed_command().is_none());
     }
