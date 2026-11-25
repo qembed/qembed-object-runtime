@@ -253,7 +253,7 @@ pub async fn resolve_public<R: DnsResolver>(
 
 /// Parses and validates all records. One forbidden or malformed address rejects the
 /// entire answer set; no safe subset is returned.
-pub fn validate_answer(
+fn validate_answer(
     hostname: DnsName,
     answer: DnsAnswer,
 ) -> Result<ResolvedAddressSet, DnsResolutionError> {

@@ -204,8 +204,7 @@ mod tests {
         DnsAnswer, DnsName, DnsResolutionError, DnsResolver, ResolvedAddressSet,
     };
 
-    const TEST_ROOT_CERTIFICATE: &[u8] =
-        include_bytes!("../tests/fixtures/dns-test-root-cert.der");
+    const TEST_ROOT_CERTIFICATE: &[u8] = include_bytes!("../tests/fixtures/dns-test-root-cert.der");
     const TEST_CERTIFICATE: &[u8] = include_bytes!("../tests/fixtures/dns-test-cert.der");
     const TEST_PRIVATE_KEY: &[u8] = include_bytes!("../tests/fixtures/dns-test-key.der");
 
