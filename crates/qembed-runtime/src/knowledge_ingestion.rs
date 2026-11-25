@@ -2,8 +2,8 @@
 use qembed_domain::{
     ids::{KnowledgeChunkId, KnowledgeDocumentId},
     knowledge_ingestion::{
-        IngestionChunk, IngestionPersistenceOutcome,
-        KnowledgeIngestionDocumentState, KnowledgeIngestionError, ModelEmbedding,
+        IngestionChunk, IngestionPersistenceOutcome, KnowledgeIngestionDocumentState,
+        KnowledgeIngestionError, ModelEmbedding,
     },
     ports::KnowledgeIngestionStore,
     scope::Scope,
