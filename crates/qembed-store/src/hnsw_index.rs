@@ -168,10 +168,10 @@ impl PgHnswIndexManager {
             sqlx::query(&drop_sql).execute(&mut *connection).await?;
         }
 
-        let (operator_class, operator) = match model.distance_metric() {
-            EmbeddingDistanceMetric::Cosine => ("vector_cosine_ops", "cosine"),
-            EmbeddingDistanceMetric::L2 => ("vector_l2_ops", "l2"),
-            EmbeddingDistanceMetric::InnerProduct => ("vector_ip_ops", "ip"),
+        let operator_class = match model.distance_metric() {
+            EmbeddingDistanceMetric::Cosine => "vector_cosine_ops",
+            EmbeddingDistanceMetric::L2 => "vector_l2_ops",
+            EmbeddingDistanceMetric::InnerProduct => "vector_ip_ops",
         };
         let model_id = model.id().replace('\'', "''");
         let create_sql = format!(
@@ -198,7 +198,6 @@ impl PgHnswIndexManager {
             return Err(PgHnswIndexError::InvalidPersistedModel);
         }
 
-        let _ = operator;
         Ok(HnswIndexOutcome::Created)
     }
 }
