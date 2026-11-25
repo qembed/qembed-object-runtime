@@ -89,7 +89,7 @@ impl<E: Error + 'static> Error for ToolVersionResolutionError<E> {}
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, convert::Infallible, future::Future};
+    use std::{collections::HashMap, convert::Infallible};
 
     use qembed_domain::{
         ids::{ObjectId, ObjectVersionId, SnapshotId, TenantId, ToolId, ToolVersionId},
@@ -105,12 +105,12 @@ mod tests {
     impl ToolVersionRegistry for MockRegistry {
         type Error = Infallible;
 
-        fn get_tool_version(
+        async fn get_tool_version(
             &self,
             tool_id: ToolId,
             version_id: ToolVersionId,
-        ) -> impl Future<Output = Result<Option<ToolVersion>, Self::Error>> + Send {
-            async move { Ok(self.0.get(&(tool_id, version_id)).cloned()) }
+        ) -> Result<Option<ToolVersion>, Self::Error> {
+            Ok(self.0.get(&(tool_id, version_id)).cloned())
         }
     }
 
