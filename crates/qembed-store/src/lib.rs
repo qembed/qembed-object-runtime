@@ -17,6 +17,7 @@ pub mod caller_deletion;
 mod cas;
 pub mod context_issuer;
 pub mod embedding_model_registry;
+pub mod episodic_memory;
 mod event_outbox;
 pub mod external_deletion_ledger;
 pub mod hnsw_index;

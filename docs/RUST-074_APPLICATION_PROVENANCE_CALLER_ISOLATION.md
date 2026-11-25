@@ -1,0 +1,30 @@
+# RUST-074 — Application-level provenance and Caller isolation
+
+## Application provenance boundary
+
+The API application service accepts a structured claim document, not a caller-supplied evidence set. It loads the exact Knowledge chunks visible to the trusted Scope at the supplied pinned revision, then invokes the RUST-073 domain verifier with only those persisted chunks.
+
+A client may propose citation IDs, but cannot provide or replace the evidence text used to resolve them. A citation that does not resolve inside the database retrieval result is rejected by V4. Revision visibility and tenant isolation remain enforced by the existing Knowledge retrieval Store.
+
+This is deterministic provenance validation, not natural-language entailment. It does not claim that ordinary prose is semantically implied by a cited chunk.
+
+## Episodic memory Caller boundary
+
+Episodic memory reads begin a signed Caller-scoped PostgreSQL transaction through `PgContext::begin_caller`. The requested Caller is resolved against the authenticated Principal's active direct delegation; the resulting `ResolvedCaller` is bound to the same transaction. The repository uses only that resolved Caller ID and also filters by it explicitly.
+
+The current RUST-074 Store slice is read-only. Memory creation, provenance assignment, and Owner promotion are separate application workflows; RUST-075 owns Owner-authored Verified-row promotion.
+
+PostgreSQL RLS remains an independent enforcement layer for episodic memories and dependent rows. The Rust Caller integration test is deliberately run against the canonical qembed-sql schema after RT-050 is installed; the ordinary Rust-owned SQLx development schema does not contain `memories`. Missing or revoked Caller delegation fails closed before the memory query.
+
+## Acceptance coverage
+
+- Canonical PostgreSQL integration (run by `scripts/test-postgres.sh` after qembed-sql RT-050): Caller A cannot read Caller B's episodic memory, even when both memories share tenant and Object; a direct query without an explicit Caller predicate is still filtered by signed-context RLS.
+- Canonical PostgreSQL integration: an un-delegated Caller cannot be selected by the authenticated Principal.
+- PostgreSQL/API integration: a valid citation resolves only against persisted revision-visible evidence; a forged chunk ID is rejected.
+- The application verifier has no evidence input parameter, so request data cannot replace the retrieved evidence text.
+
+## Explicit non-goals
+
+- No natural-language entailment model.
+- No memory write or Owner promotion workflow; promotion is RUST-075.
+- No cross-Caller delegation or implicit Caller selection.
