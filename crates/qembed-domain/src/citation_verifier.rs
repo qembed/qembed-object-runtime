@@ -638,7 +638,7 @@ mod tests {
         let matching = CitationDocument {
             claims: vec![claim("The balance is -5.", vec![id])],
         };
-        assert!(CitationVerifier::new().verify(&matching, &[negative.clone()]).is_accepted());
+        assert!(CitationVerifier::new().verify(&matching, std::slice::from_ref(&negative)).is_accepted());
 
         let positive = chunk("The balance is 5.");
         let id = positive.id;
