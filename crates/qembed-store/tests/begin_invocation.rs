@@ -70,6 +70,9 @@ async fn setup(fail_table: Option<&str>) -> Fixture {
             "CREATE TABLE \"{schema}\".object_invocations (id UUID PRIMARY KEY, tenant_id UUID NOT NULL, object_id UUID NOT NULL, caller_id UUID NOT NULL, snapshot_id UUID NOT NULL, knowledge_revision BIGINT NOT NULL CHECK (knowledge_revision >= 0), pool TEXT NOT NULL CHECK (pool IN ('anonymous','authenticated')), status TEXT NOT NULL CHECK (status IN ('Received','ContextLoading','Processing','ExecutingTool','Verifying','WaitingForInput','WaitingForApproval','Completed','CompletedDegraded','Failed','Cancelled')), error_code TEXT, degraded_reason TEXT, trace_id UUID NOT NULL, cancel_requested_at TIMESTAMPTZ, lease_owner TEXT, lease_until TIMESTAMPTZ, heartbeat_at TIMESTAMPTZ, fencing_token BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0), started_at TIMESTAMPTZ NOT NULL DEFAULT now(), finished_at TIMESTAMPTZ, version BIGINT NOT NULL DEFAULT 0 CHECK (version >= 0), CHECK ((status IN ('Completed','CompletedDegraded','Failed','Cancelled')) = (finished_at IS NOT NULL)), CHECK (status <> 'Failed' OR error_code IS NOT NULL), CHECK (status <> 'CompletedDegraded' OR degraded_reason IS NOT NULL), CHECK ((lease_owner IS NULL) = (lease_until IS NULL)), CHECK (finished_at IS NULL OR lease_owner IS NULL), UNIQUE (tenant_id, object_id, id), UNIQUE (tenant_id, object_id, caller_id, id), UNIQUE (tenant_id, object_id, id, pool), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id), FOREIGN KEY (tenant_id, caller_id) REFERENCES \"{schema}\".callers(tenant_id, id), FOREIGN KEY (tenant_id, object_id, snapshot_id) REFERENCES \"{schema}\".snapshots(tenant_id, object_id, snapshot_id))"
         ),
         format!(
+            "CREATE TABLE \"{schema}\".knowledge_revision_pins (tenant_id UUID NOT NULL, object_id UUID NOT NULL, invocation_id UUID NOT NULL, revision BIGINT NOT NULL CHECK (revision > 0), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (tenant_id, object_id, invocation_id))"
+        ),
+        format!(
             "CREATE TABLE \"{schema}\".object_budgets (tenant_id UUID NOT NULL, object_id UUID NOT NULL, daily_token_limit BIGINT NOT NULL CHECK (daily_token_limit >= 0), daily_cost_limit_micros BIGINT NOT NULL CHECK (daily_cost_limit_micros >= 0), anonymous_share_pct SMALLINT NOT NULL DEFAULT 50 CHECK (anonymous_share_pct BETWEEN 0 AND 100), per_caller_daily_token_limit BIGINT NOT NULL CHECK (per_caller_daily_token_limit >= 0), max_concurrent_invocations INTEGER NOT NULL CHECK (max_concurrent_invocations > 0), max_llm_calls INTEGER NOT NULL CHECK (max_llm_calls > 0), max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls >= 0), max_tokens_per_invocation BIGINT NOT NULL CHECK (max_tokens_per_invocation > 0), max_duration_ms INTEGER NOT NULL CHECK (max_duration_ms > 0), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (tenant_id, object_id), FOREIGN KEY (tenant_id, object_id) REFERENCES \"{schema}\".objects(tenant_id, object_id))"
         ),
         format!(
@@ -317,6 +320,15 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
         other => panic!("expected Created, got {other:?}"),
     };
     assert_eq!(counts(&fixture).await, (1, 1, 1, 1, 1));
+    let pin: (i64, i64) = sqlx::query_as(
+        "SELECT count(*), COALESCE(max(revision), 0) FROM knowledge_revision_pins WHERE tenant_id=$1::uuid AND object_id=$2::uuid",
+    )
+    .bind(fixture.scope.tenant_id().to_string())
+    .bind(fixture.object_id.to_string())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("invocation revision pin should be persisted");
+    assert_eq!(pin, (1, 7), "invocation creation persists its exact revision pin");
     let reservation_count: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
         .fetch_one(&fixture.pool)
         .await

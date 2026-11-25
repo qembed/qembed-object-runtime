@@ -150,3 +150,23 @@ candidate set before ranking, so it does not yet use these global HNSW indexes.
 That is deliberate: ANN candidate selection must not bypass pinned-revision
 visibility and consume top-k slots with invisible rows. HNSW query-plan
 integration requires a separate correctness-preserving design.
+
+
+## RUST-072: retrieval pinning and Knowledge GC protection
+
+A positive Knowledge revision is pinned in the same transaction that creates
+its invocation. The pin references the immutable revision log and invocation.
+Revision-zero invocations have no visible Knowledge rows and do not need a pin.
+
+Pin insertion takes a shared lock on the Object's knowledge_revisions row.
+The retired-document collector takes an exclusive lock on that same row before
+checking pins and deleting data. This serializes pin creation, revision commits,
+and GC. A pin protects every retired document whose half-open visibility
+interval could contain the pinned revision (pin.revision < valid_to_revision).
+
+A terminal invocation transition releases its pin through a definer-owned
+database trigger; application code cannot delete pins directly. GC removes
+only retired documents that no active pin can observe. Existing foreign-key
+cascades remove their chunks and embeddings. The append-only revision log is
+retained. GC is tenant-scoped, bounded to batches of 1–500 documents, and
+requires the trusted transaction tenant context.

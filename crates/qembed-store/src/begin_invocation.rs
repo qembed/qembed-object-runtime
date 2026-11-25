@@ -416,6 +416,24 @@ async fn begin_invocation_in_transaction(
     .await
     .map_err(BeginInvocationError::Database)?;
 
+    // Revisions are immutable, but their historical rows may be collected.
+    // Persist the pin atomically with the invocation so GC can protect every
+    // revision this invocation may retrieve. Revision zero has no visible data.
+    if knowledge_revision > 0 {
+        execute(
+            &mut transaction,
+            sqlx::query(
+                "INSERT INTO knowledge_revision_pins (tenant_id, object_id, invocation_id, revision) VALUES ($1::uuid, $2::uuid, $3::uuid, $4)",
+            )
+            .bind(tenant_id.to_string())
+            .bind(command.object_id.to_string())
+            .bind(invocation_id.to_string())
+            .bind(i64::try_from(knowledge_revision).map_err(|_| BeginInvocationError::KnowledgeRevisionOutOfRange)?),
+        )
+        .await
+        .map_err(BeginInvocationError::Database)?;
+    }
+
     execute(
         &mut transaction,
         sqlx::query(
