@@ -514,9 +514,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: разные модели, метрики и размерности изолированы; runtime не может менять глобальный registry.
   - Evidence: Rust PR [#141](https://github.com/qembed/qembed-object-runtime/pull/141), CI run [#45589012062](https://github.com/qembed/qembed-object-runtime/actions/runs/45589012062) — success (355 passed, 6 skipped).
 
-- [ ] **RUST-069 (M)** Реализовать retrieval filtering по revision до vector top-k.
-  - Тесты: DB integration с staged, future, closed и pinned revisions; regression test на порядок filter/top-k.
-  - DoD: нерелевантные revision rows исключаются до top-k.
+- [x] **RUST-069 (M)** Реализовать retrieval filtering по revision до vector top-k.
+  - Реализация: `PgKnowledgeRetrievalStore` принимает trusted Scope и immutable PinnedKnowledgeRevision, отклоняет cross-tenant и future pins; SQL-функция `knowledge_visible_chunks_at` (SECURITY INVOKER) возвращает только chunks, у которых и document, и chunk интервалы содержат pinned revision, документ находится в live/retired, chunk не erased. Функция проверяет committed revision pointer и сохраняет действие RLS. Candidate API намеренно не принимает top-k: ранжирование разрешено только поверх MATERIALIZED результата функции.
+  - Тесты: PostgreSQL integration для staged/indexed/live/retired/future/closed/erased строк на revision 1 и 2; negative tests для future и cross-tenant pins; regression control доказывает, что unfiltered top-1 выбирает future chunk, а filter-before-top-1 возвращает лучший видимый chunk.
+  - DoD: нерелевантные revision rows исключаются до top-k; RUST-070 обязан использовать materialized candidate CTE перед pgvector distance/LIMIT.
+  - Evidence: Rust PR [#142](https://github.com/qembed/qembed-object-runtime/pull/142), CI run [#45599402253](https://github.com/qembed/qembed-object-runtime/actions/runs/45599402253) — success (357 passed, 6 skipped).
 
 - [ ] **RUST-070 (M)** Реализовать pgvector query paths.
   - Тесты: integration на IP/L2/cosine; проверка порядка результатов и размерностей.
