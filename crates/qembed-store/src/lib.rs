@@ -26,6 +26,7 @@ pub mod invocation_recovery;
 pub mod invocation_start;
 pub mod invocation_worker;
 pub mod kill_switch;
+pub mod knowledge_repository;
 pub mod object_repository;
 pub mod outbox_dispatcher;
 pub mod pg_context;
