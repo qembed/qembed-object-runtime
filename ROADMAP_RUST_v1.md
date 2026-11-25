@@ -540,7 +540,7 @@ SQLX_OFFLINE=true cargo check --workspace
 - [x] **RUST-073 (M)** Реализовать citation/provenance verifier V1–V7.
   - Тесты: positive/negative corpus для chunk IDs, чисел, ссылок и обязательных citations; property tests на malformed claims.
   - DoD: verifier отклоняет неподтверждённые claims.
-  - Evidence: Rust PR [#147](https://github.com/qembed/qembed-object-runtime/pull/147), CI run [#45635114821](https://github.com/qembed/qembed-object-runtime/actions/runs/45630503061) — success.
+  - Evidence: Rust PR [#147](https://github.com/qembed/qembed-object-runtime/pull/147), CI run [#45630503061](https://github.com/qembed/qembed-object-runtime/actions/runs/45630503061) — success.
 
 - [x] **RUST-074 (M)** Реализовать application-level provenance и caller isolation.
   - Тесты: integration — Caller A не читает episodic memory Caller B; forged provenance rejected.
@@ -552,11 +552,12 @@ SQLX_OFFLINE=true cargo check --workspace
   - DoD: promotion создаёт новую Verified запись с корректной ссылкой на superseded candidate.
   - Evidence: Rust PR [#149](https://github.com/qembed/qembed-object-runtime/pull/149), CI run [#45650580420](https://github.com/qembed/qembed-object-runtime/actions/runs/45650580420) — success (379 passed, 8 skipped); canonical PostgreSQL promotion integration passed.
 
-- [ ] **RUST-076 (S)** Добавить knowledge concurrency и GC suite.
+- [x] **RUST-076 (S)** Добавить knowledge concurrency и GC suite.
   - Тесты: commit race, pinned invocation, GC race, rollback и повторная публикация.
   - DoD: suite запускается на PostgreSQL в CI.
+  - Evidence: Rust PR [#150](https://github.com/qembed/qembed-object-runtime/pull/150), CI run [#45651982896](https://github.com/qembed/qembed-object-runtime/actions/runs/45651982896) — success (380 passed, 8 skipped); concurrent GC race passed.
 
-**M2 Gate:** revision commit, retrieval filtering, pinning/GC и provenance verifier покрыты unit и PostgreSQL integration tests.
+**M2 Gate: PASSED.** Revision commit, retrieval filtering, pinning/GC and provenance verifier are covered by unit and PostgreSQL integration tests.
 
 ---
 
