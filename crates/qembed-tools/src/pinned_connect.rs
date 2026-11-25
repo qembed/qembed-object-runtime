@@ -1,24 +1,14 @@
 //! TLS connection over an already validated, immutable DNS address set.
-use std::{
-    error::Error,
-    fmt,
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{error::Error, fmt, net::SocketAddr, sync::Arc, time::Duration};
 
 use tokio::{net::TcpStream, time::timeout};
 use tokio_rustls::{
-    client::TlsStream,
-    rustls::{
-        ClientConfig, RootCertStore,
-        pki_types::ServerName,
-        crypto::ring::default_provider,
-    },
     TlsConnector,
+    client::TlsStream,
+    rustls::{ClientConfig, RootCertStore, crypto::ring::default_provider, pki_types::ServerName},
 };
 
-use crate::dns_resolution::{DnsName, ResolvedAddressSet};
+use crate::dns_resolution::ResolvedAddressSet;
 
 /// Connects directly to validated IP addresses while retaining the original TLS identity.
 pub struct PinnedConnector {
@@ -49,13 +39,12 @@ impl PinnedConnector {
         }
     }
 
-    /// Opens TCP sockets only to the supplied checked IPs, then performs TLS using
-    /// the original DNS hostname for SNI and certificate hostname verification.
+    /// Opens TCP sockets only to the checked IPs, then performs TLS using the hostname
+    /// bound to the address set for SNI and certificate hostname verification.
     pub async fn connect_tls(
         &self,
-        hostname: &DnsName,
-        port: u16,
         addresses: &ResolvedAddressSet,
+        port: u16,
     ) -> Result<PinnedTlsStream, PinnedConnectError> {
         if port == 0 {
             return Err(PinnedConnectError::InvalidPort);
@@ -65,7 +54,11 @@ impl PinnedConnector {
             return Err(PinnedConnectError::EmptyAddressSet);
         }
 
-        let server_name = hostname.as_fqdn().trim_end_matches('.').to_owned();
+        let server_name = addresses
+            .hostname()
+            .as_fqdn()
+            .trim_end_matches('.')
+            .to_owned();
         let tls_server_name = ServerName::try_from(server_name.clone())
             .map_err(|_| PinnedConnectError::InvalidServerName(server_name.clone()))?;
 
@@ -93,11 +86,9 @@ impl PinnedConnector {
                     address,
                     message: error.to_string(),
                 })?;
-            let peer_addr = stream
-                .get_ref()
-                .0
-                .peer_addr()
-                .map_err(|error| PinnedConnectError::PeerAddressUnavailable(error.to_string()))?;
+            let peer_addr = stream.get_ref().0.peer_addr().map_err(|error| {
+                PinnedConnectError::PeerAddressUnavailable(error.to_string())
+            })?;
 
             return Ok(PinnedTlsStream {
                 stream,
@@ -164,13 +155,22 @@ impl fmt::Display for PinnedConnectError {
                 write!(formatter, "TLS client configuration failed: {message}")
             }
             Self::AllAddressesFailed(message) => {
-                write!(formatter, "all pinned TCP connection attempts failed: {message}")
+                write!(
+                    formatter,
+                    "all pinned TCP connection attempts failed: {message}"
+                )
             }
             Self::TlsHandshakeFailed { address, message } => {
-                write!(formatter, "TLS handshake with pinned peer {address} failed: {message}")
+                write!(
+                    formatter,
+                    "TLS handshake with pinned peer {address} failed: {message}"
+                )
             }
             Self::PeerAddressUnavailable(message) => {
-                write!(formatter, "connected peer address is unavailable: {message}")
+                write!(
+                    formatter,
+                    "connected peer address is unavailable: {message}"
+                )
             }
         }
     }
@@ -182,33 +182,48 @@ impl Error for PinnedConnectError {}
 mod tests {
     use std::{
         net::{IpAddr, Ipv4Addr},
-        sync::Arc,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::Duration,
     };
 
     use tokio::{net::TcpListener, time::timeout};
     use tokio_rustls::{
-        rustls::{
-            self,
-            pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
-            ClientConfig, RootCertStore, ServerConfig,
-        },
         TlsAcceptor,
+        rustls::{
+            self, ClientConfig, RootCertStore, ServerConfig,
+            pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+        },
     };
 
     use super::*;
-    use crate::dns_resolution::ResolvedAddressSet;
+    use crate::dns_resolution::{DnsAnswer, DnsName, DnsResolutionError, DnsResolver, ResolvedAddressSet};
 
-    const TEST_CERTIFICATE: &[u8] =
-        include_bytes!("../tests/fixtures/dns-test-cert.der");
-    const TEST_PRIVATE_KEY: &[u8] =
-        include_bytes!("../tests/fixtures/dns-test-key.der");
+    const TEST_CERTIFICATE: &[u8] = include_bytes!("../tests/fixtures/dns-test-cert.der");
+    const TEST_PRIVATE_KEY: &[u8] = include_bytes!("../tests/fixtures/dns-test-key.der");
+
+    struct RebindingResolver {
+        calls: AtomicUsize,
+    }
+
+    impl DnsResolver for RebindingResolver {
+        async fn lookup(&self, _name: &DnsName) -> Result<DnsAnswer, DnsResolutionError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let address = if call == 0 {
+                "127.0.0.1"
+            } else {
+                "127.0.0.2"
+            };
+            Ok(DnsAnswer::new(vec![address.to_owned()], Vec::new()))
+        }
+    }
 
     fn test_tls_configs() -> (Arc<ClientConfig>, Arc<ServerConfig>) {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
         let certificate = CertificateDer::from(TEST_CERTIFICATE.to_vec());
-        let private_key =
-            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(TEST_PRIVATE_KEY.to_vec()));
+        let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(TEST_PRIVATE_KEY.to_vec()));
 
         let server_config = ServerConfig::builder_with_provider(Arc::clone(&provider))
             .with_safe_default_protocol_versions()
@@ -242,8 +257,8 @@ mod tests {
         })
     }
 
-    fn local_addresses(ip: Ipv4Addr) -> ResolvedAddressSet {
-        ResolvedAddressSet::for_test(vec![IpAddr::V4(ip)])
+    fn local_addresses(hostname: DnsName, ip: Ipv4Addr) -> ResolvedAddressSet {
+        ResolvedAddressSet::for_test(hostname, vec![IpAddr::V4(ip)])
     }
 
     #[tokio::test]
@@ -256,9 +271,10 @@ mod tests {
         let server = spawn_tls_server(listener, server_config);
         let connector = PinnedConnector::with_tls_config(client_config);
         let hostname = DnsName::parse("example.test").expect("valid DNS name");
+        let addresses = local_addresses(hostname, Ipv4Addr::LOCALHOST);
 
         let connection = connector
-            .connect_tls(&hostname, address.port(), &local_addresses(Ipv4Addr::LOCALHOST))
+            .connect_tls(&addresses, address.port())
             .await
             .expect("TLS connection to pinned IP");
 
@@ -281,10 +297,9 @@ mod tests {
         let server = spawn_tls_server(listener, server_config);
         let connector = PinnedConnector::with_tls_config(client_config);
         let hostname = DnsName::parse("wrong.example.test").expect("valid DNS name");
+        let addresses = local_addresses(hostname, Ipv4Addr::LOCALHOST);
 
-        let result = connector
-            .connect_tls(&hostname, address.port(), &local_addresses(Ipv4Addr::LOCALHOST))
-            .await;
+        let result = connector.connect_tls(&addresses, address.port()).await;
 
         assert!(matches!(
             result,
@@ -306,19 +321,30 @@ mod tests {
         let server = spawn_tls_server(listener, server_config);
         let connector = PinnedConnector::with_tls_config(client_config);
         let hostname = DnsName::parse("example.test").expect("valid DNS name");
+        let resolver = RebindingResolver {
+            calls: AtomicUsize::new(0),
+        };
 
-        let pinned = local_addresses(Ipv4Addr::new(127, 0, 0, 1));
-        let later_dns_answer = local_addresses(Ipv4Addr::new(127, 0, 0, 2));
+        let _initial_answer = resolver.lookup(&hostname).await.expect("initial DNS answer");
+        let pinned = local_addresses(hostname.clone(), Ipv4Addr::new(127, 0, 0, 1));
+        let _rebound_answer = resolver.lookup(&hostname).await.expect("rebound DNS answer");
+        let later_dns_answer = local_addresses(hostname, Ipv4Addr::new(127, 0, 0, 2));
         assert_ne!(pinned.addresses(), later_dns_answer.addresses());
+        assert_eq!(resolver.calls.load(Ordering::SeqCst), 2);
 
         let connection = connector
-            .connect_tls(&hostname, address.port(), &pinned)
+            .connect_tls(&pinned, address.port())
             .await
             .expect("connection must use the original pinned IP");
 
         assert_eq!(
             connection.peer_addr().ip(),
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert_eq!(
+            resolver.calls.load(Ordering::SeqCst),
+            2,
+            "pinned connect must not resolve the hostname again"
         );
         assert!(
             timeout(Duration::from_millis(100), rebound_listener.accept())
