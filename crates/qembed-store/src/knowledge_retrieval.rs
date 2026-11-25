@@ -232,7 +232,7 @@ impl PgKnowledgeRetrievalStore {
                      AND e.chunk_id = c.id AND e.model_id = $4 \
                  ) \
                  SELECT id, document_id, content, chunk_position, metadata, \
-                        (embedding <=> $5::vector)::float8 AS score \
+                        (1.0 - (embedding <=> $5::vector))::float8 AS score \
                    FROM visible_candidates \
                   ORDER BY embedding <=> $5::vector, id LIMIT $6",
                 RetrievalScoreKind::Similarity,
