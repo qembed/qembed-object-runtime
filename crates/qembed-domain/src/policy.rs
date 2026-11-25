@@ -490,6 +490,59 @@ pub fn evaluate_policy(
     })
 }
 
+/// The single domain boundary that turns a positive policy verdict into a capability.
+#[derive(Debug, Default)]
+pub struct Authorizer;
+
+impl Authorizer {
+    /// Evaluates trusted policy facts and mints a capability only for Allow.
+    pub fn authorize(
+        &self,
+        input: PolicyEvaluationInput,
+        step_index: u32,
+    ) -> Result<AuthorizationOutcome, PolicyEvaluationError> {
+        let policy = evaluate_policy(input)?;
+        let allowed_command = if policy.decision() == PolicyDecision::Allow {
+            Some(AllowedCommand::mint(
+                policy.audit().invocation_id(),
+                step_index,
+                *policy.audit().action_hash(),
+            ))
+        } else {
+            None
+        };
+
+        Ok(AuthorizationOutcome {
+            policy,
+            allowed_command,
+        })
+    }
+}
+
+/// Policy result plus an optional capability; non-Allow verdicts never carry one.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AuthorizationOutcome {
+    policy: PolicyEvaluationResult,
+    allowed_command: Option<AllowedCommand>,
+}
+
+impl AuthorizationOutcome {
+    #[must_use]
+    pub const fn policy(&self) -> &PolicyEvaluationResult {
+        &self.policy
+    }
+
+    #[must_use]
+    pub const fn allowed_command(&self) -> Option<&AllowedCommand> {
+        self.allowed_command.as_ref()
+    }
+
+    #[must_use]
+    pub fn into_allowed_command(self) -> Option<AllowedCommand> {
+        self.allowed_command
+    }
+}
+
 /// An unforgeable-by-callers capability representing one policy-approved command.
 ///
 /// The fields are private, the type is not serializable or cloneable, and its
@@ -536,6 +589,15 @@ pub fn evaluate_policy(
 /// require_deserialize::<AllowedCommand>();
 /// ```
 ///
+/// External callers cannot invoke the private mint boundary:
+///
+/// ```compile_fail
+/// use qembed_domain::ids::InvocationId;
+/// use qembed_domain::policy::AllowedCommand;
+///
+/// let _ = AllowedCommand::mint(InvocationId::new(), 0, [0; 32]);
+/// ```
+///
 /// It has no default value:
 ///
 /// ```compile_fail
@@ -579,10 +641,7 @@ impl AllowedCommand {
 
     /// Mints a capability after policy has approved the exact command context.
     ///
-    /// Kept private so this module remains the sole minting boundary. The
-    /// Authorizer introduced later must call this only after a positive policy
-    /// decision; adapters and executors receive, but cannot manufacture, it.
-    #[allow(dead_code)] // The Authorizer will use this mint boundary in RUST-078.
+    /// Kept private so the Authorizer remains the sole minting boundary.
     fn mint(invocation_id: InvocationId, step_index: u32, action_hash: [u8; 32]) -> Self {
         Self {
             command_id: derive_command_id(invocation_id, step_index, &action_hash),
@@ -598,13 +657,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn policy_mint_creates_a_capability_bound_to_exact_command_context() {
+    fn authorizer_mints_only_for_allow_and_binds_exact_context() {
         let invocation_id = InvocationId::new();
         let step_index = 4;
         let action_hash = [0x5a; 32];
-
-        let allowed = AllowedCommand::mint(invocation_id, step_index, action_hash);
-
+        let policy_input = PolicyEvaluationInput::new(
+            invocation_id,
+            PrincipalId::new(),
+            ObjectId::new(),
+            1,
+            PolicyActionClass::ToolExecution,
+            action_hash,
+            1_795_000_000_000,
+            satisfied_checks(PolicyActionClass::ToolExecution),
+            vec![],
+        );
+        let outcome = Authorizer
+            .authorize(policy_input, step_index)
+            .expect("valid policy");
+        let allowed = outcome.allowed_command().expect("Allow mints capability");
         assert_eq!(
             allowed.command_id(),
             derive_command_id(invocation_id, step_index, &action_hash)
@@ -612,6 +683,39 @@ mod tests {
         assert_eq!(allowed.invocation_id(), invocation_id);
         assert_eq!(allowed.step_index(), step_index);
         assert_eq!(allowed.action_hash(), &action_hash);
+        assert_eq!(outcome.policy().decision(), PolicyDecision::Allow);
+    }
+
+    #[test]
+    fn authorizer_never_mints_for_deny_or_approval() {
+        let mut denied_checks = satisfied_checks(PolicyActionClass::ToolExecution);
+        denied_checks[0] =
+            TrustedPolicyCheck::new(PolicyCheck::PrincipalAuthorized, PolicyCheckOutcome::Denied);
+        let denied = Authorizer
+            .authorize(
+                input(PolicyActionClass::ToolExecution, denied_checks, vec![]),
+                0,
+            )
+            .expect("valid policy");
+        assert_eq!(denied.policy().decision(), PolicyDecision::Deny);
+        assert!(denied.allowed_command().is_none());
+
+        let mut approval_checks = satisfied_checks(PolicyActionClass::ToolExecution);
+        approval_checks[0] = TrustedPolicyCheck::new(
+            PolicyCheck::PrincipalAuthorized,
+            PolicyCheckOutcome::RequiresApproval,
+        );
+        let approval = Authorizer
+            .authorize(
+                input(PolicyActionClass::ToolExecution, approval_checks, vec![]),
+                0,
+            )
+            .expect("valid policy");
+        assert_eq!(
+            approval.policy().decision(),
+            PolicyDecision::RequireApproval
+        );
+        assert!(approval.allowed_command().is_none());
     }
     fn satisfied_checks(action_class: PolicyActionClass) -> Vec<TrustedPolicyCheck> {
         action_class
