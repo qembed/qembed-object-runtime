@@ -73,7 +73,7 @@ impl PgEpisodicMemoryRepository {
         ensure_caller_binding(&transaction, &caller)?;
 
         let rows: Vec<(Uuid, String, String, String)> = sqlx::query_as(
-            "SELECT id, claim, source_kind, verification \
+            "SELECT id, claim, source_kind::text, verification::text \
                FROM memories \
               WHERE tenant_id = $1::uuid AND object_id = $2::uuid \
                 AND caller_id = $3::uuid AND memory_kind = 'episodic' \
