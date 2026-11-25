@@ -122,6 +122,7 @@ pub mod kill_switch;
 pub mod knowledge;
 pub mod knowledge_embedding;
 pub mod knowledge_ingestion;
+pub mod memory;
 pub mod object;
 pub mod object_validation;
 pub mod object_version;
@@ -150,10 +151,18 @@ pub mod test_support {
     /// authentication boundary.
     #[must_use]
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
-        let principal =
-            Principal::from_verified_auth(PrincipalId::new(), PrincipalKind::TenantOwner)
-                .expect("a generated principal ID must be valid");
+        scope_for_principal(tenant_id, PrincipalKind::TenantOwner)
+    }
 
+    /// Creates a test Scope for a non-owner authenticated Principal.
+    #[must_use]
+    pub fn scope_for_authenticated_tenant(tenant_id: TenantId) -> Scope {
+        scope_for_principal(tenant_id, PrincipalKind::Authenticated)
+    }
+
+    fn scope_for_principal(tenant_id: TenantId, kind: PrincipalKind) -> Scope {
+        let principal = Principal::from_verified_auth(PrincipalId::new(), kind)
+            .expect("a generated principal ID must be valid");
         Scope::from_verified_auth(tenant_id, principal)
             .expect("a generated tenant ID must be valid")
     }

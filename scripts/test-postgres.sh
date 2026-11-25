@@ -157,6 +157,10 @@ cargo test -p qembed-store --test context_issuer_postgres -- --ignored --test-th
 cargo test -p qembed-store --test episodic_memory -- --ignored --test-threads=1 2>&1 \
   | tee "$evidence_dir/rust-074-episodic-memory-caller-isolation.log"
 
+# RUST-075: promote an Unverified semantic candidate into a new Owner/Verified row.
+cargo test -p qembed-store --test memory_promotion_postgres -- --ignored --test-threads=1 2>&1 \
+  | tee "$evidence_dir/rust-075-memory-promotion-canonical.log"
+
 # RUST-061 uses the same canonical Runtime schema plus the mandatory external
 # Control-plane database. The test proves revoke -> external tombstone -> erase
 # ordering and repeated deletion idempotency through the Rust Store adapter.
