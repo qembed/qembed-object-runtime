@@ -16,13 +16,12 @@ pub const MAX_EPISODIC_CLAIM_BYTES: usize = 8 * 1024;
 ///
 /// Provenance fields are deliberately not accepted from callers when writing
 /// memories. User-authored input is always stored as User / Unverified.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EpisodicMemory {
     id: Uuid,
     claim: String,
     source_kind: String,
     verification: String,
-    confidence: f64,
 }
 
 impl EpisodicMemory {
@@ -45,11 +44,6 @@ impl EpisodicMemory {
     pub fn verification(&self) -> &str {
         &self.verification
     }
-
-    #[must_use]
-    pub const fn confidence(&self) -> f64 {
-        self.confidence
-    }
 }
 
 /// PostgreSQL adapter for Caller-scoped episodic memory.
@@ -68,7 +62,7 @@ impl PgEpisodicMemoryRepository {
     ///
     /// The Caller ID is resolved from the authenticated Principal's active
     /// delegation inside the signed transaction. The request cannot provide
-    /// source_kind, verification, confidence, or a different effective Caller.
+    /// source_kind, verification, or a different effective Caller.
     pub async fn record_user_claim(
         &self,
         scope: &Scope,
@@ -125,8 +119,8 @@ impl PgEpisodicMemoryRepository {
             .map_err(EpisodicMemoryError::Context)?;
         ensure_caller_binding(&transaction, &caller)?;
 
-        let rows: Vec<(Uuid, String, String, String, f64)> = sqlx::query_as(
-            "SELECT id, claim, source_kind, verification, confidence \
+        let rows: Vec<(Uuid, String, String, String)> = sqlx::query_as(
+            "SELECT id, claim, source_kind, verification \
                FROM memories \
               WHERE tenant_id = $1::uuid AND object_id = $2::uuid \
                 AND caller_id = $3::uuid AND memory_kind = 'episodic' \
@@ -147,15 +141,12 @@ impl PgEpisodicMemoryRepository {
 
         Ok(rows
             .into_iter()
-            .map(
-                |(id, claim, source_kind, verification, confidence)| EpisodicMemory {
-                    id,
-                    claim,
-                    source_kind,
-                    verification,
-                    confidence,
-                },
-            )
+            .map(|(id, claim, source_kind, verification)| EpisodicMemory {
+                id,
+                claim,
+                source_kind,
+                verification,
+            })
             .collect())
     }
 }
