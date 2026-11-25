@@ -646,8 +646,9 @@ mod tests {
             PolicyActionClass::ObjectMutation,
             PolicyActionClass::ExternalNetwork,
         ] {
-            let result = evaluate_policy(input(action_class, satisfied_checks(action_class), vec![]))
-                .expect("configured policy version is valid");
+            let result =
+                evaluate_policy(input(action_class, satisfied_checks(action_class), vec![]))
+                    .expect("configured policy version is valid");
             assert_eq!(result.decision(), PolicyDecision::Allow);
             assert_eq!(
                 result.audit().reasons(),
@@ -678,12 +679,22 @@ mod tests {
         let result = evaluate_policy(input(PolicyActionClass::ToolExecution, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::Deny);
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::CheckDenied(PolicyCheck::CapabilityGranted)
-        ));
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::ApprovalRequired(PolicyCheck::BindingCurrent)
-        ));
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::CheckDenied(
+                    PolicyCheck::CapabilityGranted
+                ))
+        );
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::ApprovalRequired(
+                    PolicyCheck::BindingCurrent
+                ))
+        );
     }
 
     #[test]
@@ -692,21 +703,29 @@ mod tests {
         checks.retain(|check| check.check() != PolicyCheck::BudgetAvailable);
         for check in &mut checks {
             if check.check() == PolicyCheck::ObjectActive {
-                *check = TrustedPolicyCheck::new(
-                    PolicyCheck::ObjectActive,
-                    PolicyCheckOutcome::Unknown,
-                );
+                *check =
+                    TrustedPolicyCheck::new(PolicyCheck::ObjectActive, PolicyCheckOutcome::Unknown);
             }
         }
         let result = evaluate_policy(input(PolicyActionClass::KnowledgeRead, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::Deny);
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::CheckUnknown(PolicyCheck::ObjectActive)
-        ));
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::CheckMissing(PolicyCheck::BudgetAvailable)
-        ));
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::CheckUnknown(
+                    PolicyCheck::ObjectActive
+                ))
+        );
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::CheckMissing(
+                    PolicyCheck::BudgetAvailable
+                ))
+        );
     }
 
     #[test]
@@ -723,12 +742,22 @@ mod tests {
         let result = evaluate_policy(input(PolicyActionClass::KnowledgeRead, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::Deny);
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::CheckDuplicated(PolicyCheck::PrincipalAuthorized)
-        ));
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::UnexpectedCheck(PolicyCheck::NetworkTargetValidated)
-        ));
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::CheckDuplicated(
+                    PolicyCheck::PrincipalAuthorized
+                ))
+        );
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::UnexpectedCheck(
+                    PolicyCheck::NetworkTargetValidated
+                ))
+        );
     }
 
     #[test]
@@ -745,9 +774,14 @@ mod tests {
         let result = evaluate_policy(input(PolicyActionClass::ToolExecution, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::RequireApproval);
-        assert!(result.audit().reasons().contains(
-            &PolicyDecisionReason::ApprovalRequired(PolicyCheck::BindingCurrent)
-        ));
+        assert!(
+            result
+                .audit()
+                .reasons()
+                .contains(&PolicyDecisionReason::ApprovalRequired(
+                    PolicyCheck::BindingCurrent
+                ))
+        );
     }
 
     #[test]
@@ -819,5 +853,4 @@ mod tests {
             Err(PolicyEvaluationError::ZeroPolicyVersion)
         );
     }
-
 }
