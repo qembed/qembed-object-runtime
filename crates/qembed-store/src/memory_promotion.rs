@@ -97,7 +97,7 @@ impl fmt::Display for MemoryPromotionError {
 impl Error for MemoryPromotionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::CandidateRejected(e) => Some(e), Self::Context(e) => Some(e),
+            Self::CandidateRejected(_) => None, Self::Context(e) => Some(e),
             Self::Database(e) => Some(e), _ => None,
         }
     }
