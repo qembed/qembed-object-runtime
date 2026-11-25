@@ -7,9 +7,10 @@ license.workspace = true
 lints.workspace = true
 
 [dependencies]
+hickory-resolver.workspace = true
 qembed-domain = { path = "../qembed-domain" }
+tokio.workspace = true
 
 [dev-dependencies]
 qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
 serde_json.workspace = true
-tokio.workspace = true
