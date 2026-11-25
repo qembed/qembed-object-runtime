@@ -95,14 +95,29 @@ impl fmt::Display for DnsRecordFamily {
 /// A fully parsed, deduplicated and validated DNS answer set.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedAddressSet {
+    hostname: DnsName,
     addresses: Vec<IpAddr>,
 }
 
 impl ResolvedAddressSet {
+    /// Returns the hostname whose complete A+AAAA answer produced this set.
+    #[must_use]
+    pub fn hostname(&self) -> &DnsName {
+        &self.hostname
+    }
+
     /// Returns every validated address from both record families.
     #[must_use]
     pub fn addresses(&self) -> &[IpAddr] {
         &self.addresses
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(hostname: DnsName, addresses: Vec<IpAddr>) -> Self {
+        Self {
+            hostname,
+            addresses,
+        }
     }
 }
 
@@ -233,12 +248,15 @@ pub async fn resolve_public<R: DnsResolver>(
 ) -> Result<ResolvedAddressSet, DnsResolutionError> {
     let name = DnsName::parse(hostname)?;
     let answer = resolver.lookup(&name).await?;
-    validate_answer(answer)
+    validate_answer(name, answer)
 }
 
 /// Parses and validates all records. One forbidden or malformed address rejects the
 /// entire answer set; no safe subset is returned.
-pub fn validate_answer(answer: DnsAnswer) -> Result<ResolvedAddressSet, DnsResolutionError> {
+fn validate_answer(
+    hostname: DnsName,
+    answer: DnsAnswer,
+) -> Result<ResolvedAddressSet, DnsResolutionError> {
     let mut addresses = Vec::with_capacity(answer.a_records.len() + answer.aaaa_records.len());
 
     for value in answer.a_records {
@@ -275,7 +293,10 @@ pub fn validate_answer(answer: DnsAnswer) -> Result<ResolvedAddressSet, DnsResol
 
     addresses.sort_unstable();
     addresses.dedup();
-    Ok(ResolvedAddressSet { addresses })
+    Ok(ResolvedAddressSet {
+        hostname,
+        addresses,
+    })
 }
 
 fn is_public_unicast(address: IpAddr) -> bool {
@@ -334,6 +355,7 @@ mod tests {
             .await
             .expect("public RRset");
 
+        assert_eq!(result.hostname().as_fqdn(), "example.com.");
         assert_eq!(
             result.addresses(),
             &[
@@ -398,7 +420,10 @@ mod tests {
             DnsAnswer::new(vec![], vec!["fc00::1".into()]),
         ] {
             assert!(matches!(
-                validate_answer(answer),
+                validate_answer(
+                    DnsName::parse("example.com").expect("valid DNS name"),
+                    answer
+                ),
                 Err(DnsResolutionError::NonPublicAddress(_))
             ));
         }
