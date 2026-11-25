@@ -1,6 +1,7 @@
 mod support;
 
 use qembed_api::provenance::ApplicationProvenanceVerifier;
+use qembed_domain::object::Object;
 use qembed_domain::{
     citation_verifier::{CitationClaim, CitationDocument, VerificationRule},
     ids::{KnowledgeChunkId, KnowledgeDocumentId, ObjectId, TenantId},
@@ -8,8 +9,9 @@ use qembed_domain::{
     scope::Scope,
     test_support::scope_for_tenant,
 };
-use qembed_store::{PgPoolConfig, connect_pool, object_repository::ObjectRepository, run_migrations};
-use qembed_domain::object::Object;
+use qembed_store::{
+    PgPoolConfig, connect_pool, object_repository::ObjectRepository, run_migrations,
+};
 
 #[tokio::test]
 async fn application_verifier_rejects_forged_citation_ids_and_accepts_persisted_evidence() {
@@ -92,10 +94,12 @@ async fn application_verifier_rejects_forged_citation_ids_and_accepts_persisted_
         .await
         .expect("verification returns a report for unresolved citations");
     assert!(!forged_report.is_accepted());
-    assert!(forged_report
-        .violations()
-        .iter()
-        .any(|violation| violation.rule == VerificationRule::V4CitationResolution));
+    assert!(
+        forged_report
+            .violations()
+            .iter()
+            .any(|violation| violation.rule == VerificationRule::V4CitationResolution)
+    );
 
     pool.close().await;
 }
