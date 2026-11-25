@@ -6,7 +6,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
-use hickory_resolver::{proto::rr::RData, Resolver, TokioResolver};
+use hickory_resolver::{Resolver, TokioResolver, proto::rr::RData};
 
 /// A canonical absolute DNS hostname. IP literals and relative search names are rejected.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -35,7 +35,9 @@ impl DnsName {
                         .bytes()
                         .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             })
-            || labels.iter().all(|label| label.bytes().all(|byte| byte.is_ascii_digit()))
+            || labels
+                .iter()
+                .all(|label| label.bytes().all(|byte| byte.is_ascii_digit()))
         {
             return Err(DnsResolutionError::InvalidHostname);
         }
@@ -138,7 +140,10 @@ impl fmt::Display for DnsResolutionError {
                 write!(formatter, "malformed {family} address record: {value}")
             }
             Self::NonPublicAddress(address) => {
-                write!(formatter, "DNS answer contains a non-public address: {address}")
+                write!(
+                    formatter,
+                    "DNS answer contains a non-public address: {address}"
+                )
             }
         }
     }
@@ -237,22 +242,24 @@ pub fn validate_answer(answer: DnsAnswer) -> Result<ResolvedAddressSet, DnsResol
     let mut addresses = Vec::with_capacity(answer.a_records.len() + answer.aaaa_records.len());
 
     for value in answer.a_records {
-        let address = value.parse::<Ipv4Addr>().map_err(|_| {
-            DnsResolutionError::MalformedAddress {
-                family: DnsRecordFamily::A,
-                value: value.clone(),
-            }
-        })?;
+        let address =
+            value
+                .parse::<Ipv4Addr>()
+                .map_err(|_| DnsResolutionError::MalformedAddress {
+                    family: DnsRecordFamily::A,
+                    value: value.clone(),
+                })?;
         addresses.push(IpAddr::V4(address));
     }
 
     for value in answer.aaaa_records {
-        let address = value.parse::<Ipv6Addr>().map_err(|_| {
-            DnsResolutionError::MalformedAddress {
-                family: DnsRecordFamily::Aaaa,
-                value: value.clone(),
-            }
-        })?;
+        let address =
+            value
+                .parse::<Ipv6Addr>()
+                .map_err(|_| DnsResolutionError::MalformedAddress {
+                    family: DnsRecordFamily::Aaaa,
+                    value: value.clone(),
+                })?;
         addresses.push(IpAddr::V6(address));
     }
 
@@ -323,7 +330,9 @@ mod tests {
             &["2606:4700:4700::1111", "2001:4860:4860::8888"],
         );
 
-        let result = resolve_public(&resolver, "Example.COM").await.expect("public RRset");
+        let result = resolve_public(&resolver, "Example.COM")
+            .await
+            .expect("public RRset");
 
         assert_eq!(
             result.addresses(),
@@ -350,7 +359,9 @@ mod tests {
         let resolver = resolver(&["93.184.216.34", "10.0.0.7"], &[]);
         assert_eq!(
             resolve_public(&resolver, "example.com").await,
-            Err(DnsResolutionError::NonPublicAddress("10.0.0.7".parse().unwrap()))
+            Err(DnsResolutionError::NonPublicAddress(
+                "10.0.0.7".parse().unwrap()
+            ))
         );
     }
 
