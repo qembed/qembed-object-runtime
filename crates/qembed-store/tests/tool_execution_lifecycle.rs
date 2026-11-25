@@ -146,6 +146,18 @@ async fn setup() -> Fixture {
     .expect("tool version exists");
 
     sqlx::query(
+        "INSERT INTO object_tools (tenant_id, object_id, tool_id, tool_version_id, permissions)
+         VALUES ($1, $2, $3, $4, '{}'::jsonb)",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(object_id.into_uuid())
+    .bind(tool_id)
+    .bind(tool_version_id)
+    .execute(&pool)
+    .await
+    .expect("current Object Tool binding exists");
+
+    sqlx::query(
         "INSERT INTO policy_decisions
             (id, tenant_id, object_id, invocation_id, caller_id, snapshot_id,
              tool_id, tool_version_id, binding_version, operation, arguments_hash,
