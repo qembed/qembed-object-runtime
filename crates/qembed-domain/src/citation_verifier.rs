@@ -297,18 +297,17 @@ fn normalize_number(raw: &str) -> String {
     let decimal_separator = match (last_dot, last_comma) {
         (Some(dot), Some(comma)) => Some(if dot > comma { '.' } else { ',' }),
         (Some(_), None) => Some('.'),
-        (None, Some(comma)) => {
-            let digits_after = value.len().saturating_sub(comma + 1);
-            if digits_after == 3 && value[..comma].len() <= 3 { None } else { Some(',') }
-        }
+        (None, Some(_)) if is_grouped_number(value, ',') => None,
+        (None, Some(_)) => Some(',')
         (None, None) => None,
     };
 
-    let mut normalized = String::with_capacity(value.len() + usize::from(percent));
-    for ch in value.chars() {
+    let mut normalized = String::with_capacity(value.len() + if percent { 1 } else { 0 });
+    let decimal_index = decimal_separator.and_then(|separator| value.rfind(separator));
+    for (index, ch) in value.char_indices() {
         if ch.is_ascii_digit() {
             normalized.push(ch);
-        } else if Some(ch) == decimal_separator {
+        } else if Some(index) == decimal_index {
             normalized.push('.');
         }
     }
@@ -316,6 +315,14 @@ fn normalize_number(raw: &str) -> String {
         normalized.push('%');
     }
     normalized
+}
+
+fn is_grouped_number(value: &str, separator: char) -> bool {
+    let groups = value.split(separator).collect::<Vec<_>>();
+    groups.len() > 1
+        && (1..=3).contains(&groups[0].len())
+        && groups.iter().all(|group| !group.is_empty() && group.bytes().all(|byte| byte.is_ascii_digit()))
+        && groups.iter().skip(1).all(|group| group.len() == 3)
 }
 
 fn extract_urls(text: &str) -> BTreeSet<String> {
