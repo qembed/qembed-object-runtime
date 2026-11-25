@@ -12,16 +12,21 @@ The function returns candidates only; it deliberately has no top-k parameter. RU
 
 ```sql
 WITH visible_candidates AS MATERIALIZED (
-    SELECT * FROM knowledge_visible_chunks_at($tenant, $object, $pinned_revision)
+    SELECT candidate.*, embedding.model_id, embedding.embedding
+    FROM knowledge_visible_chunks_at($tenant, $object, $pinned_revision) AS candidate
+    JOIN knowledge_chunk_embeddings AS embedding
+      ON embedding.tenant_id = candidate.tenant_id
+     AND embedding.object_id = candidate.object_id
+     AND embedding.chunk_id = candidate.id
+    WHERE embedding.model_id = $model_id
 )
 SELECT ...
-FROM visible_candidates AS candidate
-JOIN knowledge_chunk_embeddings AS embedding ON ...
-ORDER BY embedding.embedding <=> $query_vector
+FROM visible_candidates
+ORDER BY embedding <=> $query_vector
 LIMIT $top_k;
 ```
 
-This materialization is intentional: filtering after an approximate or exact top-k can allow a future or otherwise invisible chunk to consume a result slot.
+This materialization must include the embedding join, not only the chunk IDs. Otherwise PostgreSQL may scan an HNSW index in distance order and apply the visibility join as a post-filter, allowing invisible rows to consume top-k slots. Materializing the visible chunk+embedding rows first makes the outer distance sort operate only on eligible candidates.
 
 ## Verification
 

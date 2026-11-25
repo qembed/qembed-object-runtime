@@ -1,9 +1,9 @@
 //! Revision-pinned candidate filtering for Knowledge retrieval.
 //!
 //! This adapter deliberately returns the complete visible candidate set. The
-//! next retrieval layer must rank and apply top-k only after this filter. Its
-//! SQL composition uses knowledge_visible_chunks_at(...) as a MATERIALIZED CTE
-//! so vector ranking cannot consume staged, future, closed or erased chunks.
+//! next retrieval layer must materialize the visible candidates together with
+//! their model embeddings, then rank and apply top-k over that materialized set.
+//! This prevents a vector index scan from spending top-k slots on invisible rows.
 
 use std::{error::Error, fmt};
 

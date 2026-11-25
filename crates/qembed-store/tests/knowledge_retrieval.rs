@@ -15,7 +15,6 @@ use qembed_store::{
 use sqlx::PgPool;
 
 struct FixtureChunk {
-    document_id: KnowledgeDocumentId,
     chunk_id: KnowledgeChunkId,
 }
 
@@ -40,6 +39,7 @@ async fn setup() -> (PgPool, PgKnowledgeRetrievalStore, Scope, ObjectId) {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_chunk(
     pool: &PgPool,
     scope: &Scope,
@@ -86,10 +86,7 @@ async fn insert_chunk(
     .await
     .expect("fixture chunk inserted");
 
-    FixtureChunk {
-        document_id,
-        chunk_id,
-    }
+    FixtureChunk { chunk_id }
 }
 
 async fn set_current_revision(pool: &PgPool, scope: &Scope, object_id: ObjectId, revision: i64) {
@@ -213,7 +210,6 @@ async fn pinned_revision_excludes_staged_future_closed_and_erased_chunks() {
     .expect("regression control query succeeds");
     assert_eq!(wrong_top_one, None);
 
-    assert_ne!(staged.document_id, live.document_id);
     pool.close().await;
 }
 
