@@ -322,7 +322,7 @@ fn normalize_number(raw: &str) -> String {
         (Some(dot), Some(comma)) => Some(if dot > comma { '.' } else { ',' }),
         (Some(_), None) => Some('.'),
         (None, Some(_)) if is_grouped_number(value, ',') => None,
-        (None, Some(_)) => Some(',')
+        (None, Some(_)) => Some(','),
         (None, None) => None,
     };
 
