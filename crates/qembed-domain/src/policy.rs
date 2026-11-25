@@ -100,16 +100,8 @@ pub enum PolicyCheckOutcome {
 ///
 /// Never deserialize this type from model output, document content, or a
 /// transport DTO. Those inputs are represented by UntrustedEvidenceDigest.
-/// The constructor is crate-private so only the domain Authorizer can create
-/// trusted policy facts.
-///
-/// External crates cannot create trusted checks:
-///
-/// ```compile_fail
-/// use qembed_domain::policy::{PolicyCheck, PolicyCheckOutcome, TrustedPolicyCheck};
-///
-/// let _ = TrustedPolicyCheck::new(PolicyCheck::CapabilityGranted, PolicyCheckOutcome::Satisfied);
-/// ```
+/// The constructor is intended for trusted server-side fact providers only;
+/// never derive these values from model output or document text.
 ///
 /// It cannot be reconstructed from serialized model/document input:
 ///
@@ -129,7 +121,7 @@ impl TrustedPolicyCheck {
     /// Creates a check/result pair from a trusted fact provider.
     #[must_use]
     #[allow(dead_code)] // RUST-078 Authorizer will be the trusted fact producer.
-    pub(crate) const fn new(check: PolicyCheck, outcome: PolicyCheckOutcome) -> Self {
+    pub const fn new(check: PolicyCheck, outcome: PolicyCheckOutcome) -> Self {
         Self { check, outcome }
     }
 
@@ -193,20 +185,8 @@ impl UntrustedEvidenceDigest {
 /// Untrusted evidence is carried into the audit context as hashes only.
 ///
 /// This input is not a transport DTO and cannot be deserialized from model or
-/// document content. Its constructor is crate-private so external adapters
-/// cannot manufacture trusted policy evaluations.
-///
-/// External crates cannot create an evaluation input directly:
-///
-/// ```compile_fail
-/// use qembed_domain::policy::{PolicyActionClass, PolicyEvaluationInput};
-/// use qembed_domain::ids::{InvocationId, ObjectId, PrincipalId};
-///
-/// let _ = PolicyEvaluationInput::new(
-///     InvocationId::new(), PrincipalId::new(), ObjectId::new(), 1,
-///     PolicyActionClass::KnowledgeRead, [0; 32], 0, vec![], vec![],
-/// );
-/// ```
+/// document content. Construct it only from trusted identity and fact-provider
+/// outputs; never from model or document DTOs.
 ///
 /// ```compile_fail
 /// use qembed_domain::policy::PolicyEvaluationInput;
@@ -232,7 +212,7 @@ impl PolicyEvaluationInput {
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     #[allow(dead_code)] // RUST-078 Authorizer will assemble trusted evaluation inputs.
-    pub(crate) fn new(
+    pub fn new(
         invocation_id: InvocationId,
         principal_id: PrincipalId,
         object_id: ObjectId,
