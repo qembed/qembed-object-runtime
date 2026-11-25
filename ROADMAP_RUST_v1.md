@@ -502,9 +502,11 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: PostgreSQL integration — первый commit и replacement; document/chunk half-open intervals; revision log + event/outbox; incomplete indexing fail-closed; injected outbox failure rollback; concurrent commits serialize и публикуют batch ровно один раз.
   - Evidence: Rust PR [#139](https://github.com/qembed/qembed-object-runtime/pull/139), merge `2e536eb657fb52f6abe2c74dbe52261a1267c809`; CI run [#45578941503](https://github.com/qembed/qembed-object-runtime/actions/runs/45578941503) — success.
   - DoD: revision row lock, indexing completeness, interval/revision/log/event/outbox atomicity подтверждены PostgreSQL integration tests. Подробности: [RUST-066 design](docs/RUST-066_KNOWLEDGE_REVISION_COMMIT.md).
-- [ ] **RUST-067 (M)** Реализовать staged ingestion/indexing pipeline.
-  - Тесты: unit на chunking/validation; integration — staged chunks не видны retrieval до commit; повтор ingestion идемпотентен.
-  - DoD: неполный документ не становится видимым.
+- [x] **RUST-067 (M)** Реализовать staged ingestion/indexing pipeline.
+  - Реализация: Runtime читает staged document через внешний `source_uri` adapter и получает embeddings через provider-neutral port; Unicode-safe chunking формирует bounded chunks с overlap; Store в одной tenant-scoped PostgreSQL transaction сохраняет все chunks и embeddings для полного active-model set и только затем переводит документ `staged → indexed`. Внешние source/provider вызовы выполняются вне DB transaction; повторная обработка indexed-документа идемпотентна.
+  - Тесты: unit — Unicode-safe chunking, overlap, blank input и invalid config; PostgreSQL integration — atomic chunks+embeddings, incomplete model payload rollback, staged visibility intervals остаются NULL до RUST-066 commit, повторная persistence не создаёт duplicates, успешный commit открывает revision interval.
+  - DoD: неполный документ не становится видимым; единственная publication boundary остаётся в `commit_knowledge_revision`, который независимо перепроверяет completeness.
+  - Evidence: Rust PR [#140](https://github.com/qembed/qembed-object-runtime/pull/140), CI run [#45582952235](https://github.com/qembed/qembed-object-runtime/actions/runs/45582952235) — success.
 
 - [ ] **RUST-068 (M)** Реализовать embedding model registry.
   - Тесты: contract tests для размерности/метрики; negative tests на смешение несовместимых embeddings.
