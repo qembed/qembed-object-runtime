@@ -55,8 +55,8 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
         .bind(i32::try_from(model.dimension()).unwrap())
         .bind(model.distance_metric().as_database_value())
         .execute(&pool)
-    .await
-    .expect("model metadata inserted");
+        .await
+        .expect("model metadata inserted");
 
     let manager = PgHnswIndexManager::new(pool.clone());
     assert_eq!(
@@ -156,10 +156,9 @@ async fn hnsw_index_creation_is_concurrent_idempotent_and_recovers_invalid_artif
 async fn hnsw_manager_skips_dimensions_outside_pgvector_vector_index_limit() {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set by the test harness");
-    let pool =
-        qembed_store::connect_pool(&database_url, qembed_store::PgPoolConfig::default())
-            .await
-            .expect("PostgreSQL connection opens");
+    let pool = qembed_store::connect_pool(&database_url, qembed_store::PgPoolConfig::default())
+        .await
+        .expect("PostgreSQL connection opens");
     let model = EmbeddingModelSpec::new(
         "rust071-too-wide",
         "test",
