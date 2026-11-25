@@ -76,29 +76,23 @@ impl PgHnswIndexManager {
     pub async fn ensure_registered_models(
         &self,
     ) -> Result<Vec<(String, HnswIndexOutcome)>, PgHnswIndexError> {
-        let rows = sqlx::query(
-            "SELECT id, dimension, distance_metric FROM embedding_models ORDER BY id",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query("SELECT id, dimension, distance_metric FROM embedding_models ORDER BY id")
+                .fetch_all(&self.pool)
+                .await?;
 
         let mut outcomes = Vec::with_capacity(rows.len());
         for row in rows {
             let id: String = row.try_get("id")?;
             let dimension: i32 = row.try_get("dimension")?;
             let metric: String = row.try_get("distance_metric")?;
-            let dimension = usize::try_from(dimension)
-                .map_err(|_| PgHnswIndexError::InvalidPersistedModel)?;
+            let dimension =
+                usize::try_from(dimension).map_err(|_| PgHnswIndexError::InvalidPersistedModel)?;
             let metric = EmbeddingDistanceMetric::from_database_value(&metric)
                 .map_err(|_| PgHnswIndexError::InvalidPersistedModel)?;
-            let spec = EmbeddingModelSpec::new(
-                id.clone(),
-                "persisted",
-                "persisted",
-                dimension,
-                metric,
-            )
-            .map_err(|_| PgHnswIndexError::InvalidPersistedModel)?;
+            let spec =
+                EmbeddingModelSpec::new(id.clone(), "persisted", "persisted", dimension, metric)
+                    .map_err(|_| PgHnswIndexError::InvalidPersistedModel)?;
             outcomes.push((id, self.ensure_model_index(&spec).await?));
         }
         Ok(outcomes)
@@ -127,12 +121,11 @@ impl PgHnswIndexManager {
         let result = self
             .ensure_model_index_locked(&mut connection, model, &index_name)
             .await;
-        let unlock = sqlx::query_scalar::<_, bool>(
-            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
-        )
-        .bind(&lock_key)
-        .fetch_one(&mut *connection)
-        .await;
+        let unlock =
+            sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock(hashtextextended($1, 0))")
+                .bind(&lock_key)
+                .fetch_one(&mut *connection)
+                .await;
 
         match (result, unlock) {
             (Err(error), _) => Err(error),
