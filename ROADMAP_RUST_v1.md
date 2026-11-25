@@ -589,7 +589,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: network integration с контролируемым DNS; DNS rebinding test; TLS SNI/hostname verification.
   - DoD: соединение идёт к проверенному IP при сохранении корректной TLS identity.
 
-- [ ] **RUST-083 (M)** Реализовать безопасную redirect policy.
+- [x] **RUST-083 (M)** Реализовать безопасную redirect policy.
   - Тесты: redirect chain на public→private, cross-host, loop и превышение лимита.
   - DoD: redirect либо запрещён, либо каждый hop проходит полную повторную валидацию.
 

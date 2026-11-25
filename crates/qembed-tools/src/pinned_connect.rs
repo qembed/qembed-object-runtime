@@ -368,4 +368,71 @@ mod tests {
             Some("example.test".to_owned())
         );
     }
+
+    #[tokio::test]
+    async fn proxy_environment_does_not_redirect_pinned_connection() {
+        use std::process::Command;
+
+        const CHILD_MARKER: &str = "QEMBED_PROXY_ENV_CHILD";
+
+        if std::env::var_os(CHILD_MARKER).is_none() {
+            let proxy_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("proxy sentinel listener");
+            let proxy_address = proxy_listener.local_addr().expect("proxy sentinel address");
+            let proxy_url = format!("http://{proxy_address}");
+            let executable = std::env::current_exe().expect("current test executable");
+            let output = Command::new(executable)
+                .arg("--exact")
+                .arg("pinned_connect::tests::proxy_environment_does_not_redirect_pinned_connection")
+                .arg("--nocapture")
+                .env(CHILD_MARKER, "1")
+                .env("HTTP_PROXY", &proxy_url)
+                .env("HTTPS_PROXY", &proxy_url)
+                .env("ALL_PROXY", &proxy_url)
+                .env("http_proxy", &proxy_url)
+                .env("https_proxy", &proxy_url)
+                .env("all_proxy", &proxy_url)
+                .output()
+                .expect("run proxy-isolated child test");
+
+            assert!(
+                output.status.success(),
+                "child test failed\\nstdout:\\n{}\\nstderr:\\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                timeout(Duration::from_millis(100), proxy_listener.accept())
+                    .await
+                    .is_err(),
+                "no connection may be made to the configured proxy"
+            );
+            return;
+        }
+
+        let (client_config, server_config) = test_tls_configs();
+        let target_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("direct destination listener");
+        let target_address = target_listener.local_addr().expect("target address");
+        let server = spawn_tls_server(target_listener, server_config);
+        let connector = PinnedConnector::with_tls_config(client_config);
+        let hostname = DnsName::parse("example.test").expect("valid DNS name");
+        let addresses = local_addresses(hostname, Ipv4Addr::LOCALHOST);
+
+        let connection = connector
+            .connect_tls(&addresses, target_address.port())
+            .await
+            .expect("direct TLS connection despite proxy environment");
+
+        assert_eq!(connection.peer_addr(), target_address);
+        assert_eq!(connection.server_name(), "example.test");
+        drop(connection);
+        assert_eq!(
+            server.await.expect("destination TLS server task"),
+            Some("example.test".to_owned())
+        );
+    }
+
 }
