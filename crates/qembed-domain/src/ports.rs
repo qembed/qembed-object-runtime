@@ -96,7 +96,7 @@ pub trait ToolVersionRegistry: Send + Sync {
     ) -> impl Future<Output = Result<Option<crate::tool_version::ToolVersion>, Self::Error>> + Send;
 }
 
-/// Persistence boundary for invocation execution state.
+/// Read-only validation of the current tenant-owned Object-to-Tool binding.\n/// Implementations must match Tool ID, ToolVersion ID, binding version, and enabled state.\npub trait ToolBindingStore: Send + Sync {\n    type Error: Error + Send + Sync + 'static;\n\n    fn is_tool_binding_current(\n        &self,\n        scope: &Scope,\n        object_id: ObjectId,\n        binding: crate::tool_binding::ToolBindingIdentity,\n    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;\n}\n\n/// Persistence boundary for invocation execution state.
 ///
 /// Implementations must scope every operation to the supplied trusted Scope.
 /// The compare-and-set operation must atomically validate the tenant,

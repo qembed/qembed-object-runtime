@@ -390,12 +390,18 @@ impl PolicyEvaluationResult {
 pub enum PolicyEvaluationError {
     /// Policy version zero is reserved as invalid/unconfigured.
     ZeroPolicyVersion,
+    /// A ToolExecution Allow verdict must be minted with a trusted binding identity.
+    ToolBindingRequired,
+    /// The binding-aware Authorizer entry point accepts only ToolExecution actions.
+    NotToolExecution,
 }
 
 impl fmt::Display for PolicyEvaluationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroPolicyVersion => formatter.write_str("policy version must be non-zero"),
+            Self::ToolBindingRequired => formatter.write_str("ToolExecution requires a current binding identity"),
+            Self::NotToolExecution => formatter.write_str("binding-aware authorization requires ToolExecution"),
         }
     }
 }
@@ -503,10 +509,14 @@ impl Authorizer {
     ) -> Result<AuthorizationOutcome, PolicyEvaluationError> {
         let policy = evaluate_policy(input)?;
         let allowed_command = if policy.decision() == PolicyDecision::Allow {
+            if policy.audit().action_class() == PolicyActionClass::ToolExecution {
+                return Err(PolicyEvaluationError::ToolBindingRequired);
+            }
             Some(AllowedCommand::mint(
                 policy.audit().invocation_id(),
                 step_index,
                 *policy.audit().action_hash(),
+                None,
             ))
         } else {
             None
@@ -516,6 +526,28 @@ impl Authorizer {
             policy,
             allowed_command,
         })
+    }
+
+    /// Authorizes a Tool command and binds its capability to the exact current binding.
+    pub fn authorize_tool(
+        &self,
+        input: PolicyEvaluationInput,
+        step_index: u32,
+        binding: crate::tool_binding::ToolBindingIdentity,
+    ) -> Result<AuthorizationOutcome, PolicyEvaluationError> {
+        let policy = evaluate_policy(input)?;
+        if policy.audit().action_class() != PolicyActionClass::ToolExecution {
+            return Err(PolicyEvaluationError::NotToolExecution);
+        }
+        let allowed_command = (policy.decision() == PolicyDecision::Allow).then(|| {
+            AllowedCommand::mint(
+                policy.audit().invocation_id(),
+                step_index,
+                *policy.audit().action_hash(),
+                Some(binding),
+            )
+        });
+        Ok(AuthorizationOutcome { policy, allowed_command })
     }
 }
 
@@ -612,6 +644,7 @@ pub struct AllowedCommand {
     invocation_id: InvocationId,
     step_index: u32,
     action_hash: [u8; 32],
+    tool_binding: Option<crate::tool_binding::ToolBindingIdentity>,
 }
 
 impl AllowedCommand {
@@ -639,15 +672,26 @@ impl AllowedCommand {
         &self.action_hash
     }
 
+    /// Returns the immutable binding identity captured at authorization time.
+    #[must_use]
+    pub const fn tool_binding(&self) -> Option<crate::tool_binding::ToolBindingIdentity> {
+        self.tool_binding
+    }
+
     /// Mints a capability after policy has approved the exact command context.
-    ///
     /// Kept private so the Authorizer remains the sole minting boundary.
-    fn mint(invocation_id: InvocationId, step_index: u32, action_hash: [u8; 32]) -> Self {
+    fn mint(
+        invocation_id: InvocationId,
+        step_index: u32,
+        action_hash: [u8; 32],
+        tool_binding: Option<crate::tool_binding::ToolBindingIdentity>,
+    ) -> Self {
         Self {
             command_id: derive_command_id(invocation_id, step_index, &action_hash),
             invocation_id,
             step_index,
             action_hash,
+            tool_binding,
         }
     }
 }
@@ -673,7 +717,15 @@ mod tests {
             vec![],
         );
         let outcome = Authorizer
-            .authorize(policy_input, step_index)
+            .authorize_tool(
+                policy_input,
+                step_index,
+                crate::tool_binding::ToolBindingIdentity::new(
+                    crate::ids::ToolId::new(),
+                    crate::ids::ToolVersionId::new(),
+                    1,
+                ).expect("valid binding"),
+            )
             .expect("valid policy");
         let allowed = outcome.allowed_command().expect("Allow mints capability");
         assert_eq!(

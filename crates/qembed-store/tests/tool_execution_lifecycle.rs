@@ -31,6 +31,7 @@ struct Fixture {
     context: PgContext,
     scope: qembed_domain::scope::Scope,
     invocation_id: InvocationId,
+    object_id: ObjectId,
     execution_id: ToolExecutionId,
 }
 
@@ -195,8 +196,45 @@ async fn setup() -> Fixture {
         context,
         scope: scope_for_tenant(tenant_id),
         invocation_id,
+        object_id,
         execution_id,
     }
+}
+
+#[tokio::test]
+async fn stale_or_disabled_binding_rejects_claim_before_external_execution() {
+    let fixture = setup().await;
+
+    // Simulate an Owner changing the binding after the Allow decision and
+    // ToolExecution were created. The trigger advances binding_version.
+    sqlx::query(
+        "UPDATE object_tools SET enabled=false
+          WHERE tenant_id=$1 AND object_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(fixture.object_id.into_uuid())
+    .execute(&fixture.pool)
+    .await
+    .expect("binding can be disabled");
+
+    let store = PgToolExecutionStore::new(fixture.context.clone());
+    let claim = store
+        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker", 60)
+        .await
+        .expect("stale binding is a normal fail-closed claim miss");
+    assert!(claim.is_none(), "stale capability must not acquire a lease");
+
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("execution remains readable")
+        .expect("execution exists");
+    assert_eq!(persisted.status(), ToolExecutionStatus::Authorized);
+    assert_eq!(persisted.version(), 0);
+    assert_eq!(persisted.fencing_token(), ToolExecutionFencingToken::INITIAL);
+    assert_eq!(persisted.lease_owner(), None);
+
+    fixture.pool.close().await;
 }
 
 #[tokio::test]
