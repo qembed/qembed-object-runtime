@@ -4,8 +4,6 @@ use std::{error::Error, fmt};
 use qembed_domain::{
     ids::ObjectId, ports::ToolBindingStore, scope::Scope, tool_binding::ToolBindingIdentity,
 };
-use sqlx::Row;
-
 use crate::{PgContext, fetch_optional};
 
 #[derive(Debug)]
@@ -76,7 +74,7 @@ impl ToolBindingStore for PgToolBindingStore {
         let mut transaction = self.context.begin_principal(scope).await?;
         let row = fetch_optional(
             &mut transaction,
-            sqlx::query(
+            sqlx::query_as::<_, (bool,)>(
                 "SELECT enabled FROM object_tools
                   WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND tool_id=$3::uuid
                     AND tool_version_id=$4::uuid AND binding_version=$5",
@@ -92,10 +90,7 @@ impl ToolBindingStore for PgToolBindingStore {
         )
         .await?;
 
-        let current = row
-            .map(|row| row.try_get::<bool, _>("enabled"))
-            .transpose()?
-            .unwrap_or(false);
+        let current = row.map(|(enabled,)| enabled).unwrap_or(false);
         transaction.commit().await?;
         Ok(current)
     }
