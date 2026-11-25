@@ -496,8 +496,12 @@ SQLX_OFFLINE=true cargo check --workspace
   - Evidence: Rust PR [#138](https://github.com/qembed/qembed-object-runtime/pull/138), merge `034ed67353b9563a09d779de592ab7722676612f`; CI run [#2952](https://github.com/qembed/qembed-object-runtime/actions/runs/45491358354) — success.
   - DoD: staged/indexed/live/retired/erased lifecycle и tenant/object-scoped revision identity типизированы; persistence и atomic revision commit остаются Store responsibilities в RUST-066.
 
-- [ ] **RUST-066 (L)** Реализовать `commit_knowledge_revision` repository operation.  - Тесты: DB integration — успешный commit, rollback, concurrent commit, revision log, event/outbox atomicity.
-  - DoD: lock revision row; проверить indexing completeness; обновить intervals/revision/event в одной транзакции.
+- [x] **RUST-066 (L)** Реализовать `commit_knowledge_revision` repository operation.
+  - Реализация: `PgKnowledgeRepository` блокирует revision row и стабильный active-model set; проверяет наличие chunks и embedding для каждой активной модели у каждого indexed document; блокирует документы/chunks/embeddings от конкурентной мутации; закрывает интервалы superseded documents и открывает новые; синхронизирует chunk intervals через definer-owned trigger; обновляет revision pointer и append-only revision log; пишет knowledge event и outbox в одной транзакции.
+  - Уточнение контракта (подтверждено): required models — все строки `embedding_models.active = true` на момент commit; пустой active registry закрывает commit с ошибкой.
+  - Тесты: PostgreSQL integration — первый commit и replacement; document/chunk half-open intervals; revision log + event/outbox; incomplete indexing fail-closed; injected outbox failure rollback; concurrent commits serialize и публикуют batch ровно один раз.
+  - Evidence: Rust PR [#139](https://github.com/qembed/qembed-object-runtime/pull/139), merge `2e536eb657fb52f6abe2c74dbe52261a1267c809`; CI run [#45578941503](https://github.com/qembed/qembed-object-runtime/actions/runs/45578941503) — success.
+  - DoD: revision row lock, indexing completeness, interval/revision/log/event/outbox atomicity подтверждены PostgreSQL integration tests. Подробности: [RUST-066 design](docs/RUST-066_KNOWLEDGE_REVISION_COMMIT.md).
 - [ ] **RUST-067 (M)** Реализовать staged ingestion/indexing pipeline.
   - Тесты: unit на chunking/validation; integration — staged chunks не видны retrieval до commit; повтор ingestion идемпотентен.
   - DoD: неполный документ не становится видимым.
