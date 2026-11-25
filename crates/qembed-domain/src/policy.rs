@@ -612,10 +612,14 @@ mod tests {
             PolicyCheck::CapabilityGranted,
             PolicyCheckOutcome::Denied,
         ));
-        checks.push(TrustedPolicyCheck::new(
-            PolicyCheck::BindingCurrent,
-            PolicyCheckOutcome::RequiresApproval,
-        ));
+        for check in &mut checks {
+            if check.check() == PolicyCheck::BindingCurrent {
+                *check = TrustedPolicyCheck::new(
+                    PolicyCheck::BindingCurrent,
+                    PolicyCheckOutcome::RequiresApproval,
+                );
+            }
+        }
         let result = evaluate_policy(input(PolicyActionClass::ToolExecution, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::Deny);
@@ -631,10 +635,14 @@ mod tests {
     fn unknown_or_missing_trusted_facts_fail_closed() {
         let mut checks = satisfied_checks(PolicyActionClass::KnowledgeRead);
         checks.retain(|check| check.check() != PolicyCheck::BudgetAvailable);
-        checks.push(TrustedPolicyCheck::new(
-            PolicyCheck::ObjectActive,
-            PolicyCheckOutcome::Unknown,
-        ));
+        for check in &mut checks {
+            if check.check() == PolicyCheck::ObjectActive {
+                *check = TrustedPolicyCheck::new(
+                    PolicyCheck::ObjectActive,
+                    PolicyCheckOutcome::Unknown,
+                );
+            }
+        }
         let result = evaluate_policy(input(PolicyActionClass::KnowledgeRead, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::Deny);
@@ -671,10 +679,14 @@ mod tests {
     #[test]
     fn approval_is_a_distinct_non_allow_verdict() {
         let mut checks = satisfied_checks(PolicyActionClass::ToolExecution);
-        checks.push(TrustedPolicyCheck::new(
-            PolicyCheck::BindingCurrent,
-            PolicyCheckOutcome::RequiresApproval,
-        ));
+        for check in &mut checks {
+            if check.check() == PolicyCheck::BindingCurrent {
+                *check = TrustedPolicyCheck::new(
+                    PolicyCheck::BindingCurrent,
+                    PolicyCheckOutcome::RequiresApproval,
+                );
+            }
+        }
         let result = evaluate_policy(input(PolicyActionClass::ToolExecution, checks, vec![]))
             .expect("configured policy version is valid");
         assert_eq!(result.decision(), PolicyDecision::RequireApproval);
