@@ -593,8 +593,8 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: redirect chain на public→private, cross-host, loop и превышение лимита.
   - DoD: redirect либо запрещён, либо каждый hop проходит полную повторную валидацию.
 
-- [ ] **RUST-084 (S)** Изолировать proxy environment и egress policy.
-  - Тесты: тесты с HTTP_PROXY/HTTPS_PROXY/ALL_PROXY; проверка фактического destination.
+- [x] **RUST-084 (S)** Изолировать proxy environment и egress policy.
+  - Реализация: `PinnedConnector` устанавливает TCP напрямую на адрес из валидированного `ResolvedAddressSet`; child-process integration test задаёт HTTP_PROXY/HTTPS_PROXY/ALL_PROXY и lowercase-варианты на локальный proxy sentinel и доказывает, что соединение идёт напрямую к target с ожидаемым TLS SNI.
   - DoD: не происходит непреднамеренного proxy routing.
 
 - [ ] **RUST-085 (M)** Добавить IPv4/IPv6 special-range validation.
