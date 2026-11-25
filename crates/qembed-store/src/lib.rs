@@ -26,6 +26,7 @@ pub mod invocation_recovery;
 pub mod invocation_start;
 pub mod invocation_worker;
 pub mod kill_switch;
+pub mod embedding_model_registry;
 pub mod knowledge_ingestion;
 pub mod knowledge_repository;
 pub mod object_repository;
