@@ -27,6 +27,7 @@ pub mod invocation_recovery;
 pub mod invocation_start;
 pub mod invocation_worker;
 pub mod kill_switch;
+pub mod hnsw_index;
 pub mod knowledge_ingestion;
 pub mod knowledge_repository;
 pub mod knowledge_retrieval;
@@ -95,7 +96,12 @@ pub async fn connect_pool(database_url: &str, config: PgPoolConfig) -> Result<Pg
 pub async fn run_migrations(pool: &PgPool) -> Result<(), MigrateError> {
     let migrations_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
     let migrator = Migrator::new(migrations_path).await?;
-    migrator.run(pool).await
+    migrator.run(pool).await?;
+    hnsw_index::PgHnswIndexManager::new(pool.clone())
+        .ensure_registered_models()
+        .await
+        .map_err(|error| MigrateError::Execute(sqlx::Error::Protocol(error.to_string())))?;
+    Ok(())
 }
 
 /// A PostgreSQL transaction with trusted tenant and authenticated Principal context established transaction-locally.
