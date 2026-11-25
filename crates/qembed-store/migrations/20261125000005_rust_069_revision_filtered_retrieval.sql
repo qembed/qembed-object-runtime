@@ -15,7 +15,7 @@ RETURNS TABLE (
     object_id UUID,
     document_id UUID,
     content TEXT,
-    position INTEGER,
+    chunk_position INTEGER,
     metadata JSONB
 )
 LANGUAGE sql
@@ -28,7 +28,7 @@ AS $knowledge_visible_chunks_at$
         c.object_id,
         c.document_id,
         c.content,
-        c.position,
+        c.position AS chunk_position,
         c.metadata
     FROM public.knowledge_chunks AS c
     JOIN public.knowledge_documents AS d

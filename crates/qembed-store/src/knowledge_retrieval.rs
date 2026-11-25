@@ -174,7 +174,7 @@ impl PgKnowledgeRetrievalStore {
 
         let mut chunks = Vec::with_capacity(rows.len());
         for row in rows {
-            let position: i32 = row.try_get("position")?;
+            let position: i32 = row.try_get("chunk_position")?;
             let position = u32::try_from(position)
                 .map_err(|_| PgKnowledgeRetrievalError::InvalidPersistedChunkPosition)?;
             chunks.push(VisibleKnowledgeChunk {
