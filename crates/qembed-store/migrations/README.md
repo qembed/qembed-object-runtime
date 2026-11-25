@@ -119,3 +119,6 @@ for every active model, then changes document/chunk intervals and appends the
 revision log, event and outbox row in one transaction. The full production
 Knowledge schema remains canonical in `qembed/qembed-sql`; this is the
 incremental Rust integration-test/runtime slice.
+
+
+The RUST-068 registry adapter is a platform-admin-only Store capability. It registers immutable provider/model identity, vector dimension and distance metric, and permits activation changes only. Runtime credentials retain read-only access to the registry; registry mutations take a table lock compatible with the RUST-066 commit lock so the required active-model set cannot change during publication validation.
