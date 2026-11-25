@@ -86,6 +86,7 @@ define_id!(MessageId);
 define_id!(CommandId);
 define_id!(ToolExecutionId);
 define_id!(ToolId);
+define_id!(ToolVersionId);
 define_id!(TaskId);
 define_id!(KnowledgeDocumentId);
 define_id!(KnowledgeChunkId);

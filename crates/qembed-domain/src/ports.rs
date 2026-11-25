@@ -82,6 +82,20 @@ pub trait AuthenticationPort: Send + Sync {
     ) -> impl Future<Output = Result<AuthenticatedIdentity, Self::Error>> + Send;
 }
 
+/// Read-only lookup of globally registered immutable ToolVersions.
+///
+/// Implementations must match both IDs. A ToolVersion ID alone is not enough
+/// to establish that it belongs to the Tool captured by the Snapshot.
+pub trait ToolVersionRegistry: Send + Sync {
+    type Error: Error + Send + Sync + 'static;
+
+    fn get_tool_version(
+        &self,
+        tool_id: crate::ids::ToolId,
+        version_id: crate::ids::ToolVersionId,
+    ) -> impl Future<Output = Result<Option<crate::tool_version::ToolVersion>, Self::Error>> + Send;
+}
+
 /// Persistence boundary for invocation execution state.
 ///
 /// Implementations must scope every operation to the supplied trusted Scope.
