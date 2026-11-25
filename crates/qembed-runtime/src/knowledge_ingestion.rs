@@ -1,5 +1,4 @@
 //! Staged-document ingestion orchestration. Provider I/O is outside DB transactions.
-use std::{error::Error, fmt};
 use qembed_domain::{
     ids::{KnowledgeChunkId, KnowledgeDocumentId},
     knowledge_ingestion::{
@@ -9,6 +8,7 @@ use qembed_domain::{
     ports::KnowledgeIngestionStore,
     scope::Scope,
 };
+use std::{error::Error, fmt};
 
 pub trait KnowledgeSourceReader: Send + Sync {
     type Error: Error + Send + Sync + 'static;
