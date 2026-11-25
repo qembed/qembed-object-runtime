@@ -204,6 +204,8 @@ mod tests {
         DnsAnswer, DnsName, DnsResolutionError, DnsResolver, ResolvedAddressSet,
     };
 
+    const TEST_ROOT_CERTIFICATE: &[u8] =
+        include_bytes!("../tests/fixtures/dns-test-root-cert.der");
     const TEST_CERTIFICATE: &[u8] = include_bytes!("../tests/fixtures/dns-test-cert.der");
     const TEST_PRIVATE_KEY: &[u8] = include_bytes!("../tests/fixtures/dns-test-key.der");
 
@@ -221,6 +223,7 @@ mod tests {
 
     fn test_tls_configs() -> (Arc<ClientConfig>, Arc<ServerConfig>) {
         let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let root_certificate = CertificateDer::from(TEST_ROOT_CERTIFICATE.to_vec());
         let certificate = CertificateDer::from(TEST_CERTIFICATE.to_vec());
         let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(TEST_PRIVATE_KEY.to_vec()));
 
@@ -232,7 +235,9 @@ mod tests {
             .expect("valid test certificate");
 
         let mut roots = RootCertStore::empty();
-        roots.add(certificate).expect("test certificate is a root");
+        roots
+            .add(root_certificate)
+            .expect("test CA certificate is trusted");
 
         let client_config = ClientConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()
