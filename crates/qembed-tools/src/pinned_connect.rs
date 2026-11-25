@@ -86,9 +86,10 @@ impl PinnedConnector {
                     address,
                     message: error.to_string(),
                 })?;
-            let peer_addr = stream.get_ref().0.peer_addr().map_err(|error| {
-                PinnedConnectError::PeerAddressUnavailable(error.to_string())
-            })?;
+            let peer_addr =
+                stream.get_ref().0.peer_addr().map_err(|error| {
+                    PinnedConnectError::PeerAddressUnavailable(error.to_string())
+                })?;
 
             return Ok(PinnedTlsStream {
                 stream,
@@ -199,7 +200,9 @@ mod tests {
     };
 
     use super::*;
-    use crate::dns_resolution::{DnsAnswer, DnsName, DnsResolutionError, DnsResolver, ResolvedAddressSet};
+    use crate::dns_resolution::{
+        DnsAnswer, DnsName, DnsResolutionError, DnsResolver, ResolvedAddressSet,
+    };
 
     const TEST_CERTIFICATE: &[u8] = include_bytes!("../tests/fixtures/dns-test-cert.der");
     const TEST_PRIVATE_KEY: &[u8] = include_bytes!("../tests/fixtures/dns-test-key.der");
@@ -211,11 +214,7 @@ mod tests {
     impl DnsResolver for RebindingResolver {
         async fn lookup(&self, _name: &DnsName) -> Result<DnsAnswer, DnsResolutionError> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst);
-            let address = if call == 0 {
-                "127.0.0.1"
-            } else {
-                "127.0.0.2"
-            };
+            let address = if call == 0 { "127.0.0.1" } else { "127.0.0.2" };
             Ok(DnsAnswer::new(vec![address.to_owned()], Vec::new()))
         }
     }
@@ -325,9 +324,15 @@ mod tests {
             calls: AtomicUsize::new(0),
         };
 
-        let _initial_answer = resolver.lookup(&hostname).await.expect("initial DNS answer");
+        let _initial_answer = resolver
+            .lookup(&hostname)
+            .await
+            .expect("initial DNS answer");
         let pinned = local_addresses(hostname.clone(), Ipv4Addr::new(127, 0, 0, 1));
-        let _rebound_answer = resolver.lookup(&hostname).await.expect("rebound DNS answer");
+        let _rebound_answer = resolver
+            .lookup(&hostname)
+            .await
+            .expect("rebound DNS answer");
         let later_dns_answer = local_addresses(hostname, Ipv4Addr::new(127, 0, 0, 2));
         assert_ne!(pinned.addresses(), later_dns_answer.addresses());
         assert_eq!(resolver.calls.load(Ordering::SeqCst), 2);
