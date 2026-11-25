@@ -748,7 +748,6 @@ mod tests {
     }
 }
 
-
 /// Persistence boundary for staged-document ingestion. Implementations must
 /// atomically persist every chunk and its complete active-model embedding set,
 /// then transition the document to indexed in the same transaction.
