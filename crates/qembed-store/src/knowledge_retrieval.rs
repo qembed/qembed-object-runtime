@@ -10,7 +10,10 @@ use std::{error::Error, fmt};
 use qembed_domain::{
     ids::{KnowledgeChunkId, KnowledgeDocumentId},
     knowledge::PinnedKnowledgeRevision,
-    knowledge_embedding::{EmbeddingDistanceMetric, EmbeddingModel, EmbeddingModelError, EmbeddingModelSpec, EmbeddingVector},
+    knowledge_embedding::{
+        EmbeddingDistanceMetric, EmbeddingModel, EmbeddingModelError, EmbeddingModelSpec,
+        EmbeddingVector,
+    },
     scope::Scope,
 };
 use sqlx::{Row, types::Uuid};
@@ -89,8 +92,12 @@ impl fmt::Display for PgKnowledgeRetrievalError {
             Self::InvalidPersistedChunkPosition => {
                 formatter.write_str("persisted chunk position is negative")
             }
-            Self::InvalidQueryVector(error) => write!(formatter, "invalid retrieval query vector: {error}"),
-            Self::InvalidTopK => formatter.write_str("retrieval top-k must be positive and fit PostgreSQL BIGINT"),
+            Self::InvalidQueryVector(error) => {
+                write!(formatter, "invalid retrieval query vector: {error}")
+            }
+            Self::InvalidTopK => {
+                formatter.write_str("retrieval top-k must be positive and fit PostgreSQL BIGINT")
+            }
         }
     }
 }
@@ -212,14 +219,21 @@ impl PgKnowledgeRetrievalStore {
         }
         let revision = i64::try_from(pinned.revision().value())
             .map_err(|_| PgKnowledgeRetrievalError::RevisionOutOfRange)?;
-        let limit = i64::try_from(top_k).ok().filter(|value| *value > 0)
+        let limit = i64::try_from(top_k)
+            .ok()
+            .filter(|value| *value > 0)
             .ok_or(PgKnowledgeRetrievalError::InvalidTopK)?;
         EmbeddingModel::new(model.clone(), true)
             .validate_vector(query_vector)
             .map_err(PgKnowledgeRetrievalError::InvalidQueryVector)?;
         let vector = format!(
             "[{}]",
-            query_vector.values().iter().map(ToString::to_string).collect::<Vec<_>>().join(",")
+            query_vector
+                .values()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
         );
 
         let (sql, score_kind) = match model.distance_metric() {
@@ -315,7 +329,6 @@ impl PgKnowledgeRetrievalStore {
         transaction.commit().await?;
         Ok(ranked)
     }
-
 }
 
 /// Whether a pgvector result is a similarity (higher is better) or distance (lower is better).
@@ -334,10 +347,14 @@ pub struct RankedKnowledgeChunk {
 
 impl RankedKnowledgeChunk {
     #[must_use]
-    pub const fn chunk(&self) -> &VisibleKnowledgeChunk { &self.chunk }
+    pub const fn chunk(&self) -> &VisibleKnowledgeChunk {
+        &self.chunk
+    }
 
     #[must_use]
-    pub const fn score(&self) -> RetrievalScore { self.score }
+    pub const fn score(&self) -> RetrievalScore {
+        self.score
+    }
 }
 
 #[derive(Clone, Copy)]
