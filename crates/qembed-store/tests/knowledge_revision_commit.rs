@@ -275,7 +275,7 @@ async fn concurrent_commits_serialize_on_revision_row_and_publish_once() {
         repository.commit_knowledge_revision(&scope, object_id),
         repository.commit_knowledge_revision(&scope, object_id)
     );
-    let successes = usize::from(first.is_ok()) + usize::from(second.is_ok());
+    let successes = [first.is_ok(), second.is_ok()].into_iter().filter(|success| *success).count();
     assert_eq!(successes, 1, "only one transaction may publish the indexed batch");
     let loser = if first.is_err() { first } else { second };
     assert!(matches!(
