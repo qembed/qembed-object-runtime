@@ -662,11 +662,19 @@ mod tests {
         let step_index = 4;
         let action_hash = [0x5a; 32];
         let policy_input = PolicyEvaluationInput::new(
-            invocation_id, PrincipalId::new(), ObjectId::new(), 1,
-            PolicyActionClass::ToolExecution, action_hash, 1_795_000_000_000,
-            satisfied_checks(PolicyActionClass::ToolExecution), vec![],
+            invocation_id,
+            PrincipalId::new(),
+            ObjectId::new(),
+            1,
+            PolicyActionClass::ToolExecution,
+            action_hash,
+            1_795_000_000_000,
+            satisfied_checks(PolicyActionClass::ToolExecution),
+            vec![],
         );
-        let outcome = Authorizer.authorize(policy_input, step_index).expect("valid policy");
+        let outcome = Authorizer
+            .authorize(policy_input, step_index)
+            .expect("valid policy");
         let allowed = outcome.allowed_command().expect("Allow mints capability");
         assert_eq!(
             allowed.command_id(),
@@ -681,12 +689,13 @@ mod tests {
     #[test]
     fn authorizer_never_mints_for_deny_or_approval() {
         let mut denied_checks = satisfied_checks(PolicyActionClass::ToolExecution);
-        denied_checks[0] = TrustedPolicyCheck::new(
-            PolicyCheck::PrincipalAuthorized,
-            PolicyCheckOutcome::Denied,
-        );
+        denied_checks[0] =
+            TrustedPolicyCheck::new(PolicyCheck::PrincipalAuthorized, PolicyCheckOutcome::Denied);
         let denied = Authorizer
-            .authorize(input(PolicyActionClass::ToolExecution, denied_checks, vec![]), 0)
+            .authorize(
+                input(PolicyActionClass::ToolExecution, denied_checks, vec![]),
+                0,
+            )
             .expect("valid policy");
         assert_eq!(denied.policy().decision(), PolicyDecision::Deny);
         assert!(denied.allowed_command().is_none());
@@ -697,9 +706,15 @@ mod tests {
             PolicyCheckOutcome::RequiresApproval,
         );
         let approval = Authorizer
-            .authorize(input(PolicyActionClass::ToolExecution, approval_checks, vec![]), 0)
+            .authorize(
+                input(PolicyActionClass::ToolExecution, approval_checks, vec![]),
+                0,
+            )
             .expect("valid policy");
-        assert_eq!(approval.policy().decision(), PolicyDecision::RequireApproval);
+        assert_eq!(
+            approval.policy().decision(),
+            PolicyDecision::RequireApproval
+        );
         assert!(approval.allowed_command().is_none());
     }
     fn satisfied_checks(action_class: PolicyActionClass) -> Vec<TrustedPolicyCheck> {
