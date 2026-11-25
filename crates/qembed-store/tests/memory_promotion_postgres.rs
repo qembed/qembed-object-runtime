@@ -63,8 +63,8 @@ async fn owner_promotion_creates_new_verified_row_and_preserves_candidate() {
     assert_eq!(promoted.candidate_id(), candidate_id);
     assert_eq!(promoted.claim(), "User supplied fact");
 
-    let candidate: (String, String, String, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT claim, source_kind, verification, verified_by::text, supersedes_id::text \
+    let candidate: (String, String, String, Option<String>, Option<String>, bool) = sqlx::query_as(
+        "SELECT claim, source_kind, verification, verified_by::text, supersedes_id::text, verified_at IS NULL \
            FROM memories WHERE id = $1",
     )
     .bind(candidate_id)
@@ -78,13 +78,14 @@ async fn owner_promotion_creates_new_verified_row_and_preserves_candidate() {
             "User".to_owned(),
             "Unverified".to_owned(),
             None,
-            None
+            None,
+            true
         )
     );
 
-    let verified: (String, String, String, f32, Option<String>, Option<String>) =
+    let verified: (String, String, String, f32, Option<String>, Option<String>, bool) =
         sqlx::query_as(
-            "SELECT claim, source_kind, verification, confidence, supersedes_id::text, verified_by::text \
+            "SELECT claim, source_kind, verification, confidence, supersedes_id::text, verified_by::text, verified_at IS NOT NULL \
                FROM memories WHERE id = $1",
         )
         .bind(promoted.id())
@@ -95,6 +96,7 @@ async fn owner_promotion_creates_new_verified_row_and_preserves_candidate() {
     assert_eq!(verified.1, "Owner");
     assert_eq!(verified.2, "Verified");
     assert_eq!(verified.3, 1.0);
+    assert!(verified.6);
 
     let candidate_id_text = candidate_id.to_string();
     let principal_id_text = principal_id.to_string();

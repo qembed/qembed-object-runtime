@@ -540,7 +540,7 @@ SQLX_OFFLINE=true cargo check --workspace
 - [x] **RUST-073 (M)** Реализовать citation/provenance verifier V1–V7.
   - Тесты: positive/negative corpus для chunk IDs, чисел, ссылок и обязательных citations; property tests на malformed claims.
   - DoD: verifier отклоняет неподтверждённые claims.
-  - Evidence: Rust PR [#147](https://github.com/qembed/qembed-object-runtime/pull/147), CI run [#45635114821](https://github.com/qembed/qembed-object-runtime/actions/runs/45635114821) — success.
+  - Evidence: Rust PR [#147](https://github.com/qembed/qembed-object-runtime/pull/147), CI run [#45635114821](https://github.com/qembed/qembed-object-runtime/actions/runs/45630503061) — success.
 
 - [x] **RUST-074 (M)** Реализовать application-level provenance и caller isolation.
   - Тесты: integration — Caller A не читает episodic memory Caller B; forged provenance rejected.
