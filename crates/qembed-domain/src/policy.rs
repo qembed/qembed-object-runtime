@@ -100,6 +100,15 @@ pub enum PolicyCheckOutcome {
 ///
 /// Never deserialize this type from model output, document content, or a
 /// transport DTO. Those inputs are represented by UntrustedEvidenceDigest.
+///
+/// It cannot be reconstructed from serialized model/document input:
+///
+/// ```compile_fail
+/// use qembed_domain::policy::TrustedPolicyCheck;
+///
+/// fn require_deserialize<T: serde::de::DeserializeOwned>() {}
+/// require_deserialize::<TrustedPolicyCheck>();
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TrustedPolicyCheck {
     check: PolicyCheck,
@@ -171,6 +180,16 @@ impl UntrustedEvidenceDigest {
 ///
 /// Only checks from trusted fact providers can influence the decision.
 /// Untrusted evidence is carried into the audit context as hashes only.
+///
+/// This input is not a transport DTO and cannot be deserialized from model or
+/// document content:
+///
+/// ```compile_fail
+/// use qembed_domain::policy::PolicyEvaluationInput;
+///
+/// fn require_deserialize<T: serde::de::DeserializeOwned>() {}
+/// require_deserialize::<PolicyEvaluationInput>();
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolicyEvaluationInput {
     invocation_id: InvocationId,
@@ -254,6 +273,7 @@ pub struct PolicyAuditContext {
     action_hash: [u8; 32],
     evaluated_at_unix_ms: u64,
     reasons: Vec<PolicyDecisionReason>,
+    trusted_checks: Vec<TrustedPolicyCheck>,
     untrusted_evidence: Vec<UntrustedEvidenceDigest>,
 }
 
@@ -304,6 +324,12 @@ impl PolicyAuditContext {
     #[must_use]
     pub fn reasons(&self) -> &[PolicyDecisionReason] {
         &self.reasons
+    }
+
+    /// Returns every trusted check and outcome included in the evaluation.
+    #[must_use]
+    pub fn trusted_checks(&self) -> &[TrustedPolicyCheck] {
+        &self.trusted_checks
     }
 
     /// Returns hash-only references to untrusted evidence.
@@ -363,10 +389,11 @@ pub fn evaluate_policy(
     }
 
     let required = input.action_class.required_checks();
+    let trusted_checks = input.trusted_checks;
     let mut seen = Vec::with_capacity(required.len());
     let mut reasons = Vec::new();
 
-    for trusted_check in input.trusted_checks {
+    for trusted_check in &trusted_checks {
         let check = trusted_check.check;
         if !required.contains(&check) {
             reasons.push(PolicyDecisionReason::UnexpectedCheck(check));
@@ -432,6 +459,7 @@ pub fn evaluate_policy(
             action_hash: input.action_hash,
             evaluated_at_unix_ms: input.evaluated_at_unix_ms,
             reasons,
+            trusted_checks,
             untrusted_evidence: input.untrusted_evidence,
         },
     })
@@ -601,6 +629,10 @@ mod tests {
             assert_eq!(
                 result.audit().reasons(),
                 &[PolicyDecisionReason::AllRequiredChecksSatisfied]
+            );
+            assert_eq!(
+                result.audit().trusted_checks().len(),
+                action_class.required_checks().len()
             );
         }
     }
