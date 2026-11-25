@@ -105,28 +105,6 @@ async fn setup() -> (
     .await
     .expect("revision pointer advanced");
 
-    let document_id = KnowledgeDocumentId::new();
-    let chunk_id = KnowledgeChunkId::new();
-    sqlx::query(
-        "INSERT INTO knowledge_documents (id, tenant_id, object_id, doc_key, title, status, valid_from_revision, valid_to_revision) VALUES ($1::uuid, $2::uuid, $3::uuid, 'retired-fixture', 'Retired fixture', 'retired', 1, 2)",
-    )
-    .bind(document_id.to_string())
-    .bind(tenant_id.to_string())
-    .bind(object_id.to_string())
-    .execute(&pool)
-    .await
-    .expect("retired document inserted");
-    sqlx::query(
-        "INSERT INTO knowledge_chunks (id, tenant_id, object_id, document_id, content, position, valid_from_revision, valid_to_revision) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'historical content', 0, 1, 2)",
-    )
-    .bind(chunk_id.to_string())
-    .bind(tenant_id.to_string())
-    .bind(object_id.to_string())
-    .bind(document_id.to_string())
-    .execute(&pool)
-    .await
-    .expect("retired chunk inserted");
-
     let invocation_id = InvocationId::new();
     sqlx::query(
         "INSERT INTO object_invocations (id, tenant_id, object_id, caller_id, snapshot_id, knowledge_revision, pool, status, trace_id) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 1, 'authenticated', 'Received', $6::uuid)",
@@ -150,6 +128,46 @@ async fn setup() -> (
     .execute(&pool)
     .await
     .expect("invocation revision pin inserted");
+
+    // Advance to revision 2 after the invocation has durably pinned revision 1.
+    sqlx::query(
+        "INSERT INTO knowledge_revision_log (tenant_id, object_id, revision) VALUES ($1::uuid, $2::uuid, 2)",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("second revision log inserted");
+    sqlx::query(
+        "UPDATE knowledge_revisions SET current_revision=2 WHERE tenant_id=$1::uuid AND object_id=$2::uuid",
+    )
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("second revision committed");
+
+    let document_id = KnowledgeDocumentId::new();
+    let chunk_id = KnowledgeChunkId::new();
+    sqlx::query(
+        "INSERT INTO knowledge_documents (id, tenant_id, object_id, doc_key, title, status, valid_from_revision, valid_to_revision) VALUES ($1::uuid, $2::uuid, $3::uuid, 'retired-fixture', 'Retired fixture', 'retired', 1, 2)",
+    )
+    .bind(document_id.to_string())
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("retired document inserted");
+    sqlx::query(
+        "INSERT INTO knowledge_chunks (id, tenant_id, object_id, document_id, content, position, valid_from_revision, valid_to_revision) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'historical content', 0, 1, 2)",
+    )
+    .bind(chunk_id.to_string())
+    .bind(tenant_id.to_string())
+    .bind(object_id.to_string())
+    .bind(document_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("retired chunk inserted");
 
     (pool, context, scope, object_id, invocation_id, document_id)
 }
