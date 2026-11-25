@@ -375,8 +375,8 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn rejects_special_addresses_from_both_families() {
+    #[test]
+    fn rejects_special_addresses_from_both_families() {
         for answer in [
             DnsAnswer::new(vec!["127.0.0.1".into()], vec![]),
             DnsAnswer::new(vec![], vec!["::1".into()]),
@@ -390,8 +390,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn rejects_invalid_and_ambiguous_hostnames_before_lookup() {
+    #[test]
+    fn rejects_invalid_and_ambiguous_hostnames_before_lookup() {
         for hostname in [
             "",
             "localhost",
