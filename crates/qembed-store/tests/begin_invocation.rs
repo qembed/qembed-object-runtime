@@ -328,7 +328,11 @@ async fn begin_invocation_commits_all_rows_and_replays_by_effective_caller() {
     .fetch_one(&fixture.pool)
     .await
     .expect("invocation revision pin should be persisted");
-    assert_eq!(pin, (1, 7), "invocation creation persists its exact revision pin");
+    assert_eq!(
+        pin,
+        (1, 7),
+        "invocation creation persists its exact revision pin"
+    );
     let reservation_count: i64 = sqlx::query_scalar("SELECT count(*) FROM budget_reservations")
         .fetch_one(&fixture.pool)
         .await

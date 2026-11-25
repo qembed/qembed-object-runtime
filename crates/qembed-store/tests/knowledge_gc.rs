@@ -2,8 +2,8 @@ mod common;
 
 use qembed_domain::{
     ids::{
-        CallerId, InvocationId, ObjectId, ObjectVersionId, SnapshotId, TenantId, TraceId,
-        KnowledgeChunkId, KnowledgeDocumentId,
+        CallerId, InvocationId, KnowledgeChunkId, KnowledgeDocumentId, ObjectId, ObjectVersionId,
+        SnapshotId, TenantId, TraceId,
     },
     object::Object,
     scope::Scope,
@@ -16,7 +16,14 @@ use qembed_store::{
 };
 use sqlx::PgPool;
 
-async fn setup() -> (PgPool, qembed_store::PgContext, Scope, ObjectId, InvocationId, KnowledgeDocumentId) {
+async fn setup() -> (
+    PgPool,
+    qembed_store::PgContext,
+    Scope,
+    ObjectId,
+    InvocationId,
+    KnowledgeDocumentId,
+) {
     let pool = common::connect().await;
     run_migrations(&pool).await.expect("migrations apply");
     let context = common::signed_context(&pool).await;
@@ -207,7 +214,9 @@ async fn active_invocation_pin_blocks_gc_until_terminal_transition_releases_it()
     assert_eq!(remaining_chunks, 0, "document deletion cascades to chunks");
 
     assert!(matches!(
-        collector.collect_retired_documents(&scope, object_id, 0).await,
+        collector
+            .collect_retired_documents(&scope, object_id, 0)
+            .await,
         Err(PgKnowledgeGcError::InvalidBatchSize)
     ));
     pool.close().await;
