@@ -68,7 +68,6 @@ impl AuthenticatedIdentity {
         self.principal_kind
     }
 }
-
 /// Verifies credentials and returns the identity established by that check.
 ///
 /// The application must wire only a trusted verifier. An HTTP request DTO
@@ -760,12 +759,19 @@ pub trait KnowledgeIngestionStore: Send + Sync {
         &self,
         scope: &Scope,
         document_id: crate::ids::KnowledgeDocumentId,
-    ) -> impl Future<Output = Result<Option<crate::knowledge_ingestion::KnowledgeIngestionDocumentState>, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<
+            Option<crate::knowledge_ingestion::KnowledgeIngestionDocumentState>,
+            Self::Error,
+        >,
+    > + Send;
 
     fn active_ingestion_embedding_models(
         &self,
         scope: &Scope,
-    ) -> impl Future<Output = Result<Vec<crate::knowledge_ingestion::IngestionEmbeddingModel>, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<Vec<crate::knowledge_ingestion::IngestionEmbeddingModel>, Self::Error>,
+    > + Send;
 
     fn persist_indexed_knowledge_document(
         &self,
@@ -773,5 +779,7 @@ pub trait KnowledgeIngestionStore: Send + Sync {
         document_id: crate::ids::KnowledgeDocumentId,
         expected_models: &[crate::knowledge_ingestion::IngestionEmbeddingModel],
         chunks: &[crate::knowledge_ingestion::IngestionChunk],
-    ) -> impl Future<Output = Result<crate::knowledge_ingestion::IngestionPersistenceOutcome, Self::Error>> + Send;
+    ) -> impl Future<
+        Output = Result<crate::knowledge_ingestion::IngestionPersistenceOutcome, Self::Error>,
+    > + Send;
 }
