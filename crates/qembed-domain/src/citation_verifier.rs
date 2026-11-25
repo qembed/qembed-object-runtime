@@ -43,7 +43,10 @@ pub struct RetrievedEvidenceChunk {
 impl RetrievedEvidenceChunk {
     #[must_use]
     pub fn new(id: KnowledgeChunkId, content: impl Into<String>) -> Self {
-        Self { id, content: content.into() }
+        Self {
+            id,
+            content: content.into(),
+        }
     }
 }
 
@@ -121,7 +124,9 @@ impl CitationVerifier {
 
         if document.claims.is_empty() || document.claims.len() > MAX_CLAIMS {
             report.violations.push(violation(
-                VerificationRule::V1Envelope, None, None,
+                VerificationRule::V1Envelope,
+                None,
+                None,
                 "claim count must be between 1 and MAX_CLAIMS",
             ));
         }
@@ -138,7 +143,9 @@ impl CitationVerifier {
             if chunk.content.trim().is_empty() || chunk.content.len() > MAX_EVIDENCE_CHUNK_BYTES {
                 invalid_evidence = true;
                 report.violations.push(violation(
-                    VerificationRule::V7EvidenceIntegrity, None, Some(chunk.id),
+                    VerificationRule::V7EvidenceIntegrity,
+                    None,
+                    Some(chunk.id),
                     "retrieved chunk content is empty or exceeds the byte limit",
                 ));
             }
@@ -160,13 +167,18 @@ impl CitationVerifier {
             let claim_id_valid = valid_claim_id(&claim.id);
             if !claim_id_valid || !claim_ids.insert(claim.id.as_str()) {
                 report.violations.push(violation(
-                    VerificationRule::V2ClaimShape, Some(&claim.id), None,
+                    VerificationRule::V2ClaimShape,
+                    Some(&claim.id),
+                    None,
                     "claim ID is malformed or duplicated",
                 ));
             }
             if claim.text.trim().is_empty()
                 || claim.text.len() > MAX_CLAIM_BYTES
-                || claim.text.chars().any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+                || claim
+                    .text
+                    .chars()
+                    .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
             {
                 report.violations.push(violation(
                     VerificationRule::V2ClaimShape, Some(&claim.id), None,
@@ -177,7 +189,9 @@ impl CitationVerifier {
 
             if claim.citations.is_empty() || claim.citations.len() > MAX_CITATIONS_PER_CLAIM {
                 report.violations.push(violation(
-                    VerificationRule::V3RequiredCitations, Some(&claim.id), None,
+                    VerificationRule::V3RequiredCitations,
+                    Some(&claim.id),
+                    None,
                     "each claim must contain between 1 and MAX_CITATIONS_PER_CLAIM citations",
                 ));
                 continue;
@@ -190,7 +204,9 @@ impl CitationVerifier {
                 if !cited_ids.insert(*citation) {
                     citation_list_valid = false;
                     report.violations.push(violation(
-                        VerificationRule::V3RequiredCitations, Some(&claim.id), Some(*citation),
+                        VerificationRule::V3RequiredCitations,
+                        Some(&claim.id),
+                        Some(*citation),
                         "claim contains a duplicate citation",
                     ));
                     continue;
@@ -200,7 +216,9 @@ impl CitationVerifier {
                     None => {
                         citation_list_valid = false;
                         report.violations.push(violation(
-                            VerificationRule::V4CitationResolution, Some(&claim.id), Some(*citation),
+                            VerificationRule::V4CitationResolution,
+                            Some(&claim.id),
+                            Some(*citation),
                             "citation does not resolve to a chunk in the supplied retrieval result",
                         ));
                     }
@@ -215,7 +233,9 @@ impl CitationVerifier {
             for number in extract_numbers(&claim.text) {
                 if !supported_numbers.contains(&number) {
                     report.violations.push(violation(
-                        VerificationRule::V5NumericGrounding, Some(&claim.id), None,
+                        VerificationRule::V5NumericGrounding,
+                        Some(&claim.id),
+                        None,
                         "numeric literal is absent from all cited chunks",
                     ));
                 }
@@ -225,7 +245,9 @@ impl CitationVerifier {
             for url in extract_urls(&claim.text) {
                 if !supported_urls.contains(&url) {
                     report.violations.push(violation(
-                        VerificationRule::V6LinkGrounding, Some(&claim.id), None,
+                        VerificationRule::V6LinkGrounding,
+                        Some(&claim.id),
+                        None,
                         "explicit URL is absent from all cited chunks",
                     ));
                 }
@@ -253,7 +275,9 @@ fn violation(
 fn valid_claim_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_CLAIM_ID_BYTES
-        && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 fn extract_numbers(text: &str) -> BTreeSet<String> {
@@ -332,7 +356,8 @@ fn extract_urls(text: &str) -> BTreeSet<String> {
         let mut offset = 0;
         while let Some(relative) = lower[offset..].find(prefix) {
             let start = offset + relative;
-            let preceding_is_word = start > 0 && lower.as_bytes()[start - 1].is_ascii_alphanumeric();
+            let preceding_is_word =
+                start > 0 && lower.as_bytes()[start - 1].is_ascii_alphanumeric();
             if preceding_is_word {
                 offset = start + prefix.len();
                 continue;
@@ -340,7 +365,9 @@ fn extract_urls(text: &str) -> BTreeSet<String> {
             let mut end = start;
             while end < text.len() {
                 let byte = text.as_bytes()[end];
-                if byte.is_ascii_whitespace() || matches!(byte, b'<' | b'>' | b'"' | b'\'' | b')' | b']' | b'}') {
+                if byte.is_ascii_whitespace()
+                    || matches!(byte, b'<' | b'>' | b'"' | b'\'' | b')' | b']' | b'}')
+                {
                     break;
                 }
                 end += 1;
@@ -368,7 +395,11 @@ mod tests {
     }
 
     fn claim(text: &str, citations: Vec<KnowledgeChunkId>) -> CitationClaim {
-        CitationClaim { id: "claim-1".to_owned(), text: text.to_owned(), citations }
+        CitationClaim {
+            id: "claim-1".to_owned(),
+            text: text.to_owned(),
+            citations,
+        }
     }
 
     #[test]
@@ -376,7 +407,10 @@ mod tests {
         let evidence = chunk("The service supports 128 requests. See https://example.com/docs.");
         let id = evidence.id;
         let document = CitationDocument {
-            claims: vec![claim("The service supports 128 requests; see https://example.com/docs.", vec![id])],
+            claims: vec![claim(
+                "The service supports 128 requests; see https://example.com/docs.",
+                vec![id],
+            )],
         };
         let report = CitationVerifier::new().verify(&document, &[evidence]);
         assert!(report.is_accepted(), "{:?}", report.violations());
@@ -385,9 +419,16 @@ mod tests {
     #[test]
     fn rejects_missing_required_citations() {
         let evidence = chunk("A fact.");
-        let document = CitationDocument { claims: vec![claim("A fact.", vec![])] };
+        let document = CitationDocument {
+            claims: vec![claim("A fact.", vec![])],
+        };
         let report = CitationVerifier::new().verify(&document, &[evidence]);
-        assert!(report.violations().iter().any(|item| item.rule == VerificationRule::V3RequiredCitations));
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V3RequiredCitations)
+        );
     }
 
     #[test]
@@ -397,7 +438,12 @@ mod tests {
             claims: vec![claim("A fact.", vec![KnowledgeChunkId::new()])],
         };
         let report = CitationVerifier::new().verify(&document, &[evidence]);
-        assert!(report.violations().iter().any(|item| item.rule == VerificationRule::V4CitationResolution));
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V4CitationResolution)
+        );
     }
 
     #[test]
@@ -405,11 +451,24 @@ mod tests {
         let evidence = chunk("The limit is 128. See https://example.com/source.");
         let id = evidence.id;
         let document = CitationDocument {
-            claims: vec![claim("The limit is 256. See https://example.com/other.", vec![id])],
+            claims: vec![claim(
+                "The limit is 256. See https://example.com/other.",
+                vec![id],
+            )],
         };
         let report = CitationVerifier::new().verify(&document, &[evidence]);
-        assert!(report.violations().iter().any(|item| item.rule == VerificationRule::V5NumericGrounding));
-        assert!(report.violations().iter().any(|item| item.rule == VerificationRule::V6LinkGrounding));
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V5NumericGrounding)
+        );
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V6LinkGrounding)
+        );
     }
 
     #[test]
@@ -419,14 +478,29 @@ mod tests {
         let document = CitationDocument {
             claims: vec![
                 claim("First fact.", vec![id]),
-                CitationClaim { id: "claim-1".to_owned(), text: "Second fact.".to_owned(), citations: vec![id] },
+                CitationClaim {
+                    id: "claim-1".to_owned(),
+                    text: "Second fact.".to_owned(),
+                    citations: vec![id],
+                },
             ],
         };
         let duplicate_claim = CitationVerifier::new().verify(&document, &[evidence.clone()]);
-        assert!(duplicate_claim.violations().iter().any(|item| item.rule == VerificationRule::V2ClaimShape));
+        assert!(
+            duplicate_claim
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V2ClaimShape)
+        );
 
-        let duplicate_evidence = CitationVerifier::new().verify(&document, &[evidence.clone(), evidence]);
-        assert!(duplicate_evidence.violations().iter().any(|item| item.rule == VerificationRule::V7EvidenceIntegrity));
+        let duplicate_evidence =
+            CitationVerifier::new().verify(&document, &[evidence.clone(), evidence]);
+        assert!(
+            duplicate_evidence
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V7EvidenceIntegrity)
+        );
     }
 
     #[test]
@@ -435,14 +509,35 @@ mod tests {
         let id = evidence.id;
         let malformed = CitationDocument {
             claims: vec![
-                CitationClaim { id: "bad id".to_owned(), text: "Fact".to_owned(), citations: vec![id] },
-                CitationClaim { id: "claim-2".to_owned(), text: " \n ".to_owned(), citations: vec![id] },
-                CitationClaim { id: "claim-3".to_owned(), text: "x".repeat(MAX_CLAIM_BYTES + 1), citations: vec![id] },
-                CitationClaim { id: "claim-4".to_owned(), text: "bad\u{0000}text".to_owned(), citations: vec![id] },
+                CitationClaim {
+                    id: "bad id".to_owned(),
+                    text: "Fact".to_owned(),
+                    citations: vec![id],
+                },
+                CitationClaim {
+                    id: "claim-2".to_owned(),
+                    text: " \n ".to_owned(),
+                    citations: vec![id],
+                },
+                CitationClaim {
+                    id: "claim-3".to_owned(),
+                    text: "x".repeat(MAX_CLAIM_BYTES + 1),
+                    citations: vec![id],
+                },
+                CitationClaim {
+                    id: "claim-4".to_owned(),
+                    text: "bad\u{0000}text".to_owned(),
+                    citations: vec![id],
+                },
             ],
         };
         let report = CitationVerifier::new().verify(&malformed, &[evidence]);
-        assert!(report.violations().iter().any(|item| item.rule == VerificationRule::V2ClaimShape));
+        assert!(
+            report
+                .violations()
+                .iter()
+                .any(|item| item.rule == VerificationRule::V2ClaimShape)
+        );
     }
 
     #[test]
@@ -457,13 +552,21 @@ mod tests {
             let document = CitationDocument {
                 claims: vec![claim_with_id(invalid_id, "A claim.", id)],
             };
-            assert!(!verifier.verify(&document, std::slice::from_ref(&evidence)).is_accepted());
+            assert!(
+                !verifier
+                    .verify(&document, std::slice::from_ref(&evidence))
+                    .is_accepted()
+            );
         }
 
         for length in 0..=MAX_CLAIM_BYTES + 2 {
             let text = "x".repeat(length);
-            let document = CitationDocument { claims: vec![claim(&text, vec![id])] };
-            let accepted = verifier.verify(&document, std::slice::from_ref(&evidence)).is_accepted();
+            let document = CitationDocument {
+                claims: vec![claim(&text, vec![id])],
+            };
+            let accepted = verifier
+                .verify(&document, std::slice::from_ref(&evidence))
+                .is_accepted();
             assert_eq!(accepted, length > 0 && length <= MAX_CLAIM_BYTES);
         }
 
@@ -472,13 +575,19 @@ mod tests {
             if ch == '\n' || ch == '\t' {
                 continue;
             }
-            let document = CitationDocument { claims: vec![claim(&format!("bad{ch}text"), vec![id])] };
+            let document = CitationDocument {
+                claims: vec![claim(&format!("bad{ch}text"), vec![id])],
+            };
             assert!(!verifier.verify(&document, std::slice::from_ref(&evidence)).is_accepted());
         }
     }
 
     fn claim_with_id(id: &str, text: &str, citation: KnowledgeChunkId) -> CitationClaim {
-        CitationClaim { id: id.to_owned(), text: text.to_owned(), citations: vec![citation] }
+        CitationClaim {
+            id: id.to_owned(),
+            text: text.to_owned(),
+            citations: vec![citation],
+        }
     }
 
     #[test]
@@ -488,13 +597,29 @@ mod tests {
         let document = CitationDocument {
             claims: vec![claim("Values: 1000, 3.14, 12.5, and 5%.", vec![id])],
         };
-        assert!(CitationVerifier::new().verify(&document, &[evidence]).is_accepted());
+        assert!(
+            CitationVerifier::new()
+                .verify(&document, &[evidence])
+                .is_accepted()
+        );
     }
 
     #[test]
     fn rejects_malformed_json_shapes_and_unknown_fields() {
-        assert!(serde_json::from_str::<CitationDocument>(r#"{"claims":[],"unexpected":true}"#).is_err());
-        assert!(serde_json::from_str::<CitationDocument>(r#"{"claims":[{"id":"x","text":"ok","citations":[],"extra":1}]}"#).is_err());
-        assert!(serde_json::from_str::<CitationDocument>(r#"{"claims":[{"id":"x","text":"ok","citations":["not-a-uuid"]}]}"#).is_err());
+        assert!(
+            serde_json::from_str::<CitationDocument>(r#"{"claims":[],"unexpected":true}"#).is_err()
+        );
+        assert!(
+            serde_json::from_str::<CitationDocument>(
+                r#"{"claims":[{"id":"x","text":"ok","citations":[],"extra":1}]}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<CitationDocument>(
+                r#"{"claims":[{"id":"x","text":"ok","citations":["not-a-uuid"]}]}"#
+            )
+            .is_err()
+        );
     }
 }
