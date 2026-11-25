@@ -349,7 +349,9 @@ async fn pgvector_search_uses_metric_specific_scores_and_materialized_visibility
 
 #[tokio::test]
 async fn pgvector_search_rejects_model_and_dimension_mismatch_and_zero_top_k() {
-    use qembed_domain::knowledge_embedding::{EmbeddingDistanceMetric, EmbeddingModelSpec, EmbeddingVector};
+    use qembed_domain::knowledge_embedding::{
+        EmbeddingDistanceMetric, EmbeddingModelSpec, EmbeddingVector,
+    };
     use qembed_store::knowledge_retrieval::PgKnowledgeRetrievalError;
 
     let (pool, store, scope, object_id) = setup().await;
