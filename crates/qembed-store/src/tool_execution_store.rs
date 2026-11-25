@@ -135,6 +135,15 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
                         version=version+1
                   WHERE tenant_id=$1::uuid AND id=$2::uuid
                     AND status='Authorized' AND version=0 AND fencing_token=0
+                    AND EXISTS (
+                        SELECT 1 FROM object_tools binding
+                         WHERE binding.tenant_id=tool_executions.tenant_id
+                           AND binding.object_id=tool_executions.object_id
+                           AND binding.tool_id=tool_executions.tool_id
+                           AND binding.tool_version_id=tool_executions.tool_version_id
+                           AND binding.binding_version=tool_executions.binding_version
+                           AND binding.enabled
+                    )
                 RETURNING id::text, tenant_id::text, object_id::text, invocation_id::text,
                           command_id::text, status, version, fencing_token, lease_owner",
             )

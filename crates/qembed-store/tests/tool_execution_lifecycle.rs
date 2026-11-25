@@ -31,6 +31,7 @@ struct Fixture {
     context: PgContext,
     scope: qembed_domain::scope::Scope,
     invocation_id: InvocationId,
+    object_id: ObjectId,
     execution_id: ToolExecutionId,
 }
 
@@ -145,6 +146,18 @@ async fn setup() -> Fixture {
     .expect("tool version exists");
 
     sqlx::query(
+        "INSERT INTO object_tools (tenant_id, object_id, tool_id, tool_version_id, permissions)
+         VALUES ($1, $2, $3, $4, '{}'::jsonb)",
+    )
+    .bind(tenant_id.into_uuid())
+    .bind(object_id.into_uuid())
+    .bind(tool_id)
+    .bind(tool_version_id)
+    .execute(&pool)
+    .await
+    .expect("current Object Tool binding exists");
+
+    sqlx::query(
         "INSERT INTO policy_decisions
             (id, tenant_id, object_id, invocation_id, caller_id, snapshot_id,
              tool_id, tool_version_id, binding_version, operation, arguments_hash,
@@ -195,8 +208,62 @@ async fn setup() -> Fixture {
         context,
         scope: scope_for_tenant(tenant_id),
         invocation_id,
+        object_id,
         execution_id,
     }
+}
+
+#[tokio::test]
+async fn changed_binding_version_rejects_claim_before_external_execution() {
+    let fixture = setup().await;
+
+    // Simulate an Owner changing the binding after the Allow decision and
+    // ToolExecution were created. The trigger advances binding_version.
+    sqlx::query(
+        "UPDATE object_tools SET permissions=jsonb_build_object('updated', true)
+          WHERE tenant_id=$1 AND object_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(fixture.object_id.into_uuid())
+    .execute(&fixture.pool)
+    .await
+    .expect("binding can be changed");
+
+    let binding_state: (i64, bool) = sqlx::query_as(
+        "SELECT binding_version, enabled FROM object_tools WHERE tenant_id=$1 AND object_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(fixture.object_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("updated binding is readable");
+    assert_eq!(
+        binding_state,
+        (2, true),
+        "binding mutation advances its monotonic version"
+    );
+
+    let store = PgToolExecutionStore::new(fixture.context.clone());
+    let claim = store
+        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker", 60)
+        .await
+        .expect("stale binding is a normal fail-closed claim miss");
+    assert!(claim.is_none(), "stale capability must not acquire a lease");
+
+    let persisted = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("execution remains readable")
+        .expect("execution exists");
+    assert_eq!(persisted.status(), ToolExecutionStatus::Authorized);
+    assert_eq!(persisted.version(), 0);
+    assert_eq!(
+        persisted.fencing_token(),
+        ToolExecutionFencingToken::INITIAL
+    );
+    assert_eq!(persisted.lease_owner(), None);
+
+    fixture.pool.close().await;
 }
 
 #[tokio::test]
