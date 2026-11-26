@@ -172,4 +172,44 @@ mod tests {
     #[test] fn tampering_and_wrong_associated_identity_are_rejected(){let p=TestProvider::new();let t=TenantId::new();let c=CommandId::new();let plain=b"secret";let h=Sha256::digest(plain).into();let e=encrypt_command_payload(&p,t,c,plain,h).unwrap();let mut bytes=e.ciphertext().to_vec();let n=bytes.len()-1;bytes[n]^=1;let bad=EncryptedCommandPayload::new(bytes,e.key_id().into(),h);assert_eq!(decrypt_command_payload(&p,t,c,&bad,h),Err(PayloadCryptoError::AuthenticationFailed));assert_eq!(decrypt_command_payload(&p,TenantId::new(),c,&e,h),Err(PayloadCryptoError::AuthenticationFailed));assert_eq!(decrypt_command_payload(&p,t,CommandId::new(),&e,h),Err(PayloadCryptoError::AuthenticationFailed));}
     #[test] fn wrong_key_and_allow_hash_mismatch_fail_closed(){let p=TestProvider::new();let t=TenantId::new();let c=CommandId::new();let plain=b"payload";let h=Sha256::digest(plain).into();let e=encrypt_command_payload(&p,t,c,plain,h).unwrap();assert_eq!(decrypt_command_payload(&TestProvider::new(),t,c,&e,h),Err(PayloadCryptoError::KeyProvider));assert_eq!(encrypt_command_payload(&p,t,c,plain,[0;32]),Err(PayloadCryptoError::ArgumentsHashMismatch));assert_eq!(decrypt_command_payload(&p,t,c,&e,[0;32]),Err(PayloadCryptoError::ArgumentsHashMismatch));}
     #[test] fn rotation_uses_new_key_and_preserves_old_decryptability(){let p=TestProvider::new();let t=TenantId::new();let c=CommandId::new();let plain=b"rotate me";let h=Sha256::digest(plain).into();let first=encrypt_command_payload(&p,t,c,plain,h).unwrap();p.rotate();let next=rotate_command_payload(&p,t,c,&first,h).unwrap();assert_ne!(first.key_id(),next.key_id());assert_eq!(decrypt_command_payload(&p,t,c,&next,h).unwrap(),plain);assert_eq!(decrypt_command_payload(&p,t,c,&first,h).unwrap(),plain);}
+
+    #[derive(Default)]
+    struct MemoryStore(std::sync::Mutex<Option<EncryptedCommandPayload>>);
+    impl CommandPayloadStore for MemoryStore {
+        type Error = std::io::Error;
+        async fn store_command_payload(&self, _scope: &Scope, _command: CommandId, payload: EncryptedCommandPayload, _ttl: u32) -> Result<(), Self::Error> {
+            *self.0.lock().expect("memory store lock") = Some(payload);
+            Ok(())
+        }
+        async fn load_command_payload(&self, _scope: &Scope, _command: CommandId, expected: [u8;32]) -> Result<Option<EncryptedCommandPayload>, Self::Error> {
+            Ok(self.0.lock().expect("memory store lock").clone().filter(|p| p.arguments_hash() == &expected))
+        }
+    }
+
+    #[tokio::test]
+    async fn persistence_workflow_never_stores_plaintext_and_loads_only_verified_arguments() {
+        use qembed_domain::{ids::TenantId, test_support::scope_for_tenant};
+        let provider=TestProvider::new(); let store=MemoryStore::default(); let scope=scope_for_tenant(TenantId::new());
+        let command=CommandId::new(); let plaintext=b"highly sensitive command arguments"; let hash=Sha256::digest(plaintext).into();
+        persist_authorized_command_payload(&store,&provider,&scope,command,plaintext,hash,300).await.expect("persist");
+        let stored=store.0.lock().expect("memory store lock").clone().expect("stored ciphertext");
+        assert!(!stored.ciphertext().windows(plaintext.len()).any(|w|w==plaintext));
+        assert_eq!(load_authorized_command_payload(&store,&provider,&scope,command,hash).await.expect("load").expect("payload"),plaintext);
+        assert!(load_authorized_command_payload(&store,&provider,&scope,command,[0;32]).await.expect("wrong Allow hash").is_none());
+    }
+
+    #[tokio::test]
+    async fn persistence_workflow_rejects_tampered_ciphertext_before_returning_plaintext() {
+        use qembed_domain::{ids::TenantId, test_support::scope_for_tenant};
+        let provider=TestProvider::new(); let store=MemoryStore::default(); let scope=scope_for_tenant(TenantId::new());
+        let command=CommandId::new(); let plaintext=b"do not execute tampered arguments"; let hash=Sha256::digest(plaintext).into();
+        persist_authorized_command_payload(&store,&provider,&scope,command,plaintext,hash,300).await.expect("persist");
+        let mut record=store.0.lock().expect("memory store lock");
+        let current=record.take().expect("stored");
+        let mut bytes=current.ciphertext().to_vec(); let n=bytes.len()-1; bytes[n]^=1;
+        *record=Some(EncryptedCommandPayload::new(bytes,current.key_id().to_owned(),hash));
+        drop(record);
+        assert!(matches!(load_authorized_command_payload(&store,&provider,&scope,command,hash).await,Err(CommandPayloadWorkflowError::Crypto(PayloadCryptoError::AuthenticationFailed))));
+    }
+
 }
