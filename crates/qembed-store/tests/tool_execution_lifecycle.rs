@@ -879,3 +879,40 @@ async fn postgres_reconciliation_rejects_mismatched_invocation_provenance() {
     assert_eq!(persisted.invocation_id(), unknown.invocation_id());
     fixture.pool.close().await;
 }
+
+
+#[tokio::test]
+async fn command_payload_store_persists_ciphertext_and_requires_matching_allow_hash() {
+    use qembed_domain::{
+        command_payload::{CommandPayloadStore, EncryptedCommandPayload},
+        ids::CommandId,
+    };
+    use qembed_store::command_payload_store::PgCommandPayloadStore;
+
+    let fixture = setup().await;
+    let command_uuid: Uuid = sqlx::query_scalar("SELECT command_id FROM tool_executions WHERE id=$1")
+        .bind(fixture.execution_id.into_uuid())
+        .fetch_one(&fixture.pool).await.expect("command ID exists");
+    let command_id = CommandId::from_uuid(command_uuid);
+    let store = PgCommandPayloadStore::new(fixture.context.clone());
+    let encrypted = EncryptedCommandPayload::new(b"opaque-ciphertext-envelope".to_vec(), "test-kek-1".to_owned(), [2_u8; 32]);
+
+    store.store_command_payload(&fixture.scope, command_id, encrypted.clone(), 300).await
+        .expect("matching Allow decision accepts encrypted payload");
+
+    let persisted: (Vec<u8>, String, Vec<u8>) = sqlx::query_as(
+        "SELECT payload_ciphertext, key_id, arguments_hash FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2"
+    ).bind(fixture.scope.tenant_id().into_uuid()).bind(command_id.into_uuid())
+     .fetch_one(&fixture.pool).await.expect("ciphertext row exists");
+    assert_eq!(persisted.0, b"opaque-ciphertext-envelope");
+    assert_eq!(persisted.1, "test-kek-1");
+    assert_eq!(persisted.2, vec![2_u8; 32]);
+
+    let loaded = store.load_command_payload(&fixture.scope, command_id, [2_u8; 32]).await
+        .expect("load succeeds").expect("payload is visible for matching Allow hash");
+    assert_eq!(loaded, encrypted);
+    assert!(store.load_command_payload(&fixture.scope, command_id, [9_u8; 32]).await
+        .expect("wrong digest is a fail-closed miss").is_none());
+
+    fixture.pool.close().await;
+}

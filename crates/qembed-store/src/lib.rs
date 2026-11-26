@@ -14,6 +14,7 @@ pub mod budget_settlement;
 pub mod caller;
 pub mod caller_delegation;
 pub mod caller_deletion;
+pub mod command_payload_store;
 mod cas;
 pub mod context_issuer;
 pub mod embedding_model_registry;
