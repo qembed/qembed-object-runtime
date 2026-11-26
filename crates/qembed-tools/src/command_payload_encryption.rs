@@ -605,17 +605,18 @@ mod tests {
         .await
         .expect("persist");
 
-        let mut record = store.0.lock().expect("memory store lock");
-        let current = record.take().expect("stored");
-        let mut bytes = current.ciphertext().to_vec();
-        let last = bytes.len() - 1;
-        bytes[last] ^= 1;
-        *record = Some(EncryptedCommandPayload::new(
-            bytes,
-            current.key_id().to_owned(),
-            hash,
-        ));
-        drop(record);
+        {
+            let mut record = store.0.lock().expect("memory store lock");
+            let current = record.take().expect("stored");
+            let mut bytes = current.ciphertext().to_vec();
+            let last = bytes.len() - 1;
+            bytes[last] ^= 1;
+            *record = Some(EncryptedCommandPayload::new(
+                bytes,
+                current.key_id().to_owned(),
+                hash,
+            ));
+        }
 
         assert!(matches!(
             load_authorized_command_payload(&store, &provider, &scope, command, hash).await,
