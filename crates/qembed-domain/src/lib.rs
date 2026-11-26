@@ -113,6 +113,7 @@ pub mod caller;
 pub mod chat;
 pub mod citation_verifier;
 pub mod command_id;
+pub mod command_payload;
 pub mod ids;
 pub mod invocation;
 pub mod invocation_lease;

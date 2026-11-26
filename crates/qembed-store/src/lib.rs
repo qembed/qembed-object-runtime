@@ -15,6 +15,7 @@ pub mod caller;
 pub mod caller_delegation;
 pub mod caller_deletion;
 mod cas;
+pub mod command_payload_store;
 pub mod context_issuer;
 pub mod embedding_model_registry;
 pub mod episodic_memory;

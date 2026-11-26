@@ -8,6 +8,8 @@ lints.workspace = true
 
 [dependencies]
 hickory-resolver.workspace = true
+ring.workspace = true
+sha2.workspace = true
 qembed-domain = { path = "../qembed-domain" }
 tokio.workspace = true
 tokio-rustls.workspace = true
