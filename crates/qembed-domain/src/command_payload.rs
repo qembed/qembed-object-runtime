@@ -38,7 +38,8 @@ impl EncryptedCommandPayload {
 }
 
 /// Tenant-scoped persistence port. Implementations must compare the digest to
-/// the immutable Allow decision before returning ciphertext.
+/// the immutable Allow decision before returning ciphertext. Initial storage is
+/// insert-only; replacement is update-only and must preserve the original expiry.
 #[allow(async_fn_in_trait)]
 pub trait CommandPayloadStore: Send + Sync {
     type Error: Send;

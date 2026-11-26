@@ -112,7 +112,7 @@ impl CommandPayloadStore for PgCommandPayloadStore {
 
         if result.rows_affected() != 1 {
             return Err(CommandPayloadStoreError::InvalidRequest(
-                "command is not backed by a matching Allow decision",
+                "command is not eligible for initial payload insertion",
             ));
         }
         Ok(())

@@ -623,7 +623,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn persisted_rotation_replaces_ciphertext_without_extending_payload_ttl() {
+    async fn persisted_rotation_replaces_ciphertext_under_active_key() {
         use qembed_domain::{ids::TenantId, test_support::scope_for_tenant};
 
         let provider = TestProvider::new();
@@ -669,5 +669,4 @@ mod tests {
             plaintext
         );
     }
-
 }
