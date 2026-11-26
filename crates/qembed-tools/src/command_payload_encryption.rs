@@ -623,4 +623,53 @@ mod tests {
             ))
         ));
     }
+
+    #[tokio::test]
+    async fn persisted_rotation_replaces_ciphertext_without_extending_payload_ttl() {
+        use qembed_domain::{ids::TenantId, test_support::scope_for_tenant};
+
+        let provider = TestProvider::new();
+        let store = MemoryStore::default();
+        let scope = scope_for_tenant(TenantId::new());
+        let command = CommandId::new();
+        let plaintext = b"payload survives key rotation";
+        let hash = Sha256::digest(plaintext).into();
+
+        persist_authorized_command_payload(
+            &store, &provider, &scope, command, plaintext, hash, 300,
+        )
+        .await
+        .expect("persist");
+        let old_key_id = store
+            .0
+            .lock()
+            .expect("memory store lock")
+            .as_ref()
+            .expect("stored payload")
+            .key_id()
+            .to_owned();
+
+        provider.rotate();
+        assert!(
+            rotate_persisted_command_payload(&store, &provider, &scope, command, hash)
+                .await
+                .expect("rotation")
+        );
+
+        let new_record = store
+            .0
+            .lock()
+            .expect("memory store lock")
+            .clone()
+            .expect("rotated payload");
+        assert_ne!(old_key_id, new_record.key_id());
+        assert_eq!(
+            load_authorized_command_payload(&store, &provider, &scope, command, hash)
+                .await
+                .expect("load")
+                .expect("payload"),
+            plaintext
+        );
+    }
+
 }
