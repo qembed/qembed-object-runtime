@@ -937,3 +937,237 @@ async fn command_payload_store_persists_ciphertext_and_requires_matching_allow_h
 
     fixture.pool.close().await;
 }
+
+
+async fn store_retention_test_payload(fixture: &Fixture, ttl_seconds: u32) -> CommandId {
+    use qembed_domain::command_payload::{CommandPayloadStore, EncryptedCommandPayload};
+    use qembed_store::command_payload_store::PgCommandPayloadStore;
+
+    let command_uuid: Uuid =
+        sqlx::query_scalar("SELECT command_id FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("command ID exists");
+    let command_id = CommandId::from_uuid(command_uuid);
+    PgCommandPayloadStore::new(fixture.context.clone())
+        .store_command_payload(
+            &fixture.scope,
+            command_id,
+            EncryptedCommandPayload::new(
+                b"retention-test-ciphertext".to_vec(),
+                "retention-test-key".to_owned(),
+                [2_u8; 32],
+            ),
+            ttl_seconds,
+        )
+        .await
+        .expect("encrypted command payload is stored");
+    command_id
+}
+
+async fn purge_command_payloads_as_definer(pool: &PgPool, batch_size: i32) -> i64 {
+    let mut transaction = pool
+        .begin()
+        .await
+        .expect("retention transaction begins");
+    sqlx::query("SET LOCAL ROLE qembed_definer")
+        .execute(&mut *transaction)
+        .await
+        .expect("retention worker assumes the dedicated definer role");
+    let deleted = sqlx::query_scalar::<_, i64>(
+        "SELECT public.qembed_purge_tool_command_payloads($1)",
+    )
+    .bind(batch_size)
+    .fetch_one(&mut *transaction)
+    .await
+    .expect("bounded payload cleanup succeeds");
+    transaction
+        .commit()
+        .await
+        .expect("retention transaction commits");
+    deleted
+}
+
+#[tokio::test]
+async fn terminal_command_payload_cleanup_is_bounded_and_idempotent() {
+    let fixture = setup().await;
+    let command_id = store_retention_test_payload(&fixture, 3600).await;
+
+    sqlx::query(
+        "UPDATE tool_executions
+            SET status='Failed', version=version+1, finished_at=clock_timestamp()
+          WHERE tenant_id=$1 AND id=$2 AND status='Authorized'",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(fixture.execution_id.into_uuid())
+    .execute(&fixture.pool)
+    .await
+    .expect("Authorized execution can be terminally failed");
+
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        1,
+        "terminal payload is removed even before its TTL"
+    );
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        0,
+        "repeating cleanup is a no-op"
+    );
+
+    let payload_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(command_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("payload absence is queryable");
+    let execution_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("execution ledger remains queryable");
+    assert_eq!(payload_count, 0);
+    assert_eq!(execution_count, 1, "cleanup never deletes audit history");
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn command_payload_ttl_expires_even_without_terminal_execution() {
+    let fixture = setup().await;
+    let command_id = store_retention_test_payload(&fixture, 1).await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+
+    assert_eq!(purge_command_payloads_as_definer(&fixture.pool, 10).await, 1);
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("execution remains present");
+    assert_eq!(status, "Authorized");
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(command_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("expired payload count is queryable");
+    assert_eq!(remaining, 0);
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn unknown_command_payload_is_retained_until_reconciliation_or_ttl() {
+    let fixture = setup().await;
+    let command_id = store_retention_test_payload(&fixture, 3600).await;
+    let store = PgToolExecutionStore::new(fixture.context.clone());
+    let unknown = transition_fixture_to_unknown(&fixture, &store).await;
+
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        0,
+        "Unknown payload remains available while reconciliation is pending and TTL is live"
+    );
+    let retained: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(command_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("Unknown payload is queryable");
+    assert_eq!(retained, 1);
+
+    let request = reconciliation_request(&unknown);
+    let outcome = ToolExecutionReconciliationOutcome::ConfirmedFailed { evidence: None };
+    let mut next = unknown;
+    next.reconcile(outcome.clone())
+        .expect("confirmed failure closes the Unknown execution");
+    assert!(
+        store
+            .apply_tool_execution_reconciliation(
+                &fixture.scope,
+                ToolExecutionReconciliationCompletion {
+                    request,
+                    next,
+                    outcome,
+                },
+            )
+            .await
+            .expect("confirmed reconciliation persists")
+    );
+
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        1,
+        "payload becomes eligible immediately after confirmed terminal reconciliation"
+    );
+    assert_eq!(purge_command_payloads_as_definer(&fixture.pool, 10).await, 0);
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn unknown_command_payload_is_removed_after_ttl_when_reconciliation_is_pending() {
+    let fixture = setup().await;
+    let command_id = store_retention_test_payload(&fixture, 1).await;
+    let store = PgToolExecutionStore::new(fixture.context.clone());
+    let unknown = transition_fixture_to_unknown(&fixture, &store).await;
+    assert_eq!(unknown.status(), ToolExecutionStatus::Unknown);
+
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        1,
+        "TTL is the upper bound even when reconciliation remains pending"
+    );
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM tool_executions WHERE id=$1")
+            .bind(fixture.execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("Unknown execution remains in the audit ledger");
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(command_id.into_uuid())
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("expired Unknown payload count is queryable");
+    assert_eq!(status, "Unknown", "cleanup does not rewrite reconciliation state");
+    assert_eq!(remaining, 0);
+
+    fixture.pool.close().await;
+}
+
+#[tokio::test]
+async fn command_payload_retention_privileges_are_narrow() {
+    let pool = common::connect().await;
+    run_migrations(&pool)
+        .await
+        .expect("all store migrations should apply");
+
+    let privileges: (bool, bool, bool, bool) = sqlx::query_as(
+        "SELECT
+            has_table_privilege('qembed_runtime', 'tool_command_payloads', 'DELETE'),
+            has_table_privilege('qembed_definer', 'tool_command_payloads', 'DELETE'),
+            has_function_privilege('qembed_runtime',
+                'public.qembed_purge_tool_command_payloads(integer)', 'EXECUTE'),
+            has_function_privilege('qembed_definer',
+                'public.qembed_purge_tool_command_payloads(integer)', 'EXECUTE')",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("retention privileges are queryable");
+    assert_eq!(privileges, (false, true, false, true));
+
+    pool.close().await;
+}
