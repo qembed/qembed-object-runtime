@@ -597,15 +597,15 @@ SQLX_OFFLINE=true cargo check --workspace
   - Реализация: `PinnedConnector` устанавливает TCP напрямую на адрес из валидированного `ResolvedAddressSet`; child-process integration test задаёт HTTP_PROXY/HTTPS_PROXY/ALL_PROXY и lowercase-варианты на локальный proxy sentinel и доказывает, что соединение идёт напрямую к target с ожидаемым TLS SNI.
   - DoD: не происходит непреднамеренного proxy routing.
 
-- [ ] **RUST-085 (M)** Добавить IPv4/IPv6 special-range validation.
+- [x] **RUST-085 (M)** Добавить IPv4/IPv6 special-range validation.
   - Тесты: corpus для mapped IPv6, NAT64, CGNAT, link-local, loopback, multicast и metadata IPs.
   - DoD: запрещённые диапазоны отвергаются.
 
-- [ ] **RUST-086 (M)** Реализовать envelope encryption для command payload store.
+- [x] **RUST-086 (M)** Реализовать envelope encryption для command payload store.
   - Тесты: encrypt/decrypt round-trip; tamper/hash mismatch; wrong key; key rotation; ciphertext-only persistence assertion.
   - DoD: payload зашифрован at rest; key ID поддерживает rotation; hash проверяется до execution.
 
-- [ ] **RUST-087 (S)** Реализовать terminal payload cleanup и Unknown retention behavior.
+- [x] **RUST-087 (S)** Реализовать terminal payload cleanup и Unknown retention behavior.
   - Тесты: integration — terminal cleanup, TTL, Unknown сохранён до reconciliation/TTL, повторный cleanup.
   - DoD: cleanup идемпотентен и не удаляет payload, нужный для reconciliation.
 
