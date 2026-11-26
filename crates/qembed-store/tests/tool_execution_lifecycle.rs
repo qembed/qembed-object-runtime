@@ -938,7 +938,6 @@ async fn command_payload_store_persists_ciphertext_and_requires_matching_allow_h
     fixture.pool.close().await;
 }
 
-
 async fn store_retention_test_payload(fixture: &Fixture, ttl_seconds: u32) -> CommandId {
     use qembed_domain::command_payload::{CommandPayloadStore, EncryptedCommandPayload};
     use qembed_store::command_payload_store::PgCommandPayloadStore;
@@ -967,21 +966,17 @@ async fn store_retention_test_payload(fixture: &Fixture, ttl_seconds: u32) -> Co
 }
 
 async fn purge_command_payloads_as_definer(pool: &PgPool, batch_size: i32) -> i64 {
-    let mut transaction = pool
-        .begin()
-        .await
-        .expect("retention transaction begins");
+    let mut transaction = pool.begin().await.expect("retention transaction begins");
     sqlx::query("SET LOCAL ROLE qembed_definer")
         .execute(&mut *transaction)
         .await
         .expect("retention worker assumes the dedicated definer role");
-    let deleted = sqlx::query_scalar::<_, i64>(
-        "SELECT public.qembed_purge_tool_command_payloads($1)",
-    )
-    .bind(batch_size)
-    .fetch_one(&mut *transaction)
-    .await
-    .expect("bounded payload cleanup succeeds");
+    let deleted =
+        sqlx::query_scalar::<_, i64>("SELECT public.qembed_purge_tool_command_payloads($1)")
+            .bind(batch_size)
+            .fetch_one(&mut *transaction)
+            .await
+            .expect("bounded payload cleanup succeeds");
     transaction
         .commit()
         .await
@@ -1043,13 +1038,15 @@ async fn command_payload_ttl_expires_even_without_terminal_execution() {
 
     tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
 
-    assert_eq!(purge_command_payloads_as_definer(&fixture.pool, 10).await, 1);
-    let status: String =
-        sqlx::query_scalar("SELECT status FROM tool_executions WHERE id=$1")
-            .bind(fixture.execution_id.into_uuid())
-            .fetch_one(&fixture.pool)
-            .await
-            .expect("execution remains present");
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        1
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM tool_executions WHERE id=$1")
+        .bind(fixture.execution_id.into_uuid())
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("execution remains present");
     assert_eq!(status, "Authorized");
     let remaining: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2",
@@ -1110,7 +1107,10 @@ async fn unknown_command_payload_is_retained_until_reconciliation_or_ttl() {
         1,
         "payload becomes eligible immediately after confirmed terminal reconciliation"
     );
-    assert_eq!(purge_command_payloads_as_definer(&fixture.pool, 10).await, 0);
+    assert_eq!(
+        purge_command_payloads_as_definer(&fixture.pool, 10).await,
+        0
+    );
 
     fixture.pool.close().await;
 }
@@ -1128,12 +1128,11 @@ async fn unknown_command_payload_is_removed_after_ttl_when_reconciliation_is_pen
         1,
         "TTL is the upper bound even when reconciliation remains pending"
     );
-    let status: String =
-        sqlx::query_scalar("SELECT status FROM tool_executions WHERE id=$1")
-            .bind(fixture.execution_id.into_uuid())
-            .fetch_one(&fixture.pool)
-            .await
-            .expect("Unknown execution remains in the audit ledger");
+    let status: String = sqlx::query_scalar("SELECT status FROM tool_executions WHERE id=$1")
+        .bind(fixture.execution_id.into_uuid())
+        .fetch_one(&fixture.pool)
+        .await
+        .expect("Unknown execution remains in the audit ledger");
     let remaining: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM tool_command_payloads WHERE tenant_id=$1 AND command_id=$2",
     )
@@ -1142,7 +1141,10 @@ async fn unknown_command_payload_is_removed_after_ttl_when_reconciliation_is_pen
     .fetch_one(&fixture.pool)
     .await
     .expect("expired Unknown payload count is queryable");
-    assert_eq!(status, "Unknown", "cleanup does not rewrite reconciliation state");
+    assert_eq!(
+        status, "Unknown",
+        "cleanup does not rewrite reconciliation state"
+    );
     assert_eq!(remaining, 0);
 
     fixture.pool.close().await;
