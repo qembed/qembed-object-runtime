@@ -110,6 +110,7 @@ pub mod anonymous;
 pub mod auth;
 pub mod budget;
 pub mod caller;
+pub mod command_payload;
 pub mod chat;
 pub mod citation_verifier;
 pub mod command_id;
