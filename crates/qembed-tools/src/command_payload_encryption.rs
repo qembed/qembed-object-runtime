@@ -453,8 +453,11 @@ mod tests {
             decrypt_command_payload(&TestProvider::new(), tenant, command, &encrypted, hash),
             Err(PayloadCryptoError::AuthenticationFailed)
         );
-        let unknown_key =
-            EncryptedCommandPayload::new(encrypted.ciphertext().to_vec(), "missing-key".into(), hash);
+        let unknown_key = EncryptedCommandPayload::new(
+            encrypted.ciphertext().to_vec(),
+            "missing-key".into(),
+            hash,
+        );
         assert_eq!(
             decrypt_command_payload(&provider, tenant, command, &unknown_key, hash),
             Err(PayloadCryptoError::KeyProvider)
