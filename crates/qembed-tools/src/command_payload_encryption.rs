@@ -1,7 +1,7 @@
 //! Envelope encryption for short-lived tool command arguments.
 use ring::{aead, rand::{SecureRandom, SystemRandom}};
 use sha2::{Digest, Sha256};
-use qembed_domain::{command_payload::EncryptedCommandPayload, ids::{CommandId, TenantId}};
+use qembed_domain::{command_payload::{CommandPayloadStore, EncryptedCommandPayload}, ids::{CommandId, TenantId}, scope::Scope};
 
 const MAGIC: &[u8; 4] = b"QCP1";
 const NONCE_LEN: usize = 12;
@@ -44,7 +44,7 @@ pub fn encrypt_command_payload<P: DataKeyProvider>(provider: &P, tenant: TenantI
     let digest: [u8; 32] = Sha256::digest(plaintext).into();
     if digest != allow_hash { return Err(PayloadCryptoError::ArgumentsHashMismatch); }
     let (key_id, data_key, wrapped) = provider.generate_and_wrap().map_err(|_| PayloadCryptoError::KeyProvider)?;
-    if key_id.is_empty() { return Err(PayloadCryptoError::InvalidKeyId); }
+    if key_id.is_empty() || key_id.len() > u16::MAX as usize { return Err(PayloadCryptoError::InvalidKeyId); }
     if wrapped.is_empty() || wrapped.len() > u16::MAX as usize { return Err(PayloadCryptoError::InvalidEnvelope); }
     let mut nonce_bytes = [0_u8; NONCE_LEN];
     SystemRandom::new().fill(&mut nonce_bytes).map_err(|_| PayloadCryptoError::Randomness)?;
@@ -101,6 +101,55 @@ fn associated_data(tenant: TenantId, command: CommandId, key_id: &str, hash: &[u
     aad.extend_from_slice(id);
     aad.extend_from_slice(hash);
     aad
+}
+
+
+/// Workflow failure while persisting or retrieving an authorized payload.
+pub enum CommandPayloadWorkflowError<E> {
+    Store(E),
+    Crypto(PayloadCryptoError),
+}
+
+/// Encrypts arguments and persists only the authenticated envelope.
+/// The digest must be taken from the immutable Allow decision.
+pub async fn persist_authorized_command_payload<S, P>(
+    store: &S, provider: &P, scope: &Scope, command_id: CommandId,
+    plaintext: &[u8], allow_arguments_hash: [u8; 32], ttl_seconds: u32,
+) -> Result<(), CommandPayloadWorkflowError<S::Error>>
+where S: CommandPayloadStore, P: DataKeyProvider {
+    let encrypted = encrypt_command_payload(provider, scope.tenant_id(), command_id, plaintext, allow_arguments_hash)
+        .map_err(CommandPayloadWorkflowError::Crypto)?;
+    store.store_command_payload(scope, command_id, encrypted, ttl_seconds).await
+        .map_err(CommandPayloadWorkflowError::Store)
+}
+
+/// Returns plaintext only after the Store confirms the Allow hash and AEAD plus
+/// SHA-256 verification succeed. Call this immediately before executor handoff.
+pub async fn load_authorized_command_payload<S, P>(
+    store: &S, provider: &P, scope: &Scope, command_id: CommandId,
+    allow_arguments_hash: [u8; 32],
+) -> Result<Option<Vec<u8>>, CommandPayloadWorkflowError<S::Error>>
+where S: CommandPayloadStore, P: DataKeyProvider {
+    let Some(encrypted) = store.load_command_payload(scope, command_id, allow_arguments_hash).await
+        .map_err(CommandPayloadWorkflowError::Store)? else { return Ok(None); };
+    decrypt_command_payload(provider, scope.tenant_id(), command_id, &encrypted, allow_arguments_hash)
+        .map(Some).map_err(CommandPayloadWorkflowError::Crypto)
+}
+
+/// Re-encrypts an existing record under the provider's active key without
+/// changing command identity, plaintext or the Allow-decision digest.
+pub async fn rotate_persisted_command_payload<S, P>(
+    store: &S, provider: &P, scope: &Scope, command_id: CommandId,
+    allow_arguments_hash: [u8; 32],
+) -> Result<bool, CommandPayloadWorkflowError<S::Error>>
+where S: CommandPayloadStore, P: DataKeyProvider {
+    let Some(existing) = store.load_command_payload(scope, command_id, allow_arguments_hash).await
+        .map_err(CommandPayloadWorkflowError::Store)? else { return Ok(false); };
+    let rotated = rotate_command_payload(provider, scope.tenant_id(), command_id, &existing, allow_arguments_hash)
+        .map_err(CommandPayloadWorkflowError::Crypto)?;
+    store.store_command_payload(scope, command_id, rotated, 1).await
+        .map_err(CommandPayloadWorkflowError::Store)?;
+    Ok(true)
 }
 
 #[cfg(test)]
