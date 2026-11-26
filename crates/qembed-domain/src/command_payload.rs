@@ -23,6 +23,7 @@ impl EncryptedCommandPayload {
 
 /// Tenant-scoped persistence port. Implementations must compare the digest to
 /// the immutable Allow decision before returning ciphertext.
+#[allow(async_fn_in_trait)]
 pub trait CommandPayloadStore: Send + Sync {
     type Error: Send;
     async fn store_command_payload(&self, scope: &Scope, command_id: CommandId, payload: EncryptedCommandPayload, ttl_seconds: u32) -> Result<(), Self::Error>;

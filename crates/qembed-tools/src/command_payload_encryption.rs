@@ -66,6 +66,7 @@ pub fn encrypt_command_payload<P: DataKeyProvider>(provider: &P, tenant: TenantI
 /// Authenticates and decrypts, then independently verifies the Allow hash.
 pub fn decrypt_command_payload<P: DataKeyProvider>(provider: &P, tenant: TenantId, command: CommandId, payload: &EncryptedCommandPayload, allow_hash: [u8; 32]) -> Result<Vec<u8>, PayloadCryptoError> {
     if payload.arguments_hash() != &allow_hash { return Err(PayloadCryptoError::ArgumentsHashMismatch); }
+    if payload.key_id().is_empty() || payload.key_id().len() > u16::MAX as usize { return Err(PayloadCryptoError::InvalidKeyId); }
     let bytes = payload.ciphertext();
     if bytes.len() < 6 + NONCE_LEN + TAG_LEN || &bytes[..4] != MAGIC { return Err(PayloadCryptoError::InvalidEnvelope); }
     let wrapped_len = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
