@@ -199,12 +199,7 @@ pub fn rotate_command_payload<P: DataKeyProvider>(
     encrypt_command_payload(provider, tenant, command, &plaintext, allow_hash)
 }
 
-fn associated_data(
-    tenant: TenantId,
-    command: CommandId,
-    key_id: &str,
-    hash: &[u8; 32],
-) -> Vec<u8> {
+fn associated_data(tenant: TenantId, command: CommandId, key_id: &str, hash: &[u8; 32]) -> Vec<u8> {
     let key_id_bytes = key_id.as_bytes();
     let mut aad = Vec::with_capacity(66 + key_id_bytes.len());
     aad.extend_from_slice(tenant.as_uuid().as_bytes());
@@ -362,11 +357,7 @@ mod tests {
 
     impl DataKeyProvider for TestProvider {
         fn generate_and_wrap(&self) -> Result<(String, DataKey, Vec<u8>), KeyProviderError> {
-            let id = self
-                .active
-                .read()
-                .map_err(|_| KeyProviderError)?
-                .clone();
+            let id = self.active.read().map_err(|_| KeyProviderError)?.clone();
             let kek = *self
                 .keys
                 .read()
@@ -432,8 +423,7 @@ mod tests {
         let mut bytes = encrypted.ciphertext().to_vec();
         let last = bytes.len() - 1;
         bytes[last] ^= 1;
-        let tampered =
-            EncryptedCommandPayload::new(bytes, encrypted.key_id().into(), hash);
+        let tampered = EncryptedCommandPayload::new(bytes, encrypted.key_id().into(), hash);
 
         assert_eq!(
             decrypt_command_payload(&provider, tenant, command, &tampered, hash),
@@ -480,8 +470,7 @@ mod tests {
         let command = CommandId::new();
         let plaintext = b"rotate me";
         let hash = Sha256::digest(plaintext).into();
-        let first =
-            encrypt_command_payload(&provider, tenant, command, plaintext, hash).unwrap();
+        let first = encrypt_command_payload(&provider, tenant, command, plaintext, hash).unwrap();
         provider.rotate();
         let next = rotate_command_payload(&provider, tenant, command, &first, hash).unwrap();
 
@@ -520,7 +509,10 @@ mod tests {
             payload: EncryptedCommandPayload,
         ) -> Result<bool, Self::Error> {
             let mut stored = self.0.lock().expect("memory store lock");
-            if stored.as_ref().is_some_and(|current| current.arguments_hash() == payload.arguments_hash()) {
+            if stored
+                .as_ref()
+                .is_some_and(|current| current.arguments_hash() == payload.arguments_hash())
+            {
                 *stored = Some(payload);
                 Ok(true)
             } else {

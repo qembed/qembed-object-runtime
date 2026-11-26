@@ -118,7 +118,6 @@ impl CommandPayloadStore for PgCommandPayloadStore {
         Ok(())
     }
 
-
     async fn replace_command_payload(
         &self,
         scope: &Scope,
@@ -188,9 +187,7 @@ impl CommandPayloadStore for PgCommandPayloadStore {
 
         row.map(|(ciphertext, key_id, hash)| {
             let hash: [u8; 32] = hash.try_into().map_err(|_| {
-                CommandPayloadStoreError::InvalidRequest(
-                    "persisted arguments hash is not 32 bytes",
-                )
+                CommandPayloadStoreError::InvalidRequest("persisted arguments hash is not 32 bytes")
             })?;
             Ok(EncryptedCommandPayload::new(ciphertext, key_id, hash))
         })
