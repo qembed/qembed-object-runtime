@@ -98,9 +98,7 @@ impl CommandPayloadStore for PgCommandPayloadStore {
                    FROM policy_decisions AS decision
                   WHERE decision.tenant_id=$1::uuid AND decision.command_id=$2::uuid
                     AND decision.decision='Allow' AND decision.arguments_hash=$6
-                 ON CONFLICT (tenant_id, command_id) DO UPDATE
-                    SET payload_ciphertext=EXCLUDED.payload_ciphertext, key_id=EXCLUDED.key_id
-                  WHERE tool_command_payloads.arguments_hash=EXCLUDED.arguments_hash",
+",
             )
             .bind(scope.tenant_id().to_string())
             .bind(command_id.to_string())
@@ -118,6 +116,46 @@ impl CommandPayloadStore for PgCommandPayloadStore {
             ));
         }
         Ok(())
+    }
+
+
+    async fn replace_command_payload(
+        &self,
+        scope: &Scope,
+        command_id: CommandId,
+        payload: EncryptedCommandPayload,
+    ) -> Result<bool, Self::Error> {
+        if payload.key_id().is_empty() {
+            return Err(CommandPayloadStoreError::InvalidRequest(
+                "key ID must not be empty",
+            ));
+        }
+        let mut transaction = self.context.begin_principal(scope).await?;
+        let result = execute(
+            &mut transaction,
+            sqlx::query(
+                "UPDATE tool_command_payloads
+                    SET payload_ciphertext=$1, key_id=$2
+                  WHERE tenant_id=$3::uuid AND command_id=$4::uuid
+                    AND arguments_hash=$5
+                    AND expires_at > clock_timestamp()
+                    AND EXISTS (
+                        SELECT 1 FROM policy_decisions AS decision
+                         WHERE decision.tenant_id=$3::uuid
+                           AND decision.command_id=$4::uuid
+                           AND decision.decision='Allow'
+                           AND decision.arguments_hash=$5
+                    )",
+            )
+            .bind(payload.ciphertext())
+            .bind(payload.key_id())
+            .bind(scope.tenant_id().to_string())
+            .bind(command_id.to_string())
+            .bind(payload.arguments_hash().as_slice()),
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
     }
 
     async fn load_command_payload(

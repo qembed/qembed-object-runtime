@@ -313,10 +313,9 @@ where
     )
     .map_err(CommandPayloadWorkflowError::Crypto)?;
     store
-        .store_command_payload(scope, command_id, rotated, 1)
+        .replace_command_payload(scope, command_id, rotated)
         .await
-        .map_err(CommandPayloadWorkflowError::Store)?;
-    Ok(true)
+        .map_err(CommandPayloadWorkflowError::Store)
 }
 
 #[cfg(test)]
@@ -512,6 +511,21 @@ mod tests {
         ) -> Result<(), Self::Error> {
             *self.0.lock().expect("memory store lock") = Some(payload);
             Ok(())
+        }
+
+        async fn replace_command_payload(
+            &self,
+            _scope: &Scope,
+            _command: CommandId,
+            payload: EncryptedCommandPayload,
+        ) -> Result<bool, Self::Error> {
+            let mut stored = self.0.lock().expect("memory store lock");
+            if stored.as_ref().is_some_and(|current| current.arguments_hash() == payload.arguments_hash()) {
+                *stored = Some(payload);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
         }
 
         async fn load_command_payload(

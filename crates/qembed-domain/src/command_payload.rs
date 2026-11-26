@@ -51,6 +51,13 @@ pub trait CommandPayloadStore: Send + Sync {
         ttl_seconds: u32,
     ) -> Result<(), Self::Error>;
 
+    async fn replace_command_payload(
+        &self,
+        scope: &Scope,
+        command_id: CommandId,
+        payload: EncryptedCommandPayload,
+    ) -> Result<bool, Self::Error>;
+
     async fn load_command_payload(
         &self,
         scope: &Scope,
