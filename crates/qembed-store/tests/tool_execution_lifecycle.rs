@@ -1157,7 +1157,10 @@ async fn command_payload_retention_privileges_are_narrow() {
         .await
         .expect("all store migrations should apply");
 
-    let privileges: (bool, bool, bool, bool, bool, bool) = sqlx::query_as(
+    // Runtime UPDATE is intentional: the tenant-scoped payload store needs it
+    // for insert/replace and key rotation. RLS confines those writes to Scope.
+    // Global DELETE and the privileged cleanup entry point remain definer-only.
+    let privileges: (bool, bool, bool, bool, bool, bool, bool, bool, bool) = sqlx::query_as(
         "SELECT
             has_table_privilege('qembed_runtime', 'tool_command_payloads', 'DELETE'),
             has_table_privilege('qembed_definer', 'tool_command_payloads', 'DELETE'),
@@ -1166,12 +1169,21 @@ async fn command_payload_retention_privileges_are_narrow() {
             has_function_privilege('qembed_runtime',
                 'public.qembed_purge_tool_command_payloads(integer)', 'EXECUTE'),
             has_function_privilege('qembed_definer',
-                'public.qembed_purge_tool_command_payloads(integer)', 'EXECUTE')",
+                'public.qembed_purge_tool_command_payloads(integer)', 'EXECUTE'),
+            (SELECT relrowsecurity FROM pg_class WHERE oid='public.tool_command_payloads'::regclass),
+            (SELECT relforcerowsecurity FROM pg_class WHERE oid='public.tool_command_payloads'::regclass),
+            EXISTS (
+                SELECT 1 FROM pg_policies
+                 WHERE schemaname='public'
+                   AND tablename='tool_command_payloads'
+                   AND policyname='tool_command_payloads_runtime_tenant'
+                   AND qual LIKE '%app.tenant_id%'
+            )",
     )
     .fetch_one(&pool)
     .await
-    .expect("retention privileges are queryable");
-    assert_eq!(privileges, (false, true, false, true, false, true));
+    .expect("retention privileges and row-level security are queryable");
+    assert_eq!(privileges, (false, true, true, true, false, true, true, true, true));
 
     pool.close().await;
 }
