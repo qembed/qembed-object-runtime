@@ -15,6 +15,10 @@ CREATE POLICY tool_command_payloads_definer_access ON public.tool_command_payloa
     WITH CHECK (true);
 
 GRANT SELECT, DELETE ON public.tool_command_payloads TO qembed_definer;
+-- PostgreSQL requires UPDATE privilege on at least one column for SELECT FOR UPDATE.
+-- Keep SKIP LOCKED concurrency while limiting that privilege to the TTL column;
+-- qembed_runtime receives no direct UPDATE or DELETE capability.
+GRANT UPDATE (expires_at) ON public.tool_command_payloads TO qembed_definer;
 
 CREATE FUNCTION public.qembed_purge_tool_command_payloads(p_batch_size INTEGER)
 RETURNS BIGINT
