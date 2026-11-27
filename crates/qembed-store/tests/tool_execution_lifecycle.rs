@@ -1157,10 +1157,12 @@ async fn command_payload_retention_privileges_are_narrow() {
         .await
         .expect("all store migrations should apply");
 
-    let privileges: (bool, bool, bool, bool) = sqlx::query_as(
+    let privileges: (bool, bool, bool, bool, bool, bool) = sqlx::query_as(
         "SELECT
             has_table_privilege('qembed_runtime', 'tool_command_payloads', 'DELETE'),
             has_table_privilege('qembed_definer', 'tool_command_payloads', 'DELETE'),
+            has_column_privilege('qembed_runtime', 'tool_command_payloads', 'expires_at', 'UPDATE'),
+            has_column_privilege('qembed_definer', 'tool_command_payloads', 'expires_at', 'UPDATE'),
             has_function_privilege('qembed_runtime',
                 'public.qembed_purge_tool_command_payloads(integer)', 'EXECUTE'),
             has_function_privilege('qembed_definer',
@@ -1169,7 +1171,7 @@ async fn command_payload_retention_privileges_are_narrow() {
     .fetch_one(&pool)
     .await
     .expect("retention privileges are queryable");
-    assert_eq!(privileges, (false, true, false, true));
+    assert_eq!(privileges, (false, true, false, true, false, true));
 
     pool.close().await;
 }
