@@ -1183,7 +1183,10 @@ async fn command_payload_retention_privileges_are_narrow() {
     .fetch_one(&pool)
     .await
     .expect("retention privileges and row-level security are queryable");
-    assert_eq!(privileges, (false, true, true, true, false, true, true, true, true));
+    assert_eq!(
+        privileges,
+        (false, true, true, true, false, true, true, true, true)
+    );
 
     pool.close().await;
 }
