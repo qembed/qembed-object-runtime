@@ -666,7 +666,7 @@ mod tests {
                     // The upstream may finish the side effect after our local timeout.
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     Ok(UpstreamToolOutcome::Succeeded { output: None })
-                },
+                }
                 Some(MockResponse::Succeeded) => Ok(UpstreamToolOutcome::Succeeded {
                     output: Some(serde_json::json!({"accepted": true})),
                 }),
@@ -742,12 +742,7 @@ mod tests {
                 command_id,
                 payload,
             },
-            upstream: MockUpstream::new(
-                tool_id,
-                tool_version_id,
-                true,
-                responses.iter().copied(),
-            ),
+            upstream: MockUpstream::new(tool_id, tool_version_id, true, responses.iter().copied()),
         }
     }
 
