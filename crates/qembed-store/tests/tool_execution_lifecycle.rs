@@ -574,7 +574,7 @@ async fn database_commit_failure_after_external_success_recovers_as_unknown_with
             &fixture.scope,
             fixture.execution_id,
             "tool-worker-crash",
-            60,
+            1,
         )
         .await
         .expect("lease claim succeeds")
@@ -658,16 +658,9 @@ async fn database_commit_failure_after_external_success_recovers_as_unknown_with
         .await
         .expect("failure-injection trigger is removed");
 
-    sqlx::query(
-        "UPDATE tool_executions
-            SET lease_until=clock_timestamp()-interval '1 second'
-          WHERE tenant_id=$1 AND id=$2",
-    )
-    .bind(fixture.scope.tenant_id().into_uuid())
-    .bind(execution_id.into_uuid())
-    .execute(&fixture.pool)
-    .await
-    .expect("simulate worker lease expiry after process loss");
+    // Let PostgreSQL's real lease deadline expire; do not bypass the
+    // state-guard trigger by mutating lease_until directly.
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
 
     assert!(
         store
