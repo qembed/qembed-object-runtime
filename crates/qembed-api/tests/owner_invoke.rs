@@ -328,7 +328,7 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         let object = payload.as_object().expect("event payload is an object");
         let mut actual_fields = object.keys().map(String::as_str).collect::<Vec<_>>();
         actual_fields.sort_unstable();
-        assert_eq!(actual_fields, expected_event_fields);
+        assert_eq!(actual_fields, expected_event_fields.to_vec());
         let serialized = payload.to_string();
         assert!(!serialized.contains("RUST091_RAW_INPUT_SENTINEL_DO_NOT_EMIT"));
         assert!(!serialized.contains(&token));
