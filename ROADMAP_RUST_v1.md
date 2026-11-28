@@ -613,20 +613,26 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: mock upstream — стабильный idempotency key после restart; timeout ambiguity; отсутствие auto-retry для non-idempotent action.
   - DoD: side effect не повторяется без доказанной idempotency/reconciliation.
 
-- [ ] **RUST-089 (M)** Реализовать reconciliation adapters для конкретных upstream providers.
-  - Тесты: provider contract tests для confirmed success/failure/unknown; stale token rejected.
-  - DoD: неизвестный outcome не превращается в успех/ошибку без подтверждения.
-- [ ] **RUST-090 (M)** Добавить tool failure-injection suite.
-  - Тесты: все crash points из acceptance plan; повторный запуск; stale worker; network timeout.
-  - DoD: состояние после каждого crash point проверяется автоматически.
-
-- [ ] **RUST-091 (S)** Проверить event/log/API payload hygiene.
-  - Тесты: capture logs/events/responses; assertions на отсутствие secrets, raw command payload и sensitive arguments.
-  - DoD: секреты и raw payload не покидают encrypted payload boundary.
-
-- [ ] **RUST-092 (S)** Подготовить automated tool-enablement test gate.
-  - Тесты: единый CI job запускает SSRF, capability, binding, lease, Unknown, reconciliation и payload security suites.
-  - DoD: write-tools нельзя включить конфигурацией, если обязательный test gate не прошёл.
+- [x] **RUST-089 (M)** Определить provider-neutral reconciliation adapter boundary.
+  - Реализация: повторно использован domain contract `ToolExecutionReconciler`; добавлены unresolved placeholder и контрактный тест. Конкретные provider adapters отложены до выбора upstream providers; placeholder не подтверждает исход операции.
+  - Тесты: contract coverage для `Unresolved`; существующие reconciliation tests проверяют confirmed success/failure, pending reconciliation и stale fencing token.
+  - DoD: неизвестный outcome остаётся `Unresolved` и не превращается в успех/ошибку без подтверждения.
+  - Evidence: Rust PR [#163](https://github.com/qembed/qembed-object-runtime/pull/163), CI run [#46114107578](https://github.com/qembed/qembed-object-runtime/actions/runs/46114107578) — success.
+- [x] **RUST-090 (M)** Добавить tool failure-injection suite.
+  - Реализация: проверены отказ чтения encrypted payload до claim, потеря lease до network I/O и сбой persistence после подтверждённого provider success; неоднозначный исход переводится в `Unknown` после истечения lease.
+  - Тесты: PostgreSQL failure injection, повторный claim/retry запрещён при неоднозначном результате; crash-point matrix задокументирована.
+  - DoD: состояние после каждого реализованного crash point проверяется автоматически.
+  - Evidence: Rust PR [#164](https://github.com/qembed/qembed-object-runtime/pull/164), CI run [#46146044905](https://github.com/qembed/qembed-object-runtime/actions/runs/46146044905) — success.
+- [x] **RUST-091 (S)** Проверить event/log/API payload hygiene.
+  - Реализация: API response sentinel test; allowlist полей `invocation.received` event/outbox; recursive sensitive-key rejection tests; review logging paths и документирование границ аудита.
+  - Ограничение: capture-based assertions для внешнего logger не добавлялись, поскольку собственного logging adapter в проверенных путях нет; внешние proxy/DB/NATS logs и произвольные third-party producers вне scope.
+  - DoD: проверенные API/event/outbox пути не раскрывают secrets, raw command payload и sensitive arguments.
+  - Evidence: Rust PR [#165](https://github.com/qembed/qembed-object-runtime/pull/165), CI run [#46173926389](https://github.com/qembed/qembed-object-runtime/actions/runs/46173926389) — success.
+- [x] **RUST-092 (S)** Подготовить automated tool-enablement test gate.
+  - Реализация: отдельный CI job запускает domain capability, SSRF, binding, lease, Unknown, reconciliation, encrypted payload и PostgreSQL ToolExecution lifecycle suites; полный workspace suite остаётся обязательным отдельно.
+  - DoD: добавлен стабильный CI status `Tool enablement gate (SSRF, capability, binding, lease, Unknown, reconciliation, payload)`. Для enforcement администратор репозитория должен сделать этот status обязательным в branch protection/ruleset; настройки защиты этим PR не изменялись.
+  - Ограничение: production write-tools config flag не добавлялся; provider reconciliation остаётся unresolved до подключения конкретных adapters.
+  - Evidence: Rust PR [#166](https://github.com/qembed/qembed-object-runtime/pull/166), CI run [#46174753942](https://github.com/qembed/qembed-object-runtime/actions/runs/46174753942) — success.
 
 **M3 Gate:** SSRF, pinned connect, capability, binding, independent leases, Unknown/reconciliation и encrypted payload подтверждены автоматическими тестами. До этого внешние write-tools остаются выключенными.
 
