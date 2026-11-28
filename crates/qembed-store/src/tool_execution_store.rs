@@ -25,6 +25,7 @@ type ToolExecutionRow = (
     String,
     i64,
     i64,
+    Vec<u8>,
     Option<String>,
 );
 
@@ -103,7 +104,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
         let row = fetch_optional(
             &mut transaction,
             sqlx::query_as::<_, ToolExecutionRow>(
-                "SELECT id::text, tenant_id::text, object_id::text, invocation_id::text, command_id::text, status, version, fencing_token, lease_owner FROM tool_executions WHERE tenant_id=$1::uuid AND id=$2::uuid",
+                "SELECT id::text, tenant_id::text, object_id::text, invocation_id::text, command_id::text, status, version, fencing_token, arguments_hash, lease_owner FROM tool_executions WHERE tenant_id=$1::uuid AND id=$2::uuid",
             )
             .bind(scope.tenant_id().to_string())
             .bind(execution_id.to_string()),
@@ -497,6 +498,9 @@ fn reconstitute_tool_execution(
         .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("version"))?;
     let token = u64::try_from(row.7)
         .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("fencing_token"))?;
+    let arguments_hash: [u8; 32] = row.8.try_into().map_err(|_| {
+        ToolExecutionStoreError::InvalidPersistedValue("arguments_hash")
+    })?;
 
     Ok(ToolExecution::from_persisted(
         id,
@@ -504,11 +508,12 @@ fn reconstitute_tool_execution(
         object_id,
         invocation_id,
         command_id,
+        arguments_hash,
         ToolExecutionCheckpoint::new(
             status,
             version,
             ToolExecutionFencingToken::from_value(token),
-            row.8,
+            row.9,
         ),
     ))
 }
