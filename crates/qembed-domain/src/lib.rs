@@ -139,6 +139,7 @@ pub mod tool_binding;
 pub mod tool_execution;
 pub mod tool_execution_lease;
 pub mod tool_execution_reconciliation;
+pub mod task;
 pub mod tool_version;
 
 /// Test-only constructors for integration tests in adapter crates.
