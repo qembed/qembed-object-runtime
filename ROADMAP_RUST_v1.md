@@ -609,7 +609,7 @@ SQLX_OFFLINE=true cargo check --workspace
   - Тесты: integration — terminal cleanup, TTL, Unknown сохранён до reconciliation/TTL, повторный cleanup.
   - DoD: cleanup идемпотентен и не удаляет payload, нужный для reconciliation.
 
-- [ ] **RUST-088 (M)** Реализовать ToolExecution executor и upstream idempotency propagation.
+- [x] **RUST-088 (M)** Реализовать ToolExecution executor и upstream idempotency propagation.
   - Тесты: mock upstream — стабильный idempotency key после restart; timeout ambiguity; отсутствие auto-retry для non-idempotent action.
   - DoD: side effect не повторяется без доказанной idempotency/reconciliation.
 
