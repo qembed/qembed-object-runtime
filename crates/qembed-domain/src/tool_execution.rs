@@ -104,6 +104,12 @@ impl ToolExecutionCheckpoint {
         }
     }
 
+    /// Returns the SHA-256 digest of the exact arguments authorized for this command.
+    #[must_use]
+    pub const fn arguments_hash(&self) -> &[u8; 32] {
+        &self.arguments_hash
+    }
+
     #[must_use]
     pub const fn status(&self) -> ToolExecutionStatus {
         self.status
@@ -136,6 +142,7 @@ pub struct ToolExecution {
     object_id: ObjectId,
     invocation_id: InvocationId,
     command_id: CommandId,
+    arguments_hash: [u8; 32],
     status: ToolExecutionStatus,
     version: u64,
     fencing_token: ToolExecutionFencingToken,
@@ -151,6 +158,7 @@ impl ToolExecution {
         object_id: ObjectId,
         invocation_id: InvocationId,
         command_id: CommandId,
+        arguments_hash: [u8; 32],
     ) -> Self {
         Self {
             id,
@@ -158,6 +166,7 @@ impl ToolExecution {
             object_id,
             invocation_id,
             command_id,
+            arguments_hash,
             status: ToolExecutionStatus::Authorized,
             version: 0,
             fencing_token: ToolExecutionFencingToken::INITIAL,
@@ -173,6 +182,7 @@ impl ToolExecution {
         object_id: ObjectId,
         invocation_id: InvocationId,
         command_id: CommandId,
+        arguments_hash: [u8; 32],
         checkpoint: ToolExecutionCheckpoint,
     ) -> Self {
         Self {
@@ -181,6 +191,7 @@ impl ToolExecution {
             object_id,
             invocation_id,
             command_id,
+            arguments_hash,
             status: checkpoint.status,
             version: checkpoint.version,
             fencing_token: checkpoint.fencing_token,
@@ -398,6 +409,7 @@ mod tests {
             ObjectId::new(),
             InvocationId::new(),
             CommandId::new(),
+            [0_u8; 32],
         )
     }
 
