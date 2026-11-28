@@ -8,7 +8,7 @@ use std::{error::Error, fmt, future::Future, time::Duration};
 
 use qembed_domain::{
     command_payload::CommandPayloadStore,
-    ids::{CommandId, ToolExecutionId},
+    ids::{CommandId, ToolExecutionId, ToolId, ToolVersionId},
     policy::AllowedCommand,
     scope::Scope,
     tool_execution::{
@@ -91,6 +91,12 @@ pub enum UpstreamToolOutcome {
 /// with that key must represent one logical side effect.
 pub trait ToolUpstream: Send + Sync {
     type Error: Error + Send + Sync + 'static;
+
+    /// Identity of the immutable Tool implementation served by this adapter.
+    fn tool_id(&self) -> ToolId;
+
+    /// Exact immutable ToolVersion served by this adapter.
+    fn tool_version_id(&self) -> ToolVersionId;
 
     fn supports_idempotency_keys(&self) -> bool;
 
@@ -235,7 +241,10 @@ where
         .tool_binding()
         .ok_or(ToolExecutionWorkflowError::InvalidIdentity)?;
 
-    if binding.tool_id() != tool_version.tool_id() || binding.tool_version_id() != tool_version.id()
+    if binding.tool_id() != tool_version.tool_id()
+        || binding.tool_version_id() != tool_version.id()
+        || upstream.tool_id() != tool_version.tool_id()
+        || upstream.tool_version_id() != tool_version.id()
     {
         return Err(ToolExecutionWorkflowError::ToolVersionMismatch);
     }
@@ -592,14 +601,23 @@ mod tests {
     }
 
     struct MockUpstream {
+        tool_id: ToolId,
+        tool_version_id: ToolVersionId,
         supports_keys: bool,
         responses: Mutex<VecDeque<MockResponse>>,
         received_keys: Mutex<Vec<Option<String>>>,
     }
 
     impl MockUpstream {
-        fn new(supports_keys: bool, responses: impl IntoIterator<Item = MockResponse>) -> Self {
+        fn new(
+            tool_id: ToolId,
+            tool_version_id: ToolVersionId,
+            supports_keys: bool,
+            responses: impl IntoIterator<Item = MockResponse>,
+        ) -> Self {
             Self {
+                tool_id,
+                tool_version_id,
                 supports_keys,
                 responses: Mutex::new(responses.into_iter().collect()),
                 received_keys: Mutex::new(Vec::new()),
@@ -616,6 +634,14 @@ mod tests {
 
     impl ToolUpstream for MockUpstream {
         type Error = std::io::Error;
+
+        fn tool_id(&self) -> ToolId {
+            self.tool_id
+        }
+
+        fn tool_version_id(&self) -> ToolVersionId {
+            self.tool_version_id
+        }
 
         fn supports_idempotency_keys(&self) -> bool {
             self.supports_keys
@@ -716,7 +742,12 @@ mod tests {
                 command_id,
                 payload,
             },
-            upstream: MockUpstream::new(true, responses.iter().copied()),
+            upstream: MockUpstream::new(
+                tool_id,
+                tool_version_id,
+                true,
+                responses.iter().copied(),
+            ),
         }
     }
 
