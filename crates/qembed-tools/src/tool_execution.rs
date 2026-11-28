@@ -392,7 +392,6 @@ mod tests {
         },
         tool_version::{ToolRiskLevel, ToolVersion},
     };
-    use ring::rand::{SecureRandom, SystemRandom};
     use sha2::{Digest, Sha256};
 
     use super::{
@@ -407,9 +406,7 @@ mod tests {
 
     impl DataKeyProvider for TestKeys {
         fn generate_and_wrap(&self) -> Result<(String, DataKey, Vec<u8>), KeyProviderError> {
-            let mut key = [0_u8; 32];
-            SystemRandom::new().fill(&mut key).map_err(|_| KeyProviderError)?;
-            Ok(("test-kek".to_owned(), DataKey::new(key), vec![3_u8; 32]))
+            Ok(("test-kek".to_owned(), DataKey::new([7_u8; 32]), vec![3_u8; 32]))
         }
 
         fn unwrap(&self, key_id: &str, wrapped_key: &[u8]) -> Result<DataKey, KeyProviderError> {
