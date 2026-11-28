@@ -147,13 +147,13 @@ pub mod tool_version;
 /// enabled. Production builds must not enable that feature.
 #[cfg(feature = "test-support")]
 pub mod test_support {
+    use crate::principal::{Principal, PrincipalKind};
+    use crate::scope::Scope;
     use crate::{
         ids::{InvocationId, ObjectId, PrincipalId, TenantId},
         policy::AllowedCommand,
         tool_binding::ToolBindingIdentity,
     };
-    use crate::principal::{Principal, PrincipalKind};
-    use crate::scope::Scope;
 
     /// Creates a scope for a test using the same trusted constructors as the
     /// authentication boundary.
@@ -161,7 +161,6 @@ pub mod test_support {
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
         scope_for_principal(tenant_id, PrincipalKind::TenantOwner)
     }
-
 
     /// Mints an Allow capability for adapter integration tests only.
     ///
