@@ -695,7 +695,7 @@ impl AllowedCommand {
     }
 
     /// Mints a capability after policy has approved the exact command context.
-    /// Kept private so the Authorizer remains the sole minting boundary.
+    /// Crate-private for the Authorizer; test-support exposes a fixture only under its test feature.
     pub(crate) fn mint(
         object_id: ObjectId,
         invocation_id: InvocationId,
