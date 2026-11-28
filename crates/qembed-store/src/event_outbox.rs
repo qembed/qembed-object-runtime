@@ -153,7 +153,11 @@ mod tests {
             Some("validating")
         );
         assert!(object.contains_key("object_id"));
-        assert!(!contains_sensitive_key(object));
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>(),
+            ["object_id", "state", "type"].into_iter().collect()
+        );
+        assert!(!contains_sensitive_key(&json));
     }
 
     #[test]
@@ -190,10 +194,30 @@ mod tests {
         assert!(!contains_sensitive_key(object));
     }
 
-    fn contains_sensitive_key(object: &serde_json::Map<String, serde_json::Value>) -> bool {
-        ["secret", "token", "raw_payload", "arguments", "credentials"]
-            .iter()
-            .any(|key| object.contains_key(*key))
+    fn contains_sensitive_key(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => object.iter().any(|(key, value)| {
+                let key = key.to_ascii_lowercase();
+                [
+                    "secret",
+                    "token",
+                    "raw_payload",
+                    "arguments",
+                    "credentials",
+                    "authorization",
+                    "api_key",
+                    "password",
+                    "input",
+                    "plaintext",
+                    "ciphertext",
+                ]
+                .iter()
+                .any(|sensitive| key.contains(sensitive))
+                    || contains_sensitive_key(value)
+            }),
+            serde_json::Value::Array(values) => values.iter().any(contains_sensitive_key),
+            _ => false,
+        }
     }
 
     #[test]
