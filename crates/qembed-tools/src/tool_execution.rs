@@ -633,7 +633,11 @@ mod tests {
                 .expect("mock response lock")
                 .pop_front()
             {
-                Some(MockResponse::Timeout) => Err(std::io::Error::other("upstream timeout")),
+                Some(MockResponse::Timeout) => {
+                    // The upstream may finish the side effect after our local timeout.
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    Ok(UpstreamToolOutcome::Succeeded { output: None })
+                },
                 Some(MockResponse::Succeeded) => Ok(UpstreamToolOutcome::Succeeded {
                     output: Some(serde_json::json!({"accepted": true})),
                 }),
@@ -683,7 +687,7 @@ mod tests {
             ToolRiskLevel::R0,
             serde_json::json!({"type":"object"}),
             serde_json::json!({"type":"object"}),
-            1_000,
+            10,
             idempotent,
         )
         .expect("ToolVersion is valid");
