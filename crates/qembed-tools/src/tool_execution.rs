@@ -843,25 +843,13 @@ mod tests {
         assert_eq!(fixture.upstream.received_keys().len(), 1);
         assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
 
-        let second_attempt = execute_tool_command(
-            &fixture.store,
-            &MockBindingStore,
-            &fixture.payload_store,
-            &TestKeys,
-            &fixture.upstream,
-            &fixture.scope,
-            fixture.execution_id,
-            fixture.command,
-            &fixture.tool_version,
-            "worker-b",
-            10,
-            1,
-            60,
-        )
-        .await
-        .expect("an already claimed execution is not claimable again");
+        let second_claim = fixture
+            .store
+            .claim_tool_execution(&fixture.scope, fixture.execution_id, "worker-b", 10)
+            .await
+            .expect("an already claimed execution remains unavailable");
 
-        assert_eq!(second_attempt, ToolExecutionResult::Stale);
+        assert!(second_claim.is_none());
         assert_eq!(fixture.upstream.received_keys().len(), 1);
         assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
     }
