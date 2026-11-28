@@ -838,6 +838,7 @@ async fn postgres_reconciliation_rejects_mismatched_invocation_provenance() {
         unknown.object_id(),
         forged_invocation_id,
         unknown.command_id(),
+        *unknown.arguments_hash(),
         ToolExecutionCheckpoint::new(
             ToolExecutionStatus::Unknown,
             unknown.version(),
