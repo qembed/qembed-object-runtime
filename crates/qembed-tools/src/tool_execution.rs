@@ -20,9 +20,7 @@ use qembed_domain::{
 use serde_json::Value;
 
 use crate::{
-    binding_validation::{
-        BindingValidationError, validate_allowed_command_binding,
-    },
+    binding_validation::{BindingValidationError, validate_allowed_command_binding},
     command_payload_encryption::{
         CommandPayloadWorkflowError, DataKeyProvider, PayloadCryptoError,
         load_authorized_command_payload,
@@ -148,18 +146,39 @@ where
             Self::Store(error) => write!(formatter, "ToolExecution store failed: {error}"),
             Self::Binding(error) => write!(formatter, "Tool binding validation failed: {error}"),
             Self::PayloadStore(error) => write!(formatter, "command payload store failed: {error}"),
-            Self::PayloadCrypto(error) => write!(formatter, "command payload verification failed: {error}"),
+            Self::PayloadCrypto(error) => {
+                write!(formatter, "command payload verification failed: {error}")
+            }
             Self::NotFound => formatter.write_str("ToolExecution was not found"),
-            Self::NotAuthorized(status) => write!(formatter, "ToolExecution is not Authorized: {status:?}"),
-            Self::PayloadMissing => formatter.write_str("encrypted command payload is missing or expired"),
-            Self::InvalidIdentity => formatter.write_str("AllowedCommand does not identify this ToolExecution"),
-            Self::ToolVersionMismatch => formatter.write_str("ToolVersion does not match the authorized binding"),
-            Self::InvalidLeaseOwner => formatter.write_str("tool worker lease owner must be non-empty"),
-            Self::InvalidLeaseDuration => formatter.write_str("tool worker lease must exceed the upstream timeout"),
-            Self::InvalidAttemptCount => formatter.write_str("maximum attempt count must be positive"),
+            Self::NotAuthorized(status) => {
+                write!(formatter, "ToolExecution is not Authorized: {status:?}")
+            }
+            Self::PayloadMissing => {
+                formatter.write_str("encrypted command payload is missing or expired")
+            }
+            Self::InvalidIdentity => {
+                formatter.write_str("AllowedCommand does not identify this ToolExecution")
+            }
+            Self::ToolVersionMismatch => {
+                formatter.write_str("ToolVersion does not match the authorized binding")
+            }
+            Self::InvalidLeaseOwner => {
+                formatter.write_str("tool worker lease owner must be non-empty")
+            }
+            Self::InvalidLeaseDuration => {
+                formatter.write_str("tool worker lease must exceed the upstream timeout")
+            }
+            Self::InvalidAttemptCount => {
+                formatter.write_str("maximum attempt count must be positive")
+            }
             Self::InvalidOutputTtl => formatter.write_str("output retention TTL must be positive"),
-            Self::InvalidArguments => formatter.write_str("authorized command arguments are not valid JSON"),
-            Self::Domain(error) => write!(formatter, "ToolExecution state transition failed: {error:?}"),
+            Self::InvalidArguments => {
+                formatter.write_str("authorized command arguments are not valid JSON")
+            }
+            Self::Domain(error) => write!(
+                formatter,
+                "ToolExecution state transition failed: {error:?}"
+            ),
         }
     }
 }
@@ -185,10 +204,7 @@ pub async fn execute_tool_command<S, B, P, K, U>(
     lease_seconds: u32,
     max_attempts: u32,
     output_ttl_seconds: u32,
-) -> Result<
-    ToolExecutionResult,
-    ToolExecutionWorkflowError<S::Error, B::Error, P::Error>,
->
+) -> Result<ToolExecutionResult, ToolExecutionWorkflowError<S::Error, B::Error, P::Error>>
 where
     S: ToolExecutionLeaseStore,
     B: qembed_domain::ports::ToolBindingStore,
@@ -219,9 +235,7 @@ where
         .tool_binding()
         .ok_or(ToolExecutionWorkflowError::InvalidIdentity)?;
 
-    if binding.tool_id() != tool_version.tool_id()
-        || binding.tool_version_id() != tool_version.id()
-    {
+    if binding.tool_id() != tool_version.tool_id() || binding.tool_version_id() != tool_version.id() {
         return Err(ToolExecutionWorkflowError::ToolVersionMismatch);
     }
 
@@ -239,7 +253,9 @@ where
         return Err(ToolExecutionWorkflowError::InvalidIdentity);
     }
     if persisted.status() != ToolExecutionStatus::Authorized {
-        return Err(ToolExecutionWorkflowError::NotAuthorized(persisted.status()));
+        return Err(ToolExecutionWorkflowError::NotAuthorized(
+            persisted.status(),
+        ));
     }
 
     // Decrypt and verify the immutable Allow digest before acquiring a lease or
@@ -374,22 +390,15 @@ mod tests {
     };
 
     use qembed_domain::{
-        command_payload::{CommandPayloadStore, EncryptedCommandPayload},
         command_id::derive_command_id,
-        ids::{
-            CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId, ToolId,
-            ToolVersionId,
-        },
+        command_payload::{CommandPayloadStore, EncryptedCommandPayload},
+        ids::{CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId, ToolId, ToolVersionId},
         ports::ToolBindingStore,
         scope::Scope,
         test_support::{allowed_tool_command_for_test, scope_for_tenant},
         tool_binding::ToolBindingIdentity,
-        tool_execution::{
-            ToolExecution, ToolExecutionFencingToken, ToolExecutionStatus,
-        },
-        tool_execution_lease::{
-            ToolExecutionCompletion, ToolExecutionLeaseStore,
-        },
+        tool_execution::{ToolExecution, ToolExecutionFencingToken, ToolExecutionStatus},
+        tool_execution_lease::{ToolExecutionCompletion, ToolExecutionLeaseStore},
         tool_version::{ToolRiskLevel, ToolVersion},
     };
     use sha2::{Digest, Sha256};
@@ -406,7 +415,11 @@ mod tests {
 
     impl DataKeyProvider for TestKeys {
         fn generate_and_wrap(&self) -> Result<(String, DataKey, Vec<u8>), KeyProviderError> {
-            Ok(("test-kek".to_owned(), DataKey::new([7_u8; 32]), vec![3_u8; 32]))
+            Ok((
+                "test-kek".to_owned(),
+                DataKey::new([7_u8; 32]),
+                vec![3_u8; 32],
+            ))
         }
 
         fn unwrap(&self, key_id: &str, wrapped_key: &[u8]) -> Result<DataKey, KeyProviderError> {
@@ -457,7 +470,9 @@ mod tests {
             _lease_seconds: u32,
         ) -> Result<Option<ToolExecution>, Self::Error> {
             let mut execution = self.execution.lock().expect("mock store lock");
-            if execution.id() != execution_id || execution.status() != ToolExecutionStatus::Authorized {
+            if execution.id() != execution_id
+                || execution.status() != ToolExecutionStatus::Authorized
+            {
                 return Ok(None);
             }
             if execution.claim(owner).is_err() {
@@ -589,7 +604,10 @@ mod tests {
         }
 
         fn received_keys(&self) -> Vec<Option<String>> {
-            self.received_keys.lock().expect("mock upstream lock").clone()
+            self.received_keys
+                .lock()
+                .expect("mock upstream lock")
+                .clone()
         }
     }
 
@@ -609,7 +627,12 @@ mod tests {
                 .expect("mock upstream lock")
                 .push(request.idempotency_key().map(str::to_owned));
 
-            match self.responses.lock().expect("mock response lock").pop_front() {
+            match self
+                .responses
+                .lock()
+                .expect("mock response lock")
+                .pop_front()
+            {
                 Some(MockResponse::Timeout) => Err(std::io::Error::other("upstream timeout")),
                 Some(MockResponse::Succeeded) => Ok(UpstreamToolOutcome::Succeeded {
                     output: Some(serde_json::json!({"accepted": true})),
@@ -672,14 +695,9 @@ mod tests {
             command_id,
             arguments_hash,
         );
-        let payload = encrypt_command_payload(
-            &TestKeys,
-            tenant_id,
-            command_id,
-            plaintext,
-            arguments_hash,
-        )
-        .expect("test command payload encrypts");
+        let payload =
+            encrypt_command_payload(&TestKeys, tenant_id, command_id, plaintext, arguments_hash)
+                .expect("test command payload encrypts");
 
         Fixture {
             scope,
@@ -697,10 +715,7 @@ mod tests {
 
     #[tokio::test]
     async fn idempotent_retry_reuses_the_same_upstream_key() {
-        let fixture = fixture(
-            true,
-            &[MockResponse::Timeout, MockResponse::Succeeded],
-        );
+        let fixture = fixture(true, &[MockResponse::Timeout, MockResponse::Succeeded]);
         let expected_key = upstream_idempotency_key(fixture.store.current().command_id());
 
         let result = execute_tool_command(
@@ -726,15 +741,15 @@ mod tests {
             fixture.upstream.received_keys(),
             vec![Some(expected_key.clone()), Some(expected_key)]
         );
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Succeeded);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Succeeded
+        );
     }
 
     #[tokio::test]
     async fn timeout_is_ambiguous_and_non_idempotent_action_is_never_retried() {
-        let fixture = fixture(
-            false,
-            &[MockResponse::Timeout, MockResponse::Succeeded],
-        );
+        let fixture = fixture(false, &[MockResponse::Timeout, MockResponse::Succeeded]);
         let expected_key = upstream_idempotency_key(fixture.store.current().command_id());
 
         let result = execute_tool_command(
@@ -763,7 +778,10 @@ mod tests {
             }
         );
         assert_eq!(fixture.upstream.received_keys(), vec![Some(expected_key)]);
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
     }
 
     #[tokio::test]
@@ -789,7 +807,10 @@ mod tests {
         .expect("definitive provider failure is persisted");
 
         assert!(matches!(result, ToolExecutionResult::Completed(_)));
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Failed);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Failed
+        );
         assert_eq!(fixture.upstream.received_keys().len(), 1);
     }
 
