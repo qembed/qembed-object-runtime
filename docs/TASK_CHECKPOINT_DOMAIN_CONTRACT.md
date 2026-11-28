@@ -1,7 +1,7 @@
 # Task and Checkpoint domain contract (RUST-093)
 
-**Status:** approved project clarification and domain contract  
-**Decision date:** 2026-11-29  
+**Status:** approved project clarification and domain contract
+**Decision date:** 2026-11-29
 **Origin:** explicitly approved by the project owner in the RUST-093 architecture discussion. This is a new project decision; it is not reconstructed from or attributed to the unavailable M0 v2.2 specification.
 
 ## Aggregate relationship
@@ -50,4 +50,3 @@ RUST-093 implements only in-memory domain contracts. Tenant-scoped persistence, 
 ## Verification
 
 The domain tests cover the full Task transition matrix, multiple distinct child Invocations, progress continuing across Invocation boundaries, duplicate/skipped step and sequence rejection, mismatched Task/unattached Invocation rejection, terminal-state behavior, and Task/Checkpoint serialization round-trips.
-
