@@ -9,8 +9,7 @@
 use std::convert::Infallible;
 
 use qembed_domain::tool_execution_reconciliation::{
-    ToolExecutionReconciler, ToolExecutionReconciliationOutcome,
-    ToolExecutionReconciliationRequest,
+    ToolExecutionReconciler, ToolExecutionReconciliationOutcome, ToolExecutionReconciliationRequest,
 };
 
 /// Safe placeholder used when no concrete upstream provider adapter is configured.
