@@ -448,12 +448,16 @@ mod tests {
     #[derive(Clone)]
     struct MockStore {
         execution: Arc<Mutex<ToolExecution>>,
+        fail_heartbeat: bool,
+        fail_completion: bool,
     }
 
     impl MockStore {
         fn new(execution: ToolExecution) -> Self {
             Self {
                 execution: Arc::new(Mutex::new(execution)),
+                fail_heartbeat: false,
+                fail_completion: false,
             }
         }
 
@@ -502,6 +506,9 @@ mod tests {
             expected_fencing_token: ToolExecutionFencingToken,
             _lease_seconds: u32,
         ) -> Result<bool, Self::Error> {
+            if self.fail_heartbeat {
+                return Ok(false);
+            }
             let execution = self.execution.lock().expect("mock store lock");
             Ok(execution.id() == execution_id
                 && execution.status() == ToolExecutionStatus::Executing
@@ -525,6 +532,11 @@ mod tests {
             _scope: &Scope,
             completion: ToolExecutionCompletion,
         ) -> Result<bool, Self::Error> {
+            if self.fail_completion {
+                return Err(std::io::Error::other(
+                    "injected completion persistence failure",
+                ));
+            }
             let mut execution = self.execution.lock().expect("mock store lock");
             if execution.id() != completion.execution_id
                 || execution.version() != completion.expected_version
@@ -557,6 +569,7 @@ mod tests {
     struct MockPayloadStore {
         command_id: CommandId,
         payload: EncryptedCommandPayload,
+        fail_load: bool,
     }
 
     impl CommandPayloadStore for MockPayloadStore {
@@ -587,6 +600,9 @@ mod tests {
             command_id: CommandId,
             expected_arguments_hash: [u8; 32],
         ) -> Result<Option<EncryptedCommandPayload>, Self::Error> {
+            if self.fail_load {
+                return Err(std::io::Error::other("injected payload read failure"));
+            }
             Ok((command_id == self.command_id
                 && self.payload.arguments_hash() == &expected_arguments_hash)
                 .then(|| self.payload.clone()))
@@ -741,9 +757,114 @@ mod tests {
             payload_store: MockPayloadStore {
                 command_id,
                 payload,
+                fail_load: false,
             },
             upstream: MockUpstream::new(tool_id, tool_version_id, true, responses.iter().copied()),
         }
+    }
+
+    #[tokio::test]
+    async fn payload_read_failure_happens_before_claim_and_external_call() {
+        let mut fixture = fixture(false, &[MockResponse::Succeeded]);
+        fixture.payload_store.fail_load = true;
+
+        let result = execute_tool_command(
+            &fixture.store,
+            &MockBindingStore,
+            &fixture.payload_store,
+            &TestKeys,
+            &fixture.upstream,
+            &fixture.scope,
+            fixture.execution_id,
+            fixture.command,
+            &fixture.tool_version,
+            "worker-a",
+            10,
+            1,
+            60,
+        )
+        .await;
+
+        assert!(result.is_err(), "payload failure must be surfaced");
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Authorized
+        );
+        assert!(fixture.upstream.received_keys().is_empty());
+    }
+
+    #[tokio::test]
+    async fn lost_lease_before_network_call_prevents_external_execution() {
+        let mut fixture = fixture(false, &[MockResponse::Succeeded]);
+        fixture.store.fail_heartbeat = true;
+
+        let result = execute_tool_command(
+            &fixture.store,
+            &MockBindingStore,
+            &fixture.payload_store,
+            &TestKeys,
+            &fixture.upstream,
+            &fixture.scope,
+            fixture.execution_id,
+            fixture.command,
+            &fixture.tool_version,
+            "worker-a",
+            10,
+            1,
+            60,
+        )
+        .await
+        .expect("lease loss is a normal stale result");
+
+        assert_eq!(result, ToolExecutionResult::Stale);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
+        assert!(fixture.upstream.received_keys().is_empty());
+    }
+
+    #[tokio::test]
+    async fn persistence_failure_after_provider_success_never_replays_the_command() {
+        let mut fixture = fixture(false, &[MockResponse::Succeeded]);
+        fixture.store.fail_completion = true;
+
+        let result = execute_tool_command(
+            &fixture.store,
+            &MockBindingStore,
+            &fixture.payload_store,
+            &TestKeys,
+            &fixture.upstream,
+            &fixture.scope,
+            fixture.execution_id,
+            fixture.command,
+            &fixture.tool_version,
+            "worker-a",
+            10,
+            1,
+            60,
+        )
+        .await;
+
+        assert!(result.is_err(), "the failed durable write must be visible");
+        assert_eq!(fixture.upstream.received_keys().len(), 1);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
+
+        let second_claim = fixture
+            .store
+            .claim_tool_execution(&fixture.scope, fixture.execution_id, "worker-b", 10)
+            .await
+            .expect("an already claimed execution remains unavailable");
+
+        assert!(second_claim.is_none());
+        assert_eq!(fixture.upstream.received_keys().len(), 1);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
     }
 
     #[tokio::test]
