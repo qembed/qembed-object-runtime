@@ -276,7 +276,7 @@ where
     };
 
     let command_id = allowed.command_id();
-    let stable_key = format!("qembed-command:{command_id}");
+    let stable_key = upstream_idempotency_key(command_id);
     let upstream_supports_keys = upstream.supports_idempotency_keys();
     let attempts_allowed = if tool_version.idempotent() && upstream_supports_keys {
         max_attempts
@@ -323,14 +323,16 @@ where
             } else {
                 ToolExecutionOutcome::Failed
             };
+            let expected_version = claimed.version();
+            let expected_fencing_token = claimed.fencing_token();
             claimed
-                .complete(worker, claimed.fencing_token(), outcome)
+                .complete(worker, expected_fencing_token, outcome)
                 .map_err(ToolExecutionWorkflowError::Domain)?;
             let completion = ToolExecutionCompletion {
                 execution_id,
                 owner: worker.to_owned(),
-                expected_version: claimed.version() - 1,
-                expected_fencing_token: claimed.fencing_token(),
+                expected_version,
+                expected_fencing_token,
                 next: claimed.clone(),
                 output_ttl_seconds: output.as_ref().map(|_| output_ttl_seconds),
                 output,
