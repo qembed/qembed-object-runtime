@@ -368,12 +368,403 @@ pub fn upstream_idempotency_key(command_id: CommandId) -> String {
 
 #[cfg(test)]
 mod tests {
-    use qembed_domain::ids::CommandId;
+    use std::{
+        collections::VecDeque,
+        sync::{Arc, Mutex},
+    };
 
-    use super::upstream_idempotency_key;
+    use qembed_domain::{
+        command_payload::{CommandPayloadStore, EncryptedCommandPayload},
+        command_id::derive_command_id,
+        ids::{
+            CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId, ToolId,
+            ToolVersionId,
+        },
+        ports::ToolBindingStore,
+        scope::Scope,
+        test_support::{allowed_tool_command_for_test, scope_for_tenant},
+        tool_binding::ToolBindingIdentity,
+        tool_execution::{
+            ToolExecution, ToolExecutionFencingToken, ToolExecutionStatus,
+        },
+        tool_execution_lease::{
+            ToolExecutionCompletion, ToolExecutionLeaseStore,
+        },
+        tool_version::{ToolRiskLevel, ToolVersion},
+    };
+    use ring::rand::{SecureRandom, SystemRandom};
+    use sha2::{Digest, Sha256};
+
+    use super::{
+        ToolExecutionResult, ToolUpstream, UpstreamToolOutcome, UpstreamToolRequest,
+        execute_tool_command, upstream_idempotency_key,
+    };
+    use crate::command_payload_encryption::{
+        DataKey, DataKeyProvider, KeyProviderError, encrypt_command_payload,
+    };
+
+    struct TestKeys;
+
+    impl DataKeyProvider for TestKeys {
+        fn generate_and_wrap(&self) -> Result<(String, DataKey, Vec<u8>), KeyProviderError> {
+            let mut key = [0_u8; 32];
+            SystemRandom::new().fill(&mut key).map_err(|_| KeyProviderError)?;
+            Ok(("test-kek".to_owned(), DataKey::new(key), vec![3_u8; 32]))
+        }
+
+        fn unwrap(&self, key_id: &str, wrapped_key: &[u8]) -> Result<DataKey, KeyProviderError> {
+            if key_id != "test-kek" || wrapped_key != [3_u8; 32] {
+                return Err(KeyProviderError);
+            }
+            Ok(DataKey::new([7_u8; 32]))
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockStore {
+        execution: Arc<Mutex<ToolExecution>>,
+    }
+
+    impl MockStore {
+        fn new(execution: ToolExecution) -> Self {
+            Self {
+                execution: Arc::new(Mutex::new(execution)),
+            }
+        }
+
+        fn current(&self) -> ToolExecution {
+            self.execution.lock().expect("mock store lock").clone()
+        }
+    }
+
+    impl ToolExecutionLeaseStore for MockStore {
+        type Error = std::io::Error;
+
+        async fn load_tool_execution(
+            &self,
+            _scope: &Scope,
+            execution_id: ToolExecutionId,
+        ) -> Result<Option<ToolExecution>, Self::Error> {
+            let execution = self.execution.lock().expect("mock store lock");
+            Ok((execution.id() == execution_id).then(|| execution.clone()))
+        }
+
+        async fn claim_tool_execution(
+            &self,
+            _scope: &Scope,
+            execution_id: ToolExecutionId,
+            owner: &str,
+            _lease_seconds: u32,
+        ) -> Result<Option<ToolExecution>, Self::Error> {
+            let mut execution = self.execution.lock().expect("mock store lock");
+            if execution.id() != execution_id || execution.status() != ToolExecutionStatus::Authorized {
+                return Ok(None);
+            }
+            if execution.claim(owner).is_err() {
+                return Ok(None);
+            }
+            Ok(Some(execution.clone()))
+        }
+
+        async fn heartbeat_tool_execution(
+            &self,
+            _scope: &Scope,
+            execution_id: ToolExecutionId,
+            owner: &str,
+            expected_version: u64,
+            expected_fencing_token: ToolExecutionFencingToken,
+            _lease_seconds: u32,
+        ) -> Result<bool, Self::Error> {
+            let execution = self.execution.lock().expect("mock store lock");
+            Ok(execution.id() == execution_id
+                && execution.status() == ToolExecutionStatus::Executing
+                && execution.lease_owner() == Some(owner)
+                && execution.version() == expected_version
+                && execution.fencing_token() == expected_fencing_token)
+        }
+
+        async fn mark_tool_execution_unknown(
+            &self,
+            _scope: &Scope,
+            _execution_id: ToolExecutionId,
+            _expected_version: u64,
+            _expected_fencing_token: ToolExecutionFencingToken,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        async fn complete_tool_execution(
+            &self,
+            _scope: &Scope,
+            completion: ToolExecutionCompletion,
+        ) -> Result<bool, Self::Error> {
+            let mut execution = self.execution.lock().expect("mock store lock");
+            if execution.id() != completion.execution_id
+                || execution.version() != completion.expected_version
+                || execution.fencing_token() != completion.expected_fencing_token
+                || execution.lease_owner() != Some(completion.owner.as_str())
+                || execution.status() != ToolExecutionStatus::Executing
+            {
+                return Ok(false);
+            }
+            *execution = completion.next;
+            Ok(true)
+        }
+    }
+
+    struct MockBindingStore;
+
+    impl ToolBindingStore for MockBindingStore {
+        type Error = std::io::Error;
+
+        async fn is_tool_binding_current(
+            &self,
+            _scope: &Scope,
+            _object_id: ObjectId,
+            _binding: ToolBindingIdentity,
+        ) -> Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    struct MockPayloadStore {
+        command_id: CommandId,
+        payload: EncryptedCommandPayload,
+    }
+
+    impl CommandPayloadStore for MockPayloadStore {
+        type Error = std::io::Error;
+
+        async fn store_command_payload(
+            &self,
+            _scope: &Scope,
+            _command_id: CommandId,
+            _payload: EncryptedCommandPayload,
+            _ttl_seconds: u32,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        async fn replace_command_payload(
+            &self,
+            _scope: &Scope,
+            _command_id: CommandId,
+            _payload: EncryptedCommandPayload,
+        ) -> Result<bool, Self::Error> {
+            Ok(false)
+        }
+
+        async fn load_command_payload(
+            &self,
+            _scope: &Scope,
+            command_id: CommandId,
+            expected_arguments_hash: [u8; 32],
+        ) -> Result<Option<EncryptedCommandPayload>, Self::Error> {
+            Ok((command_id == self.command_id
+                && self.payload.arguments_hash() == &expected_arguments_hash)
+                .then(|| self.payload.clone()))
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum MockResponse {
+        Timeout,
+        Succeeded,
+        Failed,
+    }
+
+    struct MockUpstream {
+        supports_keys: bool,
+        responses: Mutex<VecDeque<MockResponse>>,
+        received_keys: Mutex<Vec<Option<String>>>,
+    }
+
+    impl MockUpstream {
+        fn new(supports_keys: bool, responses: impl IntoIterator<Item = MockResponse>) -> Self {
+            Self {
+                supports_keys,
+                responses: Mutex::new(responses.into_iter().collect()),
+                received_keys: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn received_keys(&self) -> Vec<Option<String>> {
+            self.received_keys.lock().expect("mock upstream lock").clone()
+        }
+    }
+
+    impl ToolUpstream for MockUpstream {
+        type Error = std::io::Error;
+
+        fn supports_idempotency_keys(&self) -> bool {
+            self.supports_keys
+        }
+
+        async fn execute(
+            &self,
+            request: UpstreamToolRequest,
+        ) -> Result<UpstreamToolOutcome, Self::Error> {
+            self.received_keys
+                .lock()
+                .expect("mock upstream lock")
+                .push(request.idempotency_key().map(str::to_owned));
+
+            match self.responses.lock().expect("mock response lock").pop_front() {
+                Some(MockResponse::Timeout) => Err(std::io::Error::other("upstream timeout")),
+                Some(MockResponse::Succeeded) => Ok(UpstreamToolOutcome::Succeeded {
+                    output: Some(serde_json::json!({"accepted": true})),
+                }),
+                Some(MockResponse::Failed) => Ok(UpstreamToolOutcome::Failed),
+                None => Err(std::io::Error::other("no mock response configured")),
+            }
+        }
+    }
+
+    struct Fixture {
+        scope: Scope,
+        execution_id: ToolExecutionId,
+        command: qembed_domain::policy::AllowedCommand,
+        tool_version: ToolVersion,
+        store: MockStore,
+        payload_store: MockPayloadStore,
+        upstream: MockUpstream,
+    }
+
+    fn fixture(idempotent: bool, responses: &[MockResponse]) -> Fixture {
+        let tenant_id = TenantId::new();
+        let scope = scope_for_tenant(tenant_id);
+        let object_id = ObjectId::new();
+        let invocation_id = InvocationId::new();
+        let step_index = 4;
+        let plaintext = br#"{"recipient":"example","amount":12}"#;
+        let action_hash: [u8; 32] = Sha256::digest(plaintext).into();
+        let command_id = derive_command_id(invocation_id, step_index, &action_hash);
+        let execution_id = ToolExecutionId::new();
+        let tool_id = ToolId::new();
+        let tool_version_id = ToolVersionId::new();
+        let binding = ToolBindingIdentity::new(tool_id, tool_version_id, 1)
+            .expect("binding identity is valid");
+        let command = allowed_tool_command_for_test(
+            object_id,
+            invocation_id,
+            step_index,
+            action_hash,
+            binding,
+        );
+        let tool_version = ToolVersion::new(
+            tool_version_id,
+            tool_id,
+            "1",
+            ToolRiskLevel::R0,
+            serde_json::json!({"type":"object"}),
+            serde_json::json!({"type":"object"}),
+            1_000,
+            idempotent,
+        )
+        .expect("ToolVersion is valid");
+        let execution = ToolExecution::new(
+            execution_id,
+            tenant_id,
+            object_id,
+            invocation_id,
+            command_id,
+        );
+        let payload = encrypt_command_payload(
+            &TestKeys,
+            tenant_id,
+            command_id,
+            plaintext,
+            action_hash,
+        )
+        .expect("test command payload encrypts");
+
+        Fixture {
+            scope,
+            execution_id,
+            command,
+            tool_version,
+            store: MockStore::new(execution),
+            payload_store: MockPayloadStore {
+                command_id,
+                payload,
+            },
+            upstream: MockUpstream::new(true, responses.iter().copied()),
+        }
+    }
+
+    #[tokio::test]
+    async fn idempotent_retry_reuses_the_same_upstream_key() {
+        let fixture = fixture(
+            true,
+            &[MockResponse::Timeout, MockResponse::Succeeded],
+        );
+        let expected_key = upstream_idempotency_key(fixture.store.current().command_id());
+
+        let result = execute_tool_command(
+            &fixture.store,
+            &MockBindingStore,
+            &fixture.payload_store,
+            &TestKeys,
+            &fixture.upstream,
+            &fixture.scope,
+            fixture.execution_id,
+            fixture.command,
+            &fixture.tool_version,
+            "worker-a",
+            10,
+            3,
+            60,
+        )
+        .await
+        .expect("idempotent execution completes");
+
+        assert!(matches!(result, ToolExecutionResult::Completed(_)));
+        assert_eq!(
+            fixture.upstream.received_keys(),
+            vec![Some(expected_key.clone()), Some(expected_key)]
+        );
+        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Succeeded);
+    }
+
+    #[tokio::test]
+    async fn timeout_is_ambiguous_and_non_idempotent_action_is_never_retried() {
+        let fixture = fixture(
+            false,
+            &[MockResponse::Timeout, MockResponse::Succeeded],
+        );
+        let expected_key = upstream_idempotency_key(fixture.store.current().command_id());
+
+        let result = execute_tool_command(
+            &fixture.store,
+            &MockBindingStore,
+            &fixture.payload_store,
+            &TestKeys,
+            &fixture.upstream,
+            &fixture.scope,
+            fixture.execution_id,
+            fixture.command,
+            &fixture.tool_version,
+            "worker-a",
+            10,
+            4,
+            60,
+        )
+        .await
+        .expect("ambiguous timeout is a workflow result, not a definitive failure");
+
+        assert_eq!(
+            result,
+            ToolExecutionResult::Ambiguous {
+                command_id: fixture.store.current().command_id(),
+                attempts: 1,
+            }
+        );
+        assert_eq!(fixture.upstream.received_keys(), vec![Some(expected_key)]);
+        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
+    }
 
     #[test]
-    fn upstream_idempotency_key_survives_reconstructing_command_id_after_restart() {
+    fn upstream_key_is_stable_after_reconstructing_persisted_command_id() {
         let original = CommandId::new();
         let persisted = original.to_string();
         let restored: CommandId = persisted.parse().expect("persisted CommandId parses");
