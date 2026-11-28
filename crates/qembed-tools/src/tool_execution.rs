@@ -410,7 +410,10 @@ mod tests {
         }
 
         fn unwrap(&self, key_id: &str, wrapped_key: &[u8]) -> Result<DataKey, KeyProviderError> {
-            if key_id != "test-kek" || wrapped_key != [3_u8; 32] {
+            if key_id != "test-kek"
+                || wrapped_key.len() != 32
+                || wrapped_key.iter().any(|byte| *byte != 3)
+            {
                 return Err(KeyProviderError);
             }
             Ok(DataKey::new([7_u8; 32]))
