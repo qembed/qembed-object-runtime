@@ -533,7 +533,9 @@ mod tests {
             completion: ToolExecutionCompletion,
         ) -> Result<bool, Self::Error> {
             if self.fail_completion {
-                return Err(std::io::Error::other("injected completion persistence failure"));
+                return Err(std::io::Error::other(
+                    "injected completion persistence failure",
+                ));
             }
             let mut execution = self.execution.lock().expect("mock store lock");
             if execution.id() != completion.execution_id
@@ -761,7 +763,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn payload_read_failure_happens_before_claim_and_external_call() {
         let mut fixture = fixture(false, &[MockResponse::Succeeded]);
@@ -785,7 +786,10 @@ mod tests {
         .await;
 
         assert!(result.is_err(), "payload failure must be surfaced");
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Authorized);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Authorized
+        );
         assert!(fixture.upstream.received_keys().is_empty());
     }
 
@@ -813,7 +817,10 @@ mod tests {
         .expect("lease loss is a normal stale result");
 
         assert_eq!(result, ToolExecutionResult::Stale);
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
         assert!(fixture.upstream.received_keys().is_empty());
     }
 
