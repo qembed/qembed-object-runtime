@@ -634,7 +634,9 @@ mod tests {
         let invocation_id = InvocationId::new();
         let step_index = 4;
         let plaintext = br#"{"recipient":"example","amount":12}"#;
-        let action_hash: [u8; 32] = Sha256::digest(plaintext).into();
+        let arguments_hash: [u8; 32] = Sha256::digest(plaintext).into();
+        // The whole-action digest and the arguments digest are distinct values.
+        let action_hash = [0x33_u8; 32];
         let command_id = derive_command_id(invocation_id, step_index, &action_hash);
         let execution_id = ToolExecutionId::new();
         let tool_id = ToolId::new();
@@ -665,14 +667,14 @@ mod tests {
             object_id,
             invocation_id,
             command_id,
-            action_hash,
+            arguments_hash,
         );
         let payload = encrypt_command_payload(
             &TestKeys,
             tenant_id,
             command_id,
             plaintext,
-            action_hash,
+            arguments_hash,
         )
         .expect("test command payload encrypts");
 
