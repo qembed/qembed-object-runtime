@@ -1191,7 +1191,6 @@ async fn command_payload_retention_privileges_are_narrow() {
     pool.close().await;
 }
 
-
 #[tokio::test]
 async fn loaded_tool_execution_preserves_arguments_hash_separately_from_action_hash() {
     let fixture = setup().await;
