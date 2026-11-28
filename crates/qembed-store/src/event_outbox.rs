@@ -191,7 +191,21 @@ mod tests {
             object.get("validator_version").and_then(|v| v.as_str()),
             Some("m0-r3-bounded-budget-v1")
         );
-        assert!(!contains_sensitive_key(object));
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>(),
+            [
+                "object_id",
+                "previous_version_id",
+                "snapshot_id",
+                "state",
+                "type",
+                "validator_version",
+                "version_id",
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert!(!contains_sensitive_key(&json));
     }
 
     fn contains_sensitive_key(value: &serde_json::Value) -> bool {
