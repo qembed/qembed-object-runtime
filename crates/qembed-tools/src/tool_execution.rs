@@ -249,7 +249,7 @@ where
         key_provider,
         scope,
         allowed.command_id(),
-        *allowed.action_hash(),
+        *persisted.arguments_hash(),
     )
     .await
     {
@@ -665,6 +665,7 @@ mod tests {
             object_id,
             invocation_id,
             command_id,
+            action_hash,
         );
         let payload = encrypt_command_payload(
             &TestKeys,
