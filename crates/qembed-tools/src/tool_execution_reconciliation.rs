@@ -134,6 +134,7 @@ mod tests {
                 ObjectId::new(),
                 InvocationId::new(),
                 CommandId::new(),
+                [0_u8; 32],
             );
             execution.claim("worker").expect("claim succeeds");
             execution
@@ -152,6 +153,7 @@ mod tests {
                 current.object_id(),
                 current.invocation_id(),
                 current.command_id(),
+                *current.arguments_hash(),
                 ToolExecutionCheckpoint::new(
                     ToolExecutionStatus::Unknown,
                     current.version(),

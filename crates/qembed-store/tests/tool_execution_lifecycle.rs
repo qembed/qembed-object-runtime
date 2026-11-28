@@ -778,6 +778,7 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
         unknown.object_id(),
         unknown.invocation_id(),
         unknown.command_id(),
+        *unknown.arguments_hash(),
         ToolExecutionCheckpoint::new(
             ToolExecutionStatus::Unknown,
             unknown.version(),
@@ -837,6 +838,7 @@ async fn postgres_reconciliation_rejects_mismatched_invocation_provenance() {
         unknown.object_id(),
         forged_invocation_id,
         unknown.command_id(),
+        *unknown.arguments_hash(),
         ToolExecutionCheckpoint::new(
             ToolExecutionStatus::Unknown,
             unknown.version(),
@@ -1189,4 +1191,22 @@ async fn command_payload_retention_privileges_are_narrow() {
     );
 
     pool.close().await;
+}
+
+#[tokio::test]
+async fn loaded_tool_execution_preserves_arguments_hash_separately_from_action_hash() {
+    let fixture = setup().await;
+    let store = PgToolExecutionStore::new(fixture.context.clone());
+
+    let execution = store
+        .load_tool_execution(&fixture.scope, fixture.execution_id)
+        .await
+        .expect("ToolExecution loads")
+        .expect("fixture execution exists");
+
+    // The fixture stores arguments_hash=[2; 32] and action_hash=[3; 32].
+    // The executor must verify ciphertext against the former, not the latter.
+    assert_eq!(execution.arguments_hash(), &[2_u8; 32]);
+
+    fixture.pool.close().await;
 }

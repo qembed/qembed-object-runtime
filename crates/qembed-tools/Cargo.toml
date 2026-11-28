@@ -9,6 +9,7 @@ lints.workspace = true
 [dependencies]
 hickory-resolver.workspace = true
 ring.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 qembed-domain = { path = "../qembed-domain" }
 tokio.workspace = true
@@ -18,4 +19,3 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 qembed-domain = { path = "../qembed-domain", features = ["test-support"] }
-serde_json.workspace = true
