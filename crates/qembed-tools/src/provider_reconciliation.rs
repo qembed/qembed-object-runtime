@@ -35,7 +35,7 @@ impl ToolExecutionReconciler for UnresolvedToolExecutionReconciler {
 #[cfg(test)]
 mod tests {
     use qembed_domain::{
-        ids::{CommandId, InvocationId, TenantId, ToolExecutionId},
+        ids::{CommandId, InvocationId, ToolExecutionId},
         tool_execution::ToolExecutionFencingToken,
         tool_execution_reconciliation::{
             ToolExecutionReconciler, ToolExecutionReconciliationOutcome,
