@@ -73,6 +73,21 @@ trap cleanup EXIT
 # The existing Rust SQLx integration suite still uses its isolated RT-050 verifier fixture.
 install_legacy_rt050_test_fixture
 
+# RUST-092: the focused gate is a separate required CI check. It exercises
+# every security boundary that must remain green before write-tools activation.
+if [[ "${1:-}" == "--tool-enablement-only" ]]; then
+  cargo nextest run -p qembed-domain -p qembed-tools --profile ci 2>&1 \
+    | tee "$evidence_dir/tool-enablement-domain-tools.log"
+  cargo nextest run -p qembed-store --test tool_execution_lifecycle --profile ci 2>&1 \
+    | tee "$evidence_dir/tool-enablement-postgres.log"
+  exit 0
+fi
+
+if [[ $# -gt 0 ]]; then
+  echo "Unknown test mode: $1" >&2
+  exit 2
+fi
+
 # Run the normal Rust/PostgreSQL workspace suite against the Rust-owned test
 # schema first. The QSA-003 canonical-schema test is deliberately isolated
 # because the SQL clean-install schema is not interchangeable with SQLx
