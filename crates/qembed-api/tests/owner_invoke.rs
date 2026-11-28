@@ -162,7 +162,7 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     let request = serde_json::json!({
         "caller_id": caller_id,
         "idempotency_key": "owner-invoke-key-1",
-        "input": { "question": "hello", "sequence": 1 }
+        "input": { "question": "RUST091_RAW_INPUT_SENTINEL_DO_NOT_EMIT", "sequence": 1 }
     });
     let first = test::call_service(
         &app,
@@ -173,6 +173,9 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     let first_json: serde_json::Value =
         serde_json::from_slice(&test::read_body(first).await).expect("accepted response JSON");
     assert_eq!(first_json["status"], "received");
+    let first_response_text = first_json.to_string();
+    assert!(!first_response_text.contains("RUST091_RAW_INPUT_SENTINEL_DO_NOT_EMIT"));
+    assert!(!first_response_text.contains(&token));
     let invocation_id = first_json["invocation_id"]
         .as_str()
         .expect("invocation_id")
@@ -205,6 +208,9 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
         serde_json::from_slice(&test::read_body(inspected).await).expect("inspection JSON");
     assert_eq!(inspected_json["invocation_id"], invocation_id);
     assert_eq!(inspected_json["status"], "queued");
+    let inspected_text = inspected_json.to_string();
+    assert!(!inspected_text.contains("RUST091_RAW_INPUT_SENTINEL_DO_NOT_EMIT"));
+    assert!(!inspected_text.contains(&token));
     let inspected_fields = inspected_json.as_object().expect("inspection object");
     assert_eq!(inspected_fields.len(), 5);
     for forbidden in [
@@ -288,6 +294,48 @@ async fn owner_invoke_pins_published_snapshot_and_replays_idempotently() {
     .await
     .expect("invocation side-effect counts should be queryable");
     assert_eq!(counts, (1, 1, 1, 1));
+
+    // The durable invocation event and its outbox projection carry routing
+    // metadata only. Raw request input and bearer credentials stay out of the
+    // event transport boundary.
+    let event_payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM events WHERE tenant_id=$1::uuid AND aggregate_id=$2::uuid AND event_type='invocation.received'",
+    )
+    .bind(tenant_id.to_string())
+    .bind(&invocation_id)
+    .fetch_one(&pool)
+    .await
+    .expect("invocation event payload should be queryable");
+    let outbox_payload: serde_json::Value = sqlx::query_scalar(
+        "SELECT payload FROM outbox_messages WHERE tenant_id=$1::uuid AND payload->>'invocation_id'=$2",
+    )
+    .bind(tenant_id.to_string())
+    .bind(&invocation_id)
+    .fetch_one(&pool)
+    .await
+    .expect("invocation outbox payload should be queryable");
+    let expected_event_fields = [
+        "caller_id",
+        "caller_kind",
+        "invocation_id",
+        "invocation_pool",
+        "knowledge_revision",
+        "object_id",
+        "snapshot_id",
+        "type",
+    ];
+    for payload in [&event_payload, &outbox_payload] {
+        let object = payload.as_object().expect("event payload is an object");
+        let mut actual_fields = object.keys().map(String::as_str).collect::<Vec<_>>();
+        actual_fields.sort_unstable();
+        assert_eq!(actual_fields, expected_event_fields);
+        let serialized = payload.to_string();
+        assert!(!serialized.contains("RUST091_RAW_INPUT_SENTINEL_DO_NOT_EMIT"));
+        assert!(!serialized.contains(&token));
+        assert!(!serialized.contains("idempotency_key"));
+        assert!(!serialized.contains("arguments"));
+        assert!(!serialized.contains("payload_ciphertext"));
+    }
 
     let retention: (i64, i64) = sqlx::query_as(
         "SELECT round(extract(epoch FROM (expires_at - created_at)))::bigint, (SELECT round(extract(epoch FROM (expires_at - created_at)))::bigint FROM interaction_messages WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid AND role='user') FROM invocation_idempotency WHERE tenant_id=$1::uuid AND object_id=$2::uuid AND invocation_id=$3::uuid",
