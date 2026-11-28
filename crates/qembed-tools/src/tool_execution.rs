@@ -848,7 +848,10 @@ mod tests {
 
         assert!(result.is_err(), "the failed durable write must be visible");
         assert_eq!(fixture.upstream.received_keys().len(), 1);
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
 
         let second_claim = fixture
             .store
@@ -858,7 +861,10 @@ mod tests {
 
         assert!(second_claim.is_none());
         assert_eq!(fixture.upstream.received_keys().len(), 1);
-        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
+        assert_eq!(
+            fixture.store.current().status(),
+            ToolExecutionStatus::Executing
+        );
     }
 
     #[tokio::test]
