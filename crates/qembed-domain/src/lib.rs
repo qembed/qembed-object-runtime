@@ -147,7 +147,11 @@ pub mod tool_version;
 /// enabled. Production builds must not enable that feature.
 #[cfg(feature = "test-support")]
 pub mod test_support {
-    use crate::ids::{PrincipalId, TenantId};
+    use crate::{
+        ids::{InvocationId, ObjectId, PrincipalId, TenantId},
+        policy::AllowedCommand,
+        tool_binding::ToolBindingIdentity,
+    };
     use crate::principal::{Principal, PrincipalKind};
     use crate::scope::Scope;
 
@@ -156,6 +160,28 @@ pub mod test_support {
     #[must_use]
     pub fn scope_for_tenant(tenant_id: TenantId) -> Scope {
         scope_for_principal(tenant_id, PrincipalKind::TenantOwner)
+    }
+
+
+    /// Mints an Allow capability for adapter integration tests only.
+    ///
+    /// Production builds do not expose this constructor because the
+    /// `test-support` feature is disabled outside test targets.
+    #[must_use]
+    pub fn allowed_tool_command_for_test(
+        object_id: ObjectId,
+        invocation_id: InvocationId,
+        step_index: u32,
+        action_hash: [u8; 32],
+        binding: ToolBindingIdentity,
+    ) -> AllowedCommand {
+        AllowedCommand::mint(
+            object_id,
+            invocation_id,
+            step_index,
+            action_hash,
+            Some(binding),
+        )
     }
 
     /// Creates a test Scope for a non-owner authenticated Principal.
