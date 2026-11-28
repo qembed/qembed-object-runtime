@@ -195,7 +195,10 @@ mod tests {
             Some("m0-r3-bounded-budget-v1")
         );
         assert_eq!(
-            object.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>(),
+            object
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
             [
                 "object_id",
                 "previous_version_id",
