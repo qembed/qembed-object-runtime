@@ -630,12 +630,12 @@ mod tests {
                 .expect("mock upstream lock")
                 .push(request.idempotency_key().map(str::to_owned));
 
-            match self
+            let response = self
                 .responses
                 .lock()
                 .expect("mock response lock")
-                .pop_front()
-            {
+                .pop_front();
+            match response {
                 Some(MockResponse::Timeout) => {
                     // The upstream may finish the side effect after our local timeout.
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
