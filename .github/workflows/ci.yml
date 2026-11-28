@@ -135,3 +135,26 @@ jobs:
           path: Cargo.lock
           if-no-files-found: error
           retention-days: 7
+
+  tool-enablement-gate:
+    name: Tool enablement gate (SSRF, capability, binding, lease, Unknown, reconciliation, payload)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.100.0
+        uses: dtolnay/rust-toolchain@1.100.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run mandatory tool-enablement suites
+        run: bash scripts/test-postgres.sh --tool-enablement-only
