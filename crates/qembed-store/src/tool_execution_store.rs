@@ -146,7 +146,7 @@ impl ToolExecutionLeaseStore for PgToolExecutionStore {
                            AND binding.enabled
                     )
                 RETURNING id::text, tenant_id::text, object_id::text, invocation_id::text,
-                          command_id::text, status, version, fencing_token, lease_owner",
+                          command_id::text, status, version, fencing_token, arguments_hash, lease_owner",
             )
             .bind(scope.tenant_id().to_string())
             .bind(execution_id.to_string())
