@@ -760,6 +760,33 @@ mod tests {
         assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Executing);
     }
 
+    #[tokio::test]
+    async fn definitive_provider_failure_is_persisted_as_failed() {
+        let fixture = fixture(false, &[MockResponse::Failed]);
+
+        let result = execute_tool_command(
+            &fixture.store,
+            &MockBindingStore,
+            &fixture.payload_store,
+            &TestKeys,
+            &fixture.upstream,
+            &fixture.scope,
+            fixture.execution_id,
+            fixture.command,
+            &fixture.tool_version,
+            "worker-a",
+            10,
+            3,
+            60,
+        )
+        .await
+        .expect("definitive provider failure is persisted");
+
+        assert!(matches!(result, ToolExecutionResult::Completed(_)));
+        assert_eq!(fixture.store.current().status(), ToolExecutionStatus::Failed);
+        assert_eq!(fixture.upstream.received_keys().len(), 1);
+    }
+
     #[test]
     fn upstream_key_is_stable_after_reconstructing_persisted_command_id() {
         let original = CommandId::new();
