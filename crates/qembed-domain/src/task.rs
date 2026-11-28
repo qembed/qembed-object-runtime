@@ -32,9 +32,16 @@ impl TaskStatus {
     pub const fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
-            (Self::Pending, Self::Running | Self::Failed | Self::Cancelled)
-                | (Self::Running, Self::Waiting | Self::Completed | Self::Failed | Self::Cancelled)
-                | (Self::Waiting, Self::Running | Self::Failed | Self::Cancelled)
+            (
+                Self::Pending,
+                Self::Running | Self::Failed | Self::Cancelled
+            ) | (
+                Self::Running,
+                Self::Waiting | Self::Completed | Self::Failed | Self::Cancelled
+            ) | (
+                Self::Waiting,
+                Self::Running | Self::Failed | Self::Cancelled
+            )
         )
     }
 
@@ -60,30 +67,51 @@ impl Task {
     #[must_use]
     pub const fn new(id: TaskId, tenant_id: TenantId) -> Self {
         Self {
-            id, tenant_id, status: TaskStatus::Pending, version: 0,
-            invocation_ids: Vec::new(), last_checkpoint_sequence: 0, last_step_index: None,
+            id,
+            tenant_id,
+            status: TaskStatus::Pending,
+            version: 0,
+            invocation_ids: Vec::new(),
+            last_checkpoint_sequence: 0,
+            last_step_index: None,
         }
     }
 
     #[must_use]
-    pub const fn id(&self) -> TaskId { self.id }
+    pub const fn id(&self) -> TaskId {
+        self.id
+    }
     #[must_use]
-    pub const fn tenant_id(&self) -> TenantId { self.tenant_id }
+    pub const fn tenant_id(&self) -> TenantId {
+        self.tenant_id
+    }
     #[must_use]
-    pub const fn status(&self) -> TaskStatus { self.status }
+    pub const fn status(&self) -> TaskStatus {
+        self.status
+    }
     #[must_use]
-    pub const fn version(&self) -> u64 { self.version }
+    pub const fn version(&self) -> u64 {
+        self.version
+    }
     #[must_use]
-    pub fn invocation_ids(&self) -> &[InvocationId] { &self.invocation_ids }
+    pub fn invocation_ids(&self) -> &[InvocationId] {
+        &self.invocation_ids
+    }
     #[must_use]
-    pub const fn last_checkpoint_sequence(&self) -> u64 { self.last_checkpoint_sequence }
+    pub const fn last_checkpoint_sequence(&self) -> u64 {
+        self.last_checkpoint_sequence
+    }
     #[must_use]
-    pub const fn last_step_index(&self) -> Option<u32> { self.last_step_index }
+    pub const fn last_step_index(&self) -> Option<u32> {
+        self.last_step_index
+    }
 
     /// Adds an Invocation child exactly once. Invocations retain independent
     /// lifecycle and lease/fencing boundaries.
     pub fn attach_invocation(&mut self, invocation_id: InvocationId) -> Result<(), TaskError> {
-        if self.status.is_terminal() { return Err(TaskError::TerminalTask); }
+        if self.status.is_terminal() {
+            return Err(TaskError::TerminalTask);
+        }
         if self.invocation_ids.contains(&invocation_id) {
             return Err(TaskError::InvocationAlreadyAttached);
         }
@@ -94,7 +122,10 @@ impl Task {
 
     pub fn transition_to(&mut self, next: TaskStatus) -> Result<(), TaskError> {
         if !self.status.can_transition_to(next) {
-            return Err(TaskError::InvalidTransition { from: self.status, to: next });
+            return Err(TaskError::InvalidTransition {
+                from: self.status,
+                to: next,
+            });
         }
         self.bump_version()?;
         self.status = next;
@@ -106,16 +137,23 @@ impl Task {
     /// Checkpoint sequence starts at 1; step index starts at 0. Both advance
     /// by exactly one. The Invocation must already be attached to this Task.
     pub fn record_checkpoint(&mut self, checkpoint: &Checkpoint) -> Result<(), TaskError> {
-        if self.status != TaskStatus::Running { return Err(TaskError::TaskNotRunning); }
-        if checkpoint.task_id != self.id { return Err(TaskError::CheckpointTaskMismatch); }
+        if self.status != TaskStatus::Running {
+            return Err(TaskError::TaskNotRunning);
+        }
+        if checkpoint.task_id != self.id {
+            return Err(TaskError::CheckpointTaskMismatch);
+        }
         if !self.invocation_ids.contains(&checkpoint.invocation_id) {
             return Err(TaskError::InvocationNotAttached);
         }
-        let expected_sequence = self.last_checkpoint_sequence.checked_add(1)
+        let expected_sequence = self
+            .last_checkpoint_sequence
+            .checked_add(1)
             .ok_or(TaskError::SequenceOverflow)?;
         if checkpoint.sequence != expected_sequence {
             return Err(TaskError::InvalidCheckpointSequence {
-                expected: expected_sequence, actual: checkpoint.sequence,
+                expected: expected_sequence,
+                actual: checkpoint.sequence,
             });
         }
         let expected_step = match self.last_step_index {
@@ -124,7 +162,8 @@ impl Task {
         };
         if checkpoint.step_index != expected_step {
             return Err(TaskError::InvalidStepIndex {
-                expected: expected_step, actual: checkpoint.step_index,
+                expected: expected_step,
+                actual: checkpoint.step_index,
             });
         }
         self.bump_version()?;
@@ -134,7 +173,10 @@ impl Task {
     }
 
     fn bump_version(&mut self) -> Result<(), TaskError> {
-        self.version = self.version.checked_add(1).ok_or(TaskError::VersionOverflow)?;
+        self.version = self
+            .version
+            .checked_add(1)
+            .ok_or(TaskError::VersionOverflow)?;
         Ok(())
     }
 }
@@ -152,19 +194,41 @@ pub struct Checkpoint {
 
 impl Checkpoint {
     #[must_use]
-    pub fn new(task_id: TaskId, invocation_id: InvocationId, sequence: u64, step_index: u32, state: Value) -> Self {
-        Self { task_id, invocation_id, sequence, step_index, state }
+    pub fn new(
+        task_id: TaskId,
+        invocation_id: InvocationId,
+        sequence: u64,
+        step_index: u32,
+        state: Value,
+    ) -> Self {
+        Self {
+            task_id,
+            invocation_id,
+            sequence,
+            step_index,
+            state,
+        }
     }
     #[must_use]
-    pub const fn task_id(&self) -> TaskId { self.task_id }
+    pub const fn task_id(&self) -> TaskId {
+        self.task_id
+    }
     #[must_use]
-    pub const fn invocation_id(&self) -> InvocationId { self.invocation_id }
+    pub const fn invocation_id(&self) -> InvocationId {
+        self.invocation_id
+    }
     #[must_use]
-    pub const fn sequence(&self) -> u64 { self.sequence }
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
     #[must_use]
-    pub const fn step_index(&self) -> u32 { self.step_index }
+    pub const fn step_index(&self) -> u32 {
+        self.step_index
+    }
     #[must_use]
-    pub fn state(&self) -> &Value { &self.state }
+    pub fn state(&self) -> &Value {
+        &self.state
+    }
 }
 
 /// Task aggregate invariant error.
@@ -195,20 +259,41 @@ mod tests {
         (task, invocation_id)
     }
 
-    fn checkpoint(task: &Task, invocation_id: InvocationId, sequence: u64, step: u32) -> Checkpoint {
-        Checkpoint::new(task.id(), invocation_id, sequence, step, json!({"cursor": step}))
+    fn checkpoint(
+        task: &Task,
+        invocation_id: InvocationId,
+        sequence: u64,
+        step: u32,
+    ) -> Checkpoint {
+        Checkpoint::new(
+            task.id(),
+            invocation_id,
+            sequence,
+            step,
+            json!({"cursor": step}),
+        )
     }
 
     #[test]
     fn task_transition_matrix_matches_contract() {
         use TaskStatus as S;
-        let states = [S::Pending, S::Running, S::Waiting, S::Completed, S::Failed, S::Cancelled];
+        let states = [
+            S::Pending,
+            S::Running,
+            S::Waiting,
+            S::Completed,
+            S::Failed,
+            S::Cancelled,
+        ];
         for from in states {
             for to in states {
                 let expected = matches!(
                     (from, to),
                     (S::Pending, S::Running | S::Failed | S::Cancelled)
-                        | (S::Running, S::Waiting | S::Completed | S::Failed | S::Cancelled)
+                        | (
+                            S::Running,
+                            S::Waiting | S::Completed | S::Failed | S::Cancelled
+                        )
                         | (S::Waiting, S::Running | S::Failed | S::Cancelled)
                 );
                 assert_eq!(from.can_transition_to(to), expected, "{from:?} -> {to:?}");
@@ -224,7 +309,10 @@ mod tests {
         task.attach_invocation(first).unwrap();
         task.attach_invocation(second).unwrap();
         assert_eq!(task.invocation_ids(), &[first, second]);
-        assert_eq!(task.attach_invocation(first), Err(TaskError::InvocationAlreadyAttached));
+        assert_eq!(
+            task.attach_invocation(first),
+            Err(TaskError::InvocationAlreadyAttached)
+        );
     }
 
     #[test]
@@ -246,11 +334,21 @@ mod tests {
         let first = checkpoint(&task, invocation_id, 1, 0);
         task.record_checkpoint(&first).unwrap();
         let repeated_step = checkpoint(&task, invocation_id, 2, 0);
-        assert_eq!(task.record_checkpoint(&repeated_step),
-            Err(TaskError::InvalidStepIndex { expected: 1, actual: 0 }));
+        assert_eq!(
+            task.record_checkpoint(&repeated_step),
+            Err(TaskError::InvalidStepIndex {
+                expected: 1,
+                actual: 0
+            })
+        );
         let skipped_sequence = checkpoint(&task, invocation_id, 3, 2);
-        assert_eq!(task.record_checkpoint(&skipped_sequence),
-            Err(TaskError::InvalidCheckpointSequence { expected: 2, actual: 3 }));
+        assert_eq!(
+            task.record_checkpoint(&skipped_sequence),
+            Err(TaskError::InvalidCheckpointSequence {
+                expected: 2,
+                actual: 3
+            })
+        );
     }
 
     #[test]
@@ -262,9 +360,15 @@ mod tests {
         task.attach_invocation(invocation_id).unwrap();
         task.transition_to(TaskStatus::Running).unwrap();
         let foreign = Checkpoint::new(TaskId::new(), invocation_id, 1, 0, json!({}));
-        assert_eq!(task.record_checkpoint(&foreign), Err(TaskError::CheckpointTaskMismatch));
+        assert_eq!(
+            task.record_checkpoint(&foreign),
+            Err(TaskError::CheckpointTaskMismatch)
+        );
         let unattached = checkpoint(&task, InvocationId::new(), 1, 0);
-        assert_eq!(task.record_checkpoint(&unattached), Err(TaskError::InvocationNotAttached));
+        assert_eq!(
+            task.record_checkpoint(&unattached),
+            Err(TaskError::InvocationNotAttached)
+        );
     }
 
     #[test]
@@ -272,10 +376,17 @@ mod tests {
         let mut task = Task::new(TaskId::new(), TenantId::new());
         task.transition_to(TaskStatus::Running).unwrap();
         task.transition_to(TaskStatus::Completed).unwrap();
-        assert_eq!(task.transition_to(TaskStatus::Running), Err(TaskError::InvalidTransition {
-            from: TaskStatus::Completed, to: TaskStatus::Running
-        }));
-        assert_eq!(task.attach_invocation(InvocationId::new()), Err(TaskError::TerminalTask));
+        assert_eq!(
+            task.transition_to(TaskStatus::Running),
+            Err(TaskError::InvalidTransition {
+                from: TaskStatus::Completed,
+                to: TaskStatus::Running
+            })
+        );
+        assert_eq!(
+            task.attach_invocation(InvocationId::new()),
+            Err(TaskError::TerminalTask)
+        );
     }
 
     #[test]
