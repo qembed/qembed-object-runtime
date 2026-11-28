@@ -235,7 +235,8 @@ where
         .tool_binding()
         .ok_or(ToolExecutionWorkflowError::InvalidIdentity)?;
 
-    if binding.tool_id() != tool_version.tool_id() || binding.tool_version_id() != tool_version.id() {
+    if binding.tool_id() != tool_version.tool_id() || binding.tool_version_id() != tool_version.id()
+    {
         return Err(ToolExecutionWorkflowError::ToolVersionMismatch);
     }
 
@@ -392,7 +393,9 @@ mod tests {
     use qembed_domain::{
         command_id::derive_command_id,
         command_payload::{CommandPayloadStore, EncryptedCommandPayload},
-        ids::{CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId, ToolId, ToolVersionId},
+        ids::{
+            CommandId, InvocationId, ObjectId, TenantId, ToolExecutionId, ToolId, ToolVersionId,
+        },
         ports::ToolBindingStore,
         scope::Scope,
         test_support::{allowed_tool_command_for_test, scope_for_tenant},
