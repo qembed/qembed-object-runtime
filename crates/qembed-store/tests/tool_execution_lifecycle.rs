@@ -565,13 +565,17 @@ async fn expired_tool_execution_becomes_unknown_and_cannot_be_retried() {
     fixture.pool.close().await;
 }
 
-
 #[tokio::test]
 async fn database_commit_failure_after_external_success_recovers_as_unknown_without_retry() {
     let fixture = setup().await;
     let store = PgToolExecutionStore::new(fixture.context.clone());
     let claimed = store
-        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-crash", 60)
+        .claim_tool_execution(
+            &fixture.scope,
+            fixture.execution_id,
+            "tool-worker-crash",
+            60,
+        )
         .await
         .expect("lease claim succeeds")
         .expect("Authorized execution is claimable");
@@ -640,7 +644,10 @@ async fn database_commit_failure_after_external_success_recovers_as_unknown_with
             .fetch_one(&fixture.pool)
             .await
             .expect("output column is readable");
-    assert_eq!(output, None, "failed terminal write leaves no partial output");
+    assert_eq!(
+        output, None,
+        "failed terminal write leaves no partial output"
+    );
 
     let drop_trigger = format!(
         "DROP TRIGGER {trigger_name} ON tool_executions;
