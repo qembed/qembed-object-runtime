@@ -104,12 +104,6 @@ impl ToolExecutionCheckpoint {
         }
     }
 
-    /// Returns the SHA-256 digest of the exact arguments authorized for this command.
-    #[must_use]
-    pub const fn arguments_hash(&self) -> &[u8; 32] {
-        &self.arguments_hash
-    }
-
     #[must_use]
     pub const fn status(&self) -> ToolExecutionStatus {
         self.status
@@ -222,6 +216,12 @@ impl ToolExecution {
     #[must_use]
     pub const fn command_id(&self) -> CommandId {
         self.command_id
+    }
+
+    /// Returns the SHA-256 digest of the exact arguments authorized for this command.
+    #[must_use]
+    pub const fn arguments_hash(&self) -> &[u8; 32] {
+        &self.arguments_hash
     }
 
     #[must_use]
