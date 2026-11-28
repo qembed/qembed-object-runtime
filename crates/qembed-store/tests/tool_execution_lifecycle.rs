@@ -587,14 +587,14 @@ async fn database_commit_failure_after_external_success_recovers_as_unknown_with
     let function_name = format!("inject_tool_completion_failure_fn_{suffix}");
     let execution_id = fixture.execution_id;
     let create_trigger = format!(
-        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $
+        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $$
          BEGIN
              IF NEW.id = '{execution_id}'::uuid AND NEW.status IN ('Succeeded', 'Failed') THEN
                  RAISE EXCEPTION 'injected result persistence failure';
              END IF;
              RETURN NEW;
          END;
-         $;
+         $$;
          CREATE TRIGGER {trigger_name}
          BEFORE UPDATE ON tool_executions
          FOR EACH ROW EXECUTE FUNCTION {function_name}()"
