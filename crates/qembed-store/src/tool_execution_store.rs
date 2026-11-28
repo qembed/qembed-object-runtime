@@ -498,9 +498,10 @@ fn reconstitute_tool_execution(
         .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("version"))?;
     let token = u64::try_from(row.7)
         .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("fencing_token"))?;
-    let arguments_hash: [u8; 32] = row.8.try_into().map_err(|_| {
-        ToolExecutionStoreError::InvalidPersistedValue("arguments_hash")
-    })?;
+    let arguments_hash: [u8; 32] = row
+        .8
+        .try_into()
+        .map_err(|_| ToolExecutionStoreError::InvalidPersistedValue("arguments_hash"))?;
 
     Ok(ToolExecution::from_persisted(
         id,
