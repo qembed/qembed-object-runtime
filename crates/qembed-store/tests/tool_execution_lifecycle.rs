@@ -778,6 +778,7 @@ async fn postgres_reconciliation_rejects_stale_fencing_token() {
         unknown.object_id(),
         unknown.invocation_id(),
         unknown.command_id(),
+        *unknown.arguments_hash(),
         ToolExecutionCheckpoint::new(
             ToolExecutionStatus::Unknown,
             unknown.version(),
