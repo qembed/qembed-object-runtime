@@ -565,6 +565,135 @@ async fn expired_tool_execution_becomes_unknown_and_cannot_be_retried() {
     fixture.pool.close().await;
 }
 
+
+#[tokio::test]
+async fn database_commit_failure_after_external_success_recovers_as_unknown_without_retry() {
+    let fixture = setup().await;
+    let store = PgToolExecutionStore::new(fixture.context.clone());
+    let claimed = store
+        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-crash", 60)
+        .await
+        .expect("lease claim succeeds")
+        .expect("Authorized execution is claimable");
+
+    // Model the critical crash window: the provider has accepted the side effect,
+    // but PostgreSQL rejects the subsequent terminal result write.
+    let suffix = Uuid::new_v4().simple().to_string();
+    let trigger_name = format!("inject_tool_completion_failure_{suffix}");
+    let function_name = format!("inject_tool_completion_failure_fn_{suffix}");
+    let execution_id = fixture.execution_id;
+    let create_trigger = format!(
+        "CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $
+         BEGIN
+             IF NEW.id = '{execution_id}'::uuid AND NEW.status IN ('Succeeded', 'Failed') THEN
+                 RAISE EXCEPTION 'injected result persistence failure';
+             END IF;
+             RETURN NEW;
+         END;
+         $;
+         CREATE TRIGGER {trigger_name}
+         BEFORE UPDATE ON tool_executions
+         FOR EACH ROW EXECUTE FUNCTION {function_name}()"
+    );
+    sqlx::raw_sql(&create_trigger)
+        .execute(&fixture.pool)
+        .await
+        .expect("failure-injection trigger is installed");
+
+    let mut next = claimed.clone();
+    next.complete(
+        "tool-worker-crash",
+        claimed.fencing_token(),
+        ToolExecutionOutcome::Succeeded,
+    )
+    .expect("provider success is a valid local transition");
+    let failed_write = store
+        .complete_tool_execution(
+            &fixture.scope,
+            ToolExecutionCompletion {
+                execution_id,
+                owner: "tool-worker-crash".to_owned(),
+                expected_version: claimed.version(),
+                expected_fencing_token: claimed.fencing_token(),
+                next,
+                output: Some(serde_json::json!({"provider":"accepted"})),
+                output_ttl_seconds: Some(60),
+            },
+        )
+        .await;
+    assert!(
+        failed_write.is_err(),
+        "the injected database failure must abort the terminal write"
+    );
+
+    let after_failure = store
+        .load_tool_execution(&fixture.scope, execution_id)
+        .await
+        .expect("execution remains readable after rollback")
+        .expect("execution remains present");
+    assert_eq!(after_failure.status(), ToolExecutionStatus::Executing);
+    assert_eq!(after_failure.version(), claimed.version());
+    assert_eq!(after_failure.fencing_token(), claimed.fencing_token());
+    let output: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT output FROM tool_executions WHERE id=$1")
+            .bind(execution_id.into_uuid())
+            .fetch_one(&fixture.pool)
+            .await
+            .expect("output column is readable");
+    assert_eq!(output, None, "failed terminal write leaves no partial output");
+
+    let drop_trigger = format!(
+        "DROP TRIGGER {trigger_name} ON tool_executions;
+         DROP FUNCTION {function_name}()"
+    );
+    sqlx::raw_sql(&drop_trigger)
+        .execute(&fixture.pool)
+        .await
+        .expect("failure-injection trigger is removed");
+
+    sqlx::query(
+        "UPDATE tool_executions
+            SET lease_until=clock_timestamp()-interval '1 second'
+          WHERE tenant_id=$1 AND id=$2",
+    )
+    .bind(fixture.scope.tenant_id().into_uuid())
+    .bind(execution_id.into_uuid())
+    .execute(&fixture.pool)
+    .await
+    .expect("simulate worker lease expiry after process loss");
+
+    assert!(
+        store
+            .mark_tool_execution_unknown(
+                &fixture.scope,
+                execution_id,
+                claimed.version(),
+                claimed.fencing_token(),
+            )
+            .await
+            .expect("expired execution can be recovered as Unknown")
+    );
+    let recovered = store
+        .load_tool_execution(&fixture.scope, execution_id)
+        .await
+        .expect("recovered execution is readable")
+        .expect("execution remains present");
+    assert_eq!(recovered.status(), ToolExecutionStatus::Unknown);
+    assert_eq!(recovered.version(), claimed.version() + 1);
+    assert_eq!(recovered.fencing_token(), claimed.fencing_token());
+    assert_eq!(recovered.lease_owner(), None);
+    assert!(
+        store
+            .claim_tool_execution(&fixture.scope, execution_id, "replacement-worker", 60)
+            .await
+            .expect("Unknown is not an automatic retry candidate")
+            .is_none(),
+        "replacement worker must not replay an ambiguous external side effect"
+    );
+
+    fixture.pool.close().await;
+}
+
 #[tokio::test]
 async fn live_or_stale_tool_execution_checkpoint_cannot_be_marked_unknown() {
     let fixture = setup().await;
