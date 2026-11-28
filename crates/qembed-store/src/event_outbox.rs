@@ -154,7 +154,10 @@ mod tests {
         );
         assert!(object.contains_key("object_id"));
         assert_eq!(
-            object.keys().map(String::as_str).collect::<std::collections::BTreeSet<_>>(),
+            object
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
             ["object_id", "state", "type"].into_iter().collect()
         );
         assert!(!contains_sensitive_key(&json));
