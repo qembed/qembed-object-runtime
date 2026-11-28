@@ -642,9 +642,12 @@ SQLX_OFFLINE=true cargo check --workspace
 
 **Результат:** durable multi-step tasks поверх проверенных invocation/worker primitives.
 
-- [ ] **RUST-093 (S)** Уточнить domain contracts Task и Checkpoint.
-  - Тесты: state transition matrix; invalid checkpoint sequence; serialization round-trip.
-  - DoD: task/checkpoint invariants описаны и проверяются до persistence.
+- [x] **RUST-093 (S)** Уточнить domain contracts Task и Checkpoint.
+  - Реализация: Task — долгоживущая родительская сущность для нескольких Invocation; Invocation сохраняет собственные lifecycle и lease/fencing. Checkpoint фиксирует монотонный Task-wide progress и связывает Task с Invocation, который подтвердил шаг.
+  - Инварианты: уникальное присоединение Invocation; переходы Task по явной state matrix; checkpoint sequence начинается с 1, step index с 0 и оба увеличиваются строго на 1; checkpoint принимается только для Running Task и ранее присоединённого Invocation; терминальный Task нельзя возобновить.
+  - Тесты: полная state transition matrix; несколько Invocation у одного Task; продолжение checkpoint sequence через Invocation boundary; повтор/пропуск шага и sequence; mismatch Task/unattached Invocation; terminal behavior; serialization round-trip.
+  - Документация: [Task and Checkpoint domain contract](docs/TASK_CHECKPOINT_DOMAIN_CONTRACT.md). Это новое явно одобренное решение проекта от 2026-11-29, не восстановленное требование потерянной M0 v2.2.
+  - DoD: Task/Checkpoint invariants описаны и проверяются в domain до persistence; CAS/tenant-scoped persistence и Task-level concurrency остаются RUST-094.
 
 - [ ] **RUST-094 (M)** Реализовать Task/Checkpoint repositories.
   - Тесты: DB integration — create/update/read, tenant isolation, invalid transitions, rollback.
