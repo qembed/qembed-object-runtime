@@ -570,12 +570,7 @@ async fn database_commit_failure_after_external_success_recovers_as_unknown_with
     let fixture = setup().await;
     let store = PgToolExecutionStore::new(fixture.context.clone());
     let claimed = store
-        .claim_tool_execution(
-            &fixture.scope,
-            fixture.execution_id,
-            "tool-worker-crash",
-            1,
-        )
+        .claim_tool_execution(&fixture.scope, fixture.execution_id, "tool-worker-crash", 1)
         .await
         .expect("lease claim succeeds")
         .expect("Authorized execution is claimable");
